@@ -1,0 +1,1766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vector2stl — DXF/SVG relief generator</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #14161a; color: #ddd;
+         display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  aside { padding: 20px; border-right: 1px solid #2a2e35; overflow-y: auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 16px; }
+  label { display: block; margin: 12px 0 4px; color: #9aa3af; font-size: 12px; }
+  input[type=number] { width: 100%; padding: 6px 8px; background: #1d2127;
+         border: 1px solid #2a2e35; border-radius: 6px; color: #ddd; }
+  input[type=number]:focus-visible, button:focus-visible, a:focus-visible,
+  #drop:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  /* file drop zone */
+  #drop { margin-top: 4px; padding: 18px 12px; border: 1px dashed #3a4049; border-radius: 8px;
+          text-align: center; color: #9aa3af; cursor: pointer; background: #171a1f;
+          transition: border-color .15s, background .15s; }
+  #drop:hover, #drop.over { border-color: #3b82f6; background: #1a2130; color: #cbd5e1; }
+  #drop strong { color: #ddd; display: block; word-break: break-all; }
+  #drop small { color: #6b7280; }
+  #file { display: none; }
+
+  fieldset { margin: 16px 0 0; padding: 10px 12px; border: 1px solid #2a2e35; border-radius: 8px; }
+  legend { color: #9aa3af; font-size: 12px; padding: 0 4px; }
+  #layers { display: grid; gap: 4px; max-height: 150px; overflow-y: auto; }
+  #layers label { display: flex; gap: 8px; align-items: center; margin: 0; color: #ddd;
+                  font-size: 13px; cursor: pointer; }
+  #layers span { color: #6b7280; margin-left: auto; font-size: 11px; }
+
+  /* palette: one row per hue, brightest (lowest) to darkest (tallest) */
+  #swatches { display: grid; gap: 6px; }
+  .hue-row { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 6px; }
+  .hue-pick { width: 26px; height: 34px; padding: 0; border: 1px solid #2a2e35;
+              border-radius: 5px; background: #1d2127; cursor: pointer; }
+  .hue-pick::-webkit-color-swatch-wrapper { padding: 2px; }
+  .hue-pick::-webkit-color-swatch { border: 0; border-radius: 3px; }
+  .hue-pick:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  .swatch { height: 34px; border-radius: 5px; border: 2px solid transparent; cursor: pointer;
+            padding: 0; margin: 0; position: relative; }
+  .swatch:hover { border-color: #6b7280; }
+  .swatch[aria-pressed=true] { border-color: #fff; }
+  .swatch[aria-pressed=true]::after { content: '✓'; position: absolute; inset: 0;
+            display: grid; place-items: center; color: #fff; font-size: 15px;
+            text-shadow: 0 0 3px rgba(0,0,0,.8); }
+  .scale { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 6px; margin-top: 5px;
+           font-size: 10px; color: #6b7280; text-align: center; }
+
+  button { margin-top: 16px; width: 100%; padding: 10px; border: 0; border-radius: 6px;
+           background: #3b82f6; color: #fff; font-weight: 600; cursor: pointer; }
+  button:disabled { background: #2a2e35; color: #6b7280; cursor: default; }
+  .ghost { background: #1d2127; color: #9aa3af; font-weight: 500; border: 1px solid #2a2e35; }
+  .ghost:hover:not(:disabled) { color: #ddd; border-color: #3a4049; }
+  .seed-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+  .seed-row button { margin-top: 0; width: auto; padding: 7px 12px; }
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn-row button { margin-top: 10px; }
+  #shelf { display: grid; gap: 4px; font-size: 12px; margin-bottom: 4px; }
+  .shelf-row { display: flex; gap: 6px; }
+  .shelf-row button { margin: 0; padding: 4px 8px; font-size: 12px; width: auto; }
+  .shelf-open { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+  input[type=text] { width: 100%; padding: 6px 8px; background: #1d2127;
+         border: 1px solid #2a2e35; border-radius: 6px; color: #ddd; }
+  input[type=text]:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  #holeList { margin-top: 10px; display: grid; gap: 4px; font-size: 12px; }
+  .hole-row { display: flex; align-items: center; gap: 8px; color: #ddd; }
+  .hole-row button { margin: 0; width: auto; padding: 1px 7px; font-size: 11px; line-height: 1.4; }
+  #addHole[aria-pressed=true] { background: #f87171; color: #14161a; border-color: #f87171; }
+  #download { background: #16a34a; }
+  #exportZip { background: #0d9488; }
+  #export3mf { background: #7c3aed; }
+  #status { margin-top: 12px; font-size: 12px; color: #9aa3af; white-space: pre-wrap;
+            word-break: break-word; }
+  #status.error { color: #f87171; }
+  #stats { margin-top: 8px; font-size: 12px; color: #6b7280; white-space: pre-wrap; }
+  .muted { color: #6b7280; font-size: 12px; }
+  .check { display: flex; align-items: center; gap: 7px; margin: 0; padding: 7px 0;
+           color: #ddd; font-size: 13px; cursor: pointer; }
+  #selInfo { white-space: pre-line; }
+
+  main { position: relative; min-width: 0; }
+  #viewer { width: 100%; height: 100%; display: block; }
+  #hint { position: absolute; inset: 0; display: grid; place-items: center; color: #4b5563;
+          pointer-events: none; text-align: center; padding: 20px; }
+  #hint[hidden] { display: none; }   /* display:grid would otherwise win */
+  #tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; }
+  #tools button { margin: 0; width: auto; padding: 6px 10px; font-size: 12px; }
+  #readout { position: absolute; left: 12px; bottom: 12px; font-size: 12px; color: #9aa3af;
+             background: rgba(20,22,26,.85); border: 1px solid #2a2e35; border-radius: 6px;
+             padding: 6px 10px; pointer-events: none; white-space: pre-line; }
+  #tools button[aria-pressed=true] { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+
+  /* callback editor */
+  #editorOverlay { position: fixed; inset: 0; z-index: 20; background: rgba(8,10,13,.72);
+                   display: grid; place-items: center; padding: 24px; }
+  #editorOverlay[hidden] { display: none; }
+  #editorBox { width: min(980px, 100%); height: min(680px, 100%); background: #14161a;
+               border: 1px solid #2a2e35; border-radius: 10px; display: grid;
+               grid-template-rows: auto 1fr auto; overflow: hidden; }
+  #editorBox header, #editorBox footer { display: flex; align-items: center; gap: 12px;
+               padding: 10px 14px; border-bottom: 1px solid #2a2e35; }
+  #editorBox footer { border-bottom: 0; border-top: 1px solid #2a2e35; }
+  #editorBox header .muted { flex: 1; }
+  #editorBox code { color: #9aa3af; }
+  #editorBox button { margin: 0; width: auto; padding: 7px 14px; font-size: 13px; }
+  #editorStatus { flex: 1; white-space: pre-wrap; }
+  #editorStatus.error { color: #f87171; }
+  #editorHost { min-height: 0; }
+  #templatePick { padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
+                  border-radius: 6px; color: #ddd; font-size: 13px; max-width: 200px; }
+  #templatePick:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  #editorHost textarea { width: 100%; height: 100%; border: 0; resize: none; padding: 12px;
+               background: #16181d; color: #ddd; font: 13px/1.5 ui-monospace, monospace; }
+
+  @media (max-width: 720px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 55vh; height: auto; }
+    aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <h1>vector2stl</h1>
+  <div class="sub">Slot a DXF or SVG sketch into walls, then paint the height of each face.</div>
+
+  <div id="drop" tabindex="0" role="button" aria-label="Choose or drop a DXF, SVG or project file">
+    <strong id="dropName">Drop a .dxf or .svg here</strong>
+    <small id="dropHint">or a saved .v2sproj project — click to browse</small>
+  </div>
+  <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml">
+  <button class="ghost" id="example">Use the example sketch</button>
+
+  <fieldset id="shelfBox">
+    <legend>saved projects</legend>
+    <div id="shelf" class="muted">nothing saved on the server yet</div>
+    <label for="projectName">name</label>
+    <div class="seed-row">
+      <input type="text" id="projectName" placeholder="my window">
+      <button class="ghost" id="saveToServer" disabled>Save</button>
+    </div>
+  </fieldset>
+
+  <fieldset id="layerBox" hidden>
+    <legend>layers</legend>
+    <div id="layers"></div>
+  </fieldset>
+
+  <div class="row">
+    <div><label for="wallWidth">wall width (mm)</label>
+      <input type="number" id="wallWidth" value="1.0" step="0.1" min="0.1"></div>
+    <div><label for="wallHeight">wall height (mm)</label>
+      <input type="number" id="wallHeight" value="2.0" step="0.1" min="0.1"></div>
+  </div>
+  <div class="row">
+    <div><label for="frameLayer" title="Thickness of each frame layer">frame layer (mm)</label>
+      <input type="number" id="frameLayer" value="0.2" step="0.05" min="0.01"></div>
+    <div><label for="blackFrame" title="Print the frame in its own filament instead">frame colour</label>
+      <label class="check"><input type="checkbox" id="blackFrame"> use black frame</label></div>
+  </div>
+  <div class="row">
+    <div><label for="regionMin">lowest face (mm)</label>
+      <input type="number" id="regionMin" value="0.2" step="0.1" min="0"></div>
+    <div><label for="regionMax">tallest face (mm)</label>
+      <input type="number" id="regionMax" value="2.0" step="0.1" min="0.1"></div>
+  </div>
+  <div class="row">
+    <div><label for="sagitta">curve accuracy (mm)</label>
+      <input type="number" id="sagitta" value="0.02" step="0.01" min="0.001"></div>
+    <div><label for="scale" title="Multiply every coordinate — handy for SVGs with no physical size">scale (×)</label>
+      <input type="number" id="scale" value="1" step="0.1" min="0.001"></div>
+  </div>
+
+  <label for="seed">seed (empty = random)</label>
+  <div class="seed-row">
+    <input type="number" id="seed" placeholder="random" step="1">
+    <button class="ghost" id="reroll" title="New random heights">↻</button>
+  </div>
+
+  <button id="go">Generate 3D</button>
+
+  <fieldset id="paintBox" hidden>
+    <legend>palette</legend>
+    <div id="swatches"></div>
+    <div class="scale" id="levelScale"></div>
+    <label for="height">selected face height (mm)</label>
+    <input type="number" id="height" step="0.05" min="0" disabled>
+    <div class="muted" id="selInfo">left click paints · right click stacks · middle removes</div>
+    <div class="btn-row">
+      <button class="ghost" id="randomise" title="Random hue and height for every face">Random all</button>
+      <button class="ghost" id="randomHeights" title="Random height for every face, keeping its hue">Random heights</button>
+    </div>
+    <div class="btn-row">
+      <button class="ghost" id="mirror" title="Copy the left half's colours onto the right">Mirror ⇄</button>
+      <button class="ghost" id="fillAll" title="Give every face the selected colour">Fill all</button>
+    </div>
+    <button class="ghost" id="callback" title="Repaint every face with a script">Callback…</button>
+  </fieldset>
+
+  <fieldset id="holeBox" hidden>
+    <legend>mounting holes</legend>
+    <div class="muted">Cut right through the part, for hanging it once printed.</div>
+    <label for="holeDia">diameter (mm)</label>
+    <input type="number" id="holeDia" value="4" step="0.5" min="0.1">
+    <div class="btn-row">
+      <button class="ghost" id="addHole" aria-pressed="false">Place hole</button>
+      <button class="ghost" id="clearHoles" title="Remove every hole">Clear</button>
+    </div>
+    <div id="holeList" class="muted">no holes yet</div>
+  </fieldset>
+
+  <button class="ghost" id="saveProject" hidden title="Save the drawing, settings, colours and holes as one file">Save project</button>
+  <button id="download" hidden>Download STL</button>
+  <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
+  <button id="export3mf" hidden title="One 3MF project with an extruder per colour">Export 3MF (Snapmaker)</button>
+  <div id="status"></div>
+  <div id="stats"></div>
+</aside>
+<div id="editorOverlay" hidden>
+  <div id="editorBox" role="dialog" aria-modal="true" aria-label="Callback editor">
+    <header>
+      <strong>Callback</strong>
+      <span class="muted">runs once over every face — edit <code>face.stack</code> to repaint</span>
+      <select id="templatePick" aria-label="Load a template"></select>
+      <button class="ghost" id="editorClose" title="Close (Esc)">✕</button>
+    </header>
+    <div id="editorHost"></div>
+    <footer>
+      <div id="editorStatus" class="muted"></div>
+      <button class="ghost" id="editorReset">Reset to default</button>
+      <button id="editorRun">Run (Ctrl+Enter)</button>
+    </footer>
+  </div>
+</div>
+
+<main>
+  <canvas id="viewer"></canvas>
+  <div id="hint">generate a model to preview it here</div>
+  <div id="tools">
+    <button class="ghost" id="top" hidden>Top view</button>
+    <button class="ghost" id="reset" hidden>Reset view</button>
+    <button class="ghost" id="wire" hidden>Wireframe</button>
+  </div>
+  <div id="readout" hidden></div>
+</main>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+/* --------------------------------------------------------------- palette */
+
+// Four rows: the frame no longer needs a filament of its own, so the fourth
+// slot on the printer is free for a colour. 120 fills the widest gap.
+const DEFAULT_HUES = [35, 120, 186, 288];
+let HUES = [...DEFAULT_HUES];     // one row each, editable via the row's swatch
+
+// Only the hue is taken from the picker: brightness has to stay free to mean
+// height, which is the whole point of the palette.
+const HUE_WORDS = ['red', 'orange', 'amber', 'yellow', 'lime', 'green',
+                   'teal', 'cyan', 'azure', 'blue', 'violet', 'magenta'];
+const hueName = (deg) => HUE_WORDS[Math.round(((deg % 360) + 360) % 360 / 30) % 12];
+const LEVELS = 5;
+
+// The palette runs brightest -> darkest across the lowest -> tallest range,
+// so a face's shade always tells you how far it is raised.
+const LIGHT_HI = 0.76, LIGHT_LO = 0.30;
+
+/** Height of palette level `i` (0 = brightest/lowest) for a lo..hi range. */
+function levelHeight(i, lo, hi) {
+  return lo + (hi - lo) * i / (LEVELS - 1);
+}
+
+/** The colour a face gets, from its hue row and how high it stands. */
+function shadeFor(hue, height, lo, hi) {
+  const t = hi > lo ? clamp((height - lo) / (hi - lo), 0, 1) : 0;
+  const deg = HUES[hue] ?? HUES[0];
+  return new THREE.Color().setHSL(deg / 360, 0.55, LIGHT_HI - (LIGHT_HI - LIGHT_LO) * t);
+}
+
+let active = { hue: 0, level: LEVELS - 1 };   // the swatch currently held
+
+/** Repoint one palette row at a new hue and recolour the faces using it. */
+function setHue(row, hex, lo, hi) {
+  const hsl = { h: 0, s: 0, l: 0 };
+  new THREE.Color(hex).getHSL(hsl);
+  // A grey pick carries no hue; keep the row's current one rather than
+  // silently snapping every face on it to red.
+  if (hsl.s < 0.05) {
+    setStatus('pick a colour with some saturation — grey has no hue', true);
+    buildPalette(lo, hi);
+    return;
+  }
+  HUES[row] = hsl.h * 360;
+  buildPalette(lo, hi);
+  for (let i = 0; i < stacks.length; i++) {
+    if (stacks[i].some((l) => l.hue === row)) rebuildRegion(i);
+  }
+  rebuildFrame();          // the frame cycles the palette as well
+  setStatus(`row ${row + 1} is now ${hueName(HUES[row])}`);
+}
+
+function buildPalette(lo, hi) {
+  const wrap = $('swatches');
+  wrap.textContent = '';
+  HUES.forEach((_, hue) => {
+    const row = document.createElement('div');
+    row.className = 'hue-row';
+
+    // The picker sets this row's hue; the five shades are derived from it.
+    const pick = document.createElement('input');
+    pick.type = 'color';
+    pick.className = 'hue-pick';
+    pick.value = '#' + shadeFor(hue, levelHeight(2, lo, hi), lo, hi).getHexString();
+    pick.title = `Change this row's colour (currently ${hueName(HUES[hue])})`;
+    pick.setAttribute('aria-label', `colour of hue row ${hue + 1}`);
+    pick.oninput = () => setHue(hue, pick.value, lo, hi);
+    row.append(pick);
+
+    for (let level = 0; level < LEVELS; level++) {
+      const h = levelHeight(level, lo, hi);
+      const b = document.createElement('button');
+      b.className = 'swatch';
+      b.type = 'button';
+      b.style.background = '#' + shadeFor(hue, h, lo, hi).getHexString();
+      b.title = `${h.toFixed(2)} mm`;
+      b.setAttribute('aria-label', `hue ${hue + 1}, ${h.toFixed(2)} mm`);
+      b.setAttribute('aria-pressed', String(active.hue === hue && active.level === level));
+      b.onclick = () => {
+        // Only arm the colour. Repainting the selected face here would wipe a
+        // stack the moment you picked the next layer's colour.
+        active = { hue, level };
+        for (const s of wrap.querySelectorAll('.swatch')) s.setAttribute('aria-pressed', 'false');
+        b.setAttribute('aria-pressed', 'true');
+      };
+      row.append(b);
+    }
+    wrap.append(row);
+  });
+  $('levelScale').textContent = '';
+  $('levelScale').append(document.createElement('div'));   // spacer under the pickers
+  for (let level = 0; level < LEVELS; level++) {
+    const cell = document.createElement('div');
+    cell.textContent = levelHeight(level, lo, hi).toFixed(2);
+    $('levelScale').append(cell);
+  }
+}
+
+/* ---------------------------------------------------------------- viewer */
+
+const canvas = $('viewer');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14161a);
+
+// The model is Z-up, matching the STL the converter writes.
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 20000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(1, -2, 3);
+scene.add(sun);
+
+const group = new THREE.Group();     // everything belonging to the current model
+scene.add(group);
+
+let model = null;        // { regions, lo, hi, wallHeight, name }
+let regionMeshes = [];   // index === region id, each a list of slab meshes
+let regionGeom = [];     // the unit prism of each face, shared by its slabs
+let wallGeom = [];       // the unit prism of each wall piece
+let wallMeshes = [];     // the frame's slabs
+let stacks = [];         // index === region id, [{hue, t}] bottom-up
+let grid = null;
+let home = null;
+let selected = null;
+let hovered = null;
+let wireframe = false;
+let topLocked = false;
+let holes = [];          // [{x, y, d}] in model millimetres
+let holeMode = false;
+let holeMarkers = null;
+
+const VIEW_DIR = new THREE.Vector3(0, -0.78, 0.63).normalize();
+
+/** A shapely polygon (exterior + holes) as a three.js Shape. */
+function shapeOf(poly) {
+  // Shapely closes its rings; a repeated last point would only add a
+  // degenerate triangle, so drop it.
+  const ring = (pts) => {
+    const p = pts.slice(0, -1).map(([x, y]) => new THREE.Vector2(x, y));
+    return p.length ? p : pts.map(([x, y]) => new THREE.Vector2(x, y));
+  };
+  const shape = new THREE.Shape(ring(poly.exterior));
+  for (const hole of poly.holes) shape.holes.push(new THREE.Path(ring(hole)));
+  return shape;
+}
+
+/**
+ * Extruded to depth 1 so height changes are a z-scale, not a rebuild. A face
+ * split by a mounting hole arrives as several pieces; they merge into one
+ * geometry so a face is still exactly one mesh with one id.
+ */
+function unitPrism(parts) {
+  const geoms = (Array.isArray(parts) ? parts : [parts])
+    .map((p) => new THREE.ExtrudeGeometry(shapeOf(p), { depth: 1, bevelEnabled: false }));
+  // A face can be swallowed whole by a big hole, leaving nothing to draw.
+  if (!geoms.length) return new THREE.BufferGeometry();
+  if (geoms.length === 1) return geoms[0];
+  const merged = mergeGeometries(geoms, false);
+  for (const g of geoms) g.dispose();
+  return merged;
+}
+
+function disposeModel() {
+  group.clear();
+  for (const meshes of regionMeshes) {
+    for (const m of meshes) m.material.dispose();
+  }
+  for (const m of wallMeshes) m.material.dispose();
+  for (const g of regionGeom) g.dispose();
+  for (const g of wallGeom) g.dispose();
+  regionMeshes = [];
+  regionGeom = [];
+  wallMeshes = [];
+  wallGeom = [];
+  selected = hovered = null;
+}
+
+const totalHeight = (stack) => stack.reduce((sum, layer) => sum + layer.t, 0);
+
+const MAX_FRAME_LAYERS = 400;
+
+/**
+ * The frame as thin layers cycling through the palette, so it prints from the
+ * filaments already loaded instead of claiming a colour of its own. Returns
+ * null when the frame should stay a single solid.
+ */
+function frameStack() {
+  if ($('blackFrame').checked || !model) return null;
+  const total = model.wallHeight;
+  const step = Number($('frameLayer').value);
+  if (!(total > 0) || !(step > 0)) return null;
+  if (total / step > MAX_FRAME_LAYERS) return null;   // guarded in the handler
+
+  const layers = [];
+  for (let z = 0; z < total - 1e-9; z += step) {
+    layers.push({ hue: layers.length % HUES.length, t: round2(Math.min(step, total - z)) });
+  }
+  return layers;
+}
+
+/** Rebuild the frame's slabs from the current options. */
+function rebuildFrame() {
+  for (const m of wallMeshes) { group.remove(m); m.material.dispose(); }
+  wallMeshes = [];
+  if (!model) return;
+
+  const stack = frameStack();
+  // Mid lightness: these show which filament prints the layer, not a height.
+  const mid = (model.lo + model.hi) / 2;
+  const layers = stack ?? [{ hue: null, t: model.wallHeight }];
+
+  for (const geom of wallGeom) {
+    let z = 0;
+    for (const layer of layers) {
+      const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+        color: layer.hue === null ? 0x2b2f36 : shadeFor(layer.hue, mid, model.lo, model.hi),
+        metalness: 0.1, roughness: 0.8, wireframe,
+      }));
+      mesh.scale.z = Math.max(layer.t, 1e-4);
+      mesh.position.z = z;
+      mesh.userData.region = null;
+      group.add(mesh);
+      wallMeshes.push(mesh);
+      z += layer.t;
+    }
+  }
+}
+
+function frameChanged() {
+  if (!model) return;
+  const total = model.wallHeight;
+  const step = Number($('frameLayer').value);
+  if (!$('blackFrame').checked && (!(step > 0) || total / step > MAX_FRAME_LAYERS)) {
+    return setStatus(`a ${step} mm layer would need more than ${MAX_FRAME_LAYERS} `
+      + 'slabs for that frame height — use a thicker layer', true);
+  }
+  rebuildFrame();
+  const stack = frameStack();
+  setStatus(stack
+    ? `frame is ${count(stack.length, 'layer')} of ${stack[0].t} mm, cycling the palette`
+    : 'frame is one solid in its own colour');
+}
+
+$('blackFrame').onchange = frameChanged;
+$('frameLayer').onchange = frameChanged;
+
+/** Rebuild one face's slabs from its stack, bottom up. */
+function rebuildRegion(i) {
+  for (const m of regionMeshes[i]) { group.remove(m); m.material.dispose(); }
+  const meshes = [];
+  let z = 0;
+  for (const layer of stacks[i]) {
+    const mesh = new THREE.Mesh(regionGeom[i], new THREE.MeshStandardMaterial({
+      color: shadeFor(layer.hue, layer.t, model.lo, model.hi),
+      metalness: 0.05, roughness: 0.75, wireframe,
+    }));
+    mesh.scale.z = Math.max(layer.t, 1e-4);
+    mesh.position.z = z;
+    mesh.visible = layer.t > 0 && model.regions[i].parts.length > 0;
+    mesh.userData.region = i;
+    group.add(mesh);
+    meshes.push(mesh);
+    z += layer.t;
+  }
+  regionMeshes[i] = meshes;
+  if (i === selected) highlight(i, 0x4a4a4a);
+}
+
+/**
+ * Build the preview from the server's outlines. `keep` carries the painted
+ * stacks across a rebuild, which is what makes adding a hole non-destructive:
+ * face ids are fixed before holes are cut, so they still line up.
+ */
+function buildModel(data, lo, hi, rng, keep = null) {
+  const framed = home !== null;
+  disposeModel();
+  model = { regions: data.regions, lo, hi, wallHeight: data.wallHeight };
+
+  wallGeom = data.walls.map((poly) => unitPrism(poly));
+  rebuildFrame();
+
+  // One unit prism per face, shared by all of that face's slabs.
+  regionGeom = data.regions.map((region) => unitPrism(region.parts));
+  regionMeshes = data.regions.map(() => []);
+  stacks = data.regions.map((_, i) => keep
+    ? keep[i].map((layer) => ({ ...layer }))
+    : [{ hue: 0, t: levelHeight(Math.floor(rng() * LEVELS), lo, hi) }]);
+  for (let i = 0; i < stacks.length; i++) rebuildRegion(i);
+
+  drawHoleMarkers();
+  if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
+  $('hint').hidden = true;
+  for (const id of ['reset', 'wire', 'top', 'readout', 'paintBox', 'holeBox',
+                    'saveProject', 'download', 'exportZip', 'export3mf']) {
+    $(id).hidden = false;
+  }
+  $('saveToServer').disabled = false;
+  updateReadout();
+}
+
+/* ----------------------------------------------------------------- holes */
+
+/** Rings floating just above each hole, so it stays findable from any angle. */
+function drawHoleMarkers() {
+  if (holeMarkers) {
+    scene.remove(holeMarkers);
+    holeMarkers.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+  }
+  holeMarkers = new THREE.Group();
+  const top = model ? model.wallHeight : 1;
+  for (const hole of holes) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(hole.d / 2, hole.d / 2 + Math.max(hole.d * 0.12, 0.25), 48),
+      new THREE.MeshBasicMaterial({ color: 0xf87171, side: THREE.DoubleSide,
+        transparent: true, opacity: 0.9, depthTest: false }),
+    );
+    ring.position.set(hole.x, hole.y, top + 0.05);
+    ring.renderOrder = 2;
+    holeMarkers.add(ring);
+  }
+  scene.add(holeMarkers);
+}
+
+function holeList() {
+  const box = $('holeList');
+  box.textContent = '';
+  if (!holes.length) {
+    box.textContent = 'no holes yet';
+    box.className = 'muted';
+    return;
+  }
+  box.className = '';
+  holes.forEach((hole, i) => {
+    const row = document.createElement('div');
+    row.className = 'hole-row';
+    row.append(Object.assign(document.createElement('span'),
+      { textContent: `${hole.x.toFixed(1)}, ${hole.y.toFixed(1)} mm · ⌀${hole.d}` }));
+    const del = document.createElement('button');
+    del.className = 'ghost';
+    del.textContent = '✕';
+    del.title = 'Remove this hole';
+    del.onclick = () => { holes.splice(i, 1); applyHoles(); };
+    row.append(del);
+    box.append(row);
+  });
+}
+
+/** Re-cut the model on the server so the preview shows the real holes. */
+async function applyHoles() {
+  holeList();
+  if (!model) { drawHoleMarkers(); return; }
+  const keep = stacks.map((s) => s.map((l) => ({ ...l })));
+  setStatus(holes.length ? 'cutting holes…' : 'removing holes…');
+  try {
+    const res = await fetch('/api/regions', { method: 'POST', body: shapeForm() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    buildModel(data, model.lo, model.hi, null, keep);
+    select(null);
+    setStatus(holes.length
+      ? `${count(holes.length, 'hole')} cut through the model`
+      : 'holes removed');
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+}
+
+/** Where in the model a click landed: on the solid, or on its base plane. */
+function pointAt(event) {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(group.children, false)[0];
+  if (hit) return hit.point;
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  const at = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(plane, at) ? at : null;
+}
+
+/** Replace a face's whole stack with a single layer. */
+function paint(id, hue, height) {
+  setStack(id, [{ hue, t: height }]);
+}
+
+/** Add a layer on top of a face's stack. */
+function addLayer(id, hue, height) {
+  if (id === null || !stacks[id]) return;
+  setStack(id, [...stacks[id], { hue, t: height }]);
+}
+
+/** Take the topmost layer off a face, never emptying it completely. */
+function popLayer(id) {
+  if (id === null || !stacks[id]) return false;
+  if (stacks[id].length < 2) return false;
+  setStack(id, stacks[id].slice(0, -1));
+  return true;
+}
+
+function setStack(id, layers) {
+  if (id === null || !stacks[id]) return;
+  stacks[id] = layers;
+  rebuildRegion(id);
+  if (id === selected) showSelection(id);
+  updateReadout();
+}
+
+const round2 = (v) => Math.round(v * 100) / 100;
+const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function highlight(id, hex) {
+  for (const m of regionMeshes[id] ?? []) m.material.emissive.setHex(hex);
+}
+
+/** Describe the selected face: its stack, and the top layer in the height box. */
+function showSelection(id) {
+  const box = $('height');
+  const stack = stacks[id];
+  const top = stack[stack.length - 1];
+  box.disabled = false;
+  box.value = round2(top.t);
+  $('selInfo').textContent = `face ${id} · ${model.regions[id].area.toFixed(1)} mm² · `
+    + `${count(stack.length, 'layer')} · ${totalHeight(stack).toFixed(2)} mm tall`
+    + (stack.length > 1
+      ? `\n${stack.map((l) => `${hueName(HUES[l.hue])} ${l.t.toFixed(2)}`).join(' + ')}`
+      : '');
+}
+
+function select(id) {
+  if (selected !== null) highlight(selected, 0x000000);
+  selected = id;
+  if (id === null) {
+    $('height').value = '';
+    $('height').disabled = true;
+    $('selInfo').textContent = 'left click paints · right click stacks · middle removes';
+    return;
+  }
+  highlight(id, 0x4a4a4a);
+  showSelection(id);
+}
+
+function hover(id) {
+  if (hovered !== null && hovered !== selected) highlight(hovered, 0x000000);
+  hovered = id;
+  if (id !== null && id !== selected) highlight(id, 0x222222);
+  canvas.style.cursor = id === null ? '' : 'pointer';
+}
+
+function updateReadout() {
+  if (!model) return;
+  const totals = stacks.map(totalHeight);
+  const used = totals.filter((h) => h > 0).length;
+  const slabs = stacks.reduce((n, s) => n + s.length, 0);
+  const perHue = HUES.map((deg, hue) => `${hueName(deg)} `
+    + stacks.reduce((n, s) => n + s.filter((l) => l.hue === hue && l.t > 0).length, 0))
+    .join(' · ');
+  $('readout').textContent = `${model.regions.length} faces · ${used} raised · `
+    + `${slabs} layers · ${Math.min(...totals).toFixed(2)}–${Math.max(...totals).toFixed(2)} mm`
+    + `\n${perHue}`;
+}
+
+function frameModel() {
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  home = { center, radius: Math.max(size.length() / 2, 1e-3) };
+  resetView();
+
+  if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); }
+  const span = Math.max(size.x, size.y) * 1.5;
+  const step = Math.pow(10, Math.round(Math.log10(span / 10)));
+  const divisions = Math.max(2, Math.round(span / step));
+  grid = new THREE.GridHelper(divisions * step, divisions, 0x3a4049, 0x24282f);
+  grid.rotation.x = Math.PI / 2;                       // XY plane, not XZ
+  grid.position.set(center.x, center.y, box.min.z);
+  scene.add(grid);
+}
+
+/** Pull back far enough that the model's bounding sphere fits both axes. */
+function resetView() {
+  if (!home) return;
+  const { center, radius } = home;
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const dist = 1.1 * radius / Math.sin(Math.min(vFov, hFov) / 2);
+
+  if (topLocked) {
+    // Looking straight down -Z, so screen-up has to be +Y; leaving it at +Z
+    // would make the up vector parallel to the view and the camera degenerate.
+    camera.up.set(0, 1, 0);
+    camera.position.set(center.x, center.y, center.z + dist);
+  } else {
+    camera.up.set(0, 0, 1);
+    camera.position.copy(center).addScaledVector(VIEW_DIR, dist);
+  }
+  camera.near = Math.max(dist / 1000, 1e-3);
+  camera.far = dist * 10;
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.update();
+}
+
+/** Straight-down view with orbiting disabled, so painting can't spin the model. */
+function setTopView(on) {
+  topLocked = on;
+  controls.enableRotate = !on;
+  $('top').textContent = on ? 'Free view' : 'Top view';
+  $('top').setAttribute('aria-pressed', String(on));
+  resetView();
+}
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const ratio = renderer.getPixelRatio();
+  if (canvas.width !== w * ratio || canvas.height !== h * ratio) {
+    renderer.setSize(w, h, false);
+    camera.aspect = w / Math.max(h, 1);
+    camera.updateProjectionMatrix();
+  }
+}
+renderer.setAnimationLoop(() => { resize(); controls.update(); renderer.render(scene, camera); });
+
+$('reset').onclick = resetView;
+$('wire').onclick = () => {
+  wireframe = !wireframe;
+  group.traverse((o) => { if (o.material) o.material.wireframe = wireframe; });
+  $('wire').textContent = wireframe ? 'Solid' : 'Wireframe';
+};
+
+/* --------------------------------------------------------------- picking */
+
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+function regionAt(event) {
+  if (!regionMeshes.length) return null;
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(regionMeshes.flat(), false)[0];
+  return hit ? hit.object.userData.region : null;
+}
+
+// Only treat a press as a click if the pointer barely moved — otherwise the
+// user was orbiting and should not repaint whatever ends up under the cursor.
+let pressAt = null;
+canvas.addEventListener('pointerdown', (e) => { pressAt = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointermove', (e) => { if (!pressAt) hover(regionAt(e)); });
+canvas.addEventListener('pointerleave', () => hover(null));
+// The browser's own middle-click autoscroll and right-click menu would fight
+// the stacking gestures, so both are suppressed over the canvas.
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+
+canvas.addEventListener('pointerup', (e) => {
+  const moved = pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 4;
+  pressAt = null;
+  if (moved || !model) return;         // that was an orbit/pan/zoom drag
+
+  if (holeMode) {
+    if (e.button !== 0) return;
+    const at = pointAt(e);
+    if (!at) return;
+    const d = Number($('holeDia').value);
+    if (!(d > 0)) return setStatus('hole diameter must be greater than 0', true);
+    holes.push({ x: round2(at.x), y: round2(at.y), d });
+    applyHoles();
+    return;
+  }
+
+  const id = regionAt(e);
+  if (id === null) { if (e.button === 0) select(null); return; }
+  select(id);
+  const height = levelHeight(active.level, model.lo, model.hi);
+
+  if (e.button === 0) {                // left: this face is just this colour
+    paint(id, active.hue, height);
+  } else if (e.button === 2) {         // right: stack another layer on top
+    addLayer(id, active.hue, height);
+    setStatus(`face ${id} is now ${count(stacks[id].length, 'layer')}, `
+      + `${totalHeight(stacks[id]).toFixed(2)} mm tall`);
+  } else if (e.button === 1) {         // middle: peel the top layer off
+    if (popLayer(id)) {
+      setStatus(`face ${id} is back to ${count(stacks[id].length, 'layer')}`);
+    } else {
+      setStatus('a face always keeps its bottom layer — left click to recolour it');
+    }
+  }
+});
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('editorOverlay').hidden) closeEditor();
+  else if (holeMode) setHoleMode(false);
+  else select(null);
+});
+
+function setHoleMode(on) {
+  holeMode = on;
+  $('addHole').setAttribute('aria-pressed', String(on));
+  $('addHole').textContent = on ? 'Placing… (Esc)' : 'Place hole';
+  canvas.style.cursor = on ? 'crosshair' : '';
+  if (on) { select(null); setStatus('click where the hole should go'); }
+}
+
+$('addHole').onclick = () => setHoleMode(!holeMode);
+$('clearHoles').onclick = () => { if (holes.length) { holes = []; applyHoles(); } };
+
+$('height').onchange = () => {
+  if (selected === null) return;
+  const v = Number($('height').value);
+  if (!Number.isFinite(v) || v < 0) return setStatus('height must be 0 or greater', true);
+  const stack = stacks[selected].map((l) => ({ ...l }));
+  stack[stack.length - 1].t = v;
+  setStack(selected, stack);
+};
+
+$('fillAll').onclick = () => {
+  if (!model) return;
+  const h = levelHeight(active.level, model.lo, model.hi);
+  for (let i = 0; i < stacks.length; i++) paint(i, active.hue, h);
+  setStatus(`all ${stacks.length} faces set to ${h.toFixed(2)} mm`);
+};
+
+const randomHeight = () => levelHeight(Math.floor(Math.random() * LEVELS), model.lo, model.hi);
+
+$('randomise').onclick = () => {
+  if (!model) return;
+  for (let i = 0; i < stacks.length; i++) {
+    paint(i, Math.floor(Math.random() * HUES.length), randomHeight());
+  }
+  setStatus(`randomised colour and height on ${stacks.length} faces`);
+};
+
+/** Reshuffle the relief without disturbing the colour scheme. */
+$('randomHeights').onclick = () => {
+  if (!model) return;
+  // Every layer keeps its colour and gets a new thickness.
+  for (let i = 0; i < stacks.length; i++) {
+    setStack(i, stacks[i].map((l) => ({ hue: l.hue, t: randomHeight() })));
+  }
+  setStatus(`randomised the height of ${stacks.length} faces`);
+};
+
+/**
+ * Copy the left half's colours onto the right, reflected through the middle
+ * of the model. Faces are paired by mirrored centroid, and a pair only counts
+ * if the areas agree too — that rejects near-misses on asymmetric drawings.
+ */
+$('mirror').onclick = () => {
+  if (!model) return;
+  const box = new THREE.Box3().setFromObject(group);
+  const axis = (box.min.x + box.max.x) / 2;
+  const tolerance = Math.max(0.25, (box.max.x - box.min.x) * 0.01);
+
+  const left = model.regions.filter((r) => r.centroid[0] < axis - 1e-6);
+  let copied = 0, unmatched = 0;
+
+  for (const right of model.regions) {
+    if (right.centroid[0] <= axis + 1e-6) continue;      // left half or on the axis
+    const wantX = 2 * axis - right.centroid[0];
+    const wantY = right.centroid[1];
+
+    let best = null, bestD = Infinity;
+    for (const cand of left) {
+      const d = Math.hypot(cand.centroid[0] - wantX, cand.centroid[1] - wantY);
+      if (d < bestD) { bestD = d; best = cand; }
+    }
+    // Areas of true pairs differ slightly because mirrored arcs get flattened
+    // at different sample points, so allow an absolute slack for tiny slivers.
+    const areaOk = best && Math.abs(best.area - right.area)
+      <= Math.max(0.1 * Math.max(best.area, right.area), 0.05);
+    if (best && bestD <= tolerance && areaOk) {
+      setStack(right.id, stacks[best.id].map((l) => ({ ...l })));
+      copied++;
+    } else {
+      unmatched++;
+    }
+  }
+  setStatus(`mirrored ${copied} faces`
+    + (unmatched ? `\n${unmatched} had no match on the left — the drawing is not symmetric there` : ''));
+};
+
+$('top').onclick = () => setTopView(!topLocked);
+
+/* ------------------------------------------------------------ file input */
+
+const status = $('status');
+const stats = $('stats');
+let picked = null;
+
+function setStatus(text, isError = false) {
+  status.textContent = text;
+  status.className = isError ? 'error' : '';
+}
+
+async function pickFile(file) {
+  picked = file;
+  $('dropName').textContent = file.name;
+  $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
+  stats.textContent = '';
+  $('download').hidden = $('exportZip').hidden = $('holeBox').hidden = true;
+  $('export3mf').hidden = true;
+  $('saveProject').hidden = true;
+  $('saveToServer').disabled = true;
+  // suggest a name from the drawing, unless one is already typed
+  if (!$('projectName').value.trim()) {
+    $('projectName').value = file.name.replace(/\.(dxf|svg)$/i, '');
+  }
+  holes = [];                       // old positions mean nothing in a new drawing
+  setHoleMode(false);
+  holeList();
+  setStatus('reading layers…');
+  await loadLayers(file);
+}
+
+/** Ask the server which layers hold geometry, and offer them as checkboxes. */
+async function loadLayers(file) {
+  const box = $('layerBox');
+  const list = $('layers');
+  list.textContent = '';
+  box.hidden = true;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    for (const id of ['sagitta', 'scale']) form.append(id, $(id).value);
+    const res = await fetch('/api/inspect', { method: 'POST', body: form });
+    const info = await res.json();
+    if (!res.ok) throw new Error(info.error ?? res.statusText);
+
+    for (const layer of info.layers) {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = layer.name;
+      cb.checked = true;
+      label.append(cb, layer.name, Object.assign(document.createElement('span'),
+        { textContent: `${layer.entities}` }));
+      list.append(label);
+    }
+    box.hidden = info.layers.length < 2;   // nothing to choose from with one layer
+
+    const skipped = info.skipped.map((s) => `${s.count}× ${s.type}`).join(', ');
+    setStatus(`${info.curves} curves, ${info.size[0]} × ${info.size[1]} mm`
+      + (skipped ? `\nignored (not an outline): ${skipped}` : ''));
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+}
+
+/** Re-tick the layer boxes a project was saved with. */
+function restoreLayers(saved) {
+  if (!saved) return;
+  const wanted = new Set(saved.split(','));
+  for (const box of $('layers').querySelectorAll('input')) {
+    box.checked = wanted.has(box.value);
+  }
+}
+
+function selectedLayers() {
+  const boxes = [...$('layers').querySelectorAll('input')];
+  // An all-checked selection is the same as no filter — let the server decide.
+  if (!boxes.length || boxes.every((b) => b.checked)) return '';
+  return boxes.filter((b) => b.checked).map((b) => b.value).join(',');
+}
+
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
+$('file').onchange = (e) => { if (e.target.files[0]) accept(e.target.files[0]); };
+
+/** A dropped file is either a drawing to start from or a project to reopen. */
+function accept(file) {
+  if (PROJECT.test(file.name)) return loadProject(file);
+  if (!DRAWING.test(file.name)) {
+    return setStatus('that is not a .dxf, .svg or .v2sproj file', true);
+  }
+  return pickFile(file);
+}
+
+for (const type of ['dragenter', 'dragover']) {
+  drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.add('over'); });
+}
+for (const type of ['dragleave', 'drop']) {
+  drop.addEventListener(type, () => drop.classList.remove('over'));
+}
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) accept(file);
+});
+
+$('example').onclick = async () => {
+  setStatus('loading example…');
+  try {
+    const res = await fetch('/api/example.dxf');
+    if (!res.ok) throw new Error('could not load the example');
+    await pickFile(new File([await res.blob()], 'sketch.dxf'));
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+};
+
+$('reroll').onclick = () => {
+  $('seed').value = Math.floor(Math.random() * 100000);
+  if (picked && !$('go').disabled) $('go').click();
+};
+
+/* -------------------------------------------------------------- generate */
+
+const SHAPE_FIELDS = ['wallWidth', 'wallHeight', 'regionMin', 'regionMax', 'sagitta', 'scale'];
+const DRAWING = /\.(dxf|svg)$/i;
+
+/** Seeded PRNG, so the same seed lays out the same starting heights. */
+function mulberry32(a) {
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shapeForm() {
+  const form = new FormData();
+  form.append('file', picked);
+  for (const id of SHAPE_FIELDS) form.append(id, $(id).value);
+  form.append('layers', selectedLayers());
+  if (holes.length) form.append('holes', JSON.stringify(holes));
+  return form;
+}
+
+/**
+ * Ask the server for the faces and build the preview. `keep` restores painted
+ * heights and hues, which is how a saved project comes back.
+ *
+ * Returns 'restored' only when `keep` was actually applied — a caller must not
+ * claim a project loaded when the face count forced a fresh start.
+ */
+async function generate(keep = null) {
+  if (!picked) { setStatus('pick a .dxf or .svg file first', true); return false; }
+  const lo = Number($('regionMin').value), hi = Number($('regionMax').value);
+  if (!(hi >= lo)) { setStatus('tallest face must be at least the lowest', true); return false; }
+
+  setStatus('finding faces…');
+  stats.textContent = '';
+  $('go').disabled = true;
+  try {
+    const res = await fetch('/api/regions', { method: 'POST', body: shapeForm() });
+    const data = await res.json();
+    if (!res.ok) throw new Error([data.error ?? res.statusText, data.log].filter(Boolean).join('\n'));
+
+    // Face ids come from the drawing and the wall settings, so a project only
+    // lines up if it produced the same number of faces.
+    let mismatch = false;
+    if (keep && keep.length !== data.regions.length) {
+      setStatus(`this project was saved with ${keep.length} faces but the `
+        + `drawing now makes ${data.regions.length} — starting fresh`, true);
+      keep = null;
+      mismatch = true;      // leave the warning on screen
+    }
+    const seed = Number($('seed').value);
+    buildModel(data, lo, hi, mulberry32(Number.isFinite(seed) && $('seed').value !== ''
+      ? seed : (Math.random() * 1e9) | 0), keep);
+    buildPalette(lo, hi);
+    select(null);
+    if (!keep && !mismatch) setStatus(`${data.regions.length} faces — pick a colour, then click a face`);
+    return keep ? 'restored' : 'fresh';
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+    return false;
+  } finally {
+    $('go').disabled = false;
+  }
+}
+
+$('go').onclick = () => generate();
+
+/* --------------------------------------------------------------- project */
+
+const PROJECT = /\.v2sproj$/i;
+const PROJECT_FORMAT = 'vector2stl-project';
+
+/** Everything needed to pick the work back up, drawing included. */
+/** Everything needed to pick the work back up, drawing included. */
+async function buildProject() {
+  const bytes = new Uint8Array(await picked.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return {
+    format: PROJECT_FORMAT,
+    version: 1,
+    saved: new Date().toISOString(),
+    drawing: { name: picked.name, data: btoa(bin) },
+    settings: Object.fromEntries(
+      [...SHAPE_FIELDS, 'seed'].map((id) => [id, $(id).value]),
+    ),
+    layers: selectedLayers(),
+    palette: [...HUES],
+    frame: { black: $('blackFrame').checked, layer: $('frameLayer').value },
+    callback: callbackCode,
+    faces: { stacks },
+    holes,
+  };
+}
+
+const summary = () => `${stacks.length} faces, ${count(holes.length, 'hole')}`;
+
+$('saveProject').onclick = async () => {
+  if (!model || !picked) return;
+  try {
+    saveBlob(new TextEncoder().encode(JSON.stringify(await buildProject())),
+      'application/json', baseName() + '.v2sproj');
+    setStatus(`project saved to your downloads — ${summary()}`);
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+};
+
+async function loadProject(file) {
+  let project;
+  try {
+    project = JSON.parse(await file.text());
+  } catch {
+    return setStatus('that project file is not valid JSON', true);
+  }
+  return applyProject(project);
+}
+
+/**
+ * The painted faces out of a project. Projects saved before stacking existed
+ * carry a flat height and hue per face; those become one-layer stacks.
+ */
+function readFaces(faces) {
+  if (Array.isArray(faces.stacks)) {
+    return faces.stacks.map((stack) => (Array.isArray(stack) ? stack : [])
+      .filter((l) => l && Number.isFinite(Number(l.t)))
+      .map((l) => ({ hue: Number(l.hue) || 0, t: Number(l.t) })))
+      .map((stack) => stack.length ? stack : [{ hue: 0, t: 0 }]);
+  }
+  if (Array.isArray(faces.heights) && Array.isArray(faces.hues)) {
+    return faces.heights.map((t, i) => [{ hue: Number(faces.hues[i]) || 0, t: Number(t) }]);
+  }
+  return null;
+}
+
+async function applyProject(project) {
+  if (project?.format !== PROJECT_FORMAT) {
+    return setStatus('that does not look like a vector2stl project', true);
+  }
+  if (!project.drawing?.data) {
+    return setStatus('that project has no drawing in it', true);
+  }
+
+  setStatus('opening project…');
+  for (const [id, value] of Object.entries(project.settings ?? {})) {
+    if ($(id)) $(id).value = value;
+  }
+  if (project.frame) {
+    $('blackFrame').checked = !!project.frame.black;
+    if (project.frame.layer) $('frameLayer').value = project.frame.layer;
+  }
+  callbackCode = typeof project.callback === 'string' ? project.callback : null;
+  // A project saved with fewer rows keeps every hue it has, at the same index,
+  // so its face stacks still point at the colours they were painted with. Any
+  // row it never had is filled with a default that is not already in use.
+  const saved = Array.isArray(project.palette) ? project.palette : [];
+  const spare = DEFAULT_HUES.filter((deg) => !saved.some((h) => Number(h) === deg));
+  HUES = DEFAULT_HUES.map((fallback, i) =>
+    Number.isFinite(Number(saved[i])) ? Number(saved[i]) : (spare.shift() ?? fallback));
+  const bin = atob(project.drawing.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+  await pickFile(new File([bytes], project.drawing.name || 'drawing.dxf'));
+  restoreLayers(project.layers ?? '');
+  holes = Array.isArray(project.holes) ? project.holes : [];
+  holeList();
+
+  const keep = readFaces(project.faces ?? {});
+  if (await generate(keep) === 'restored') {
+    setStatus(`project opened — ${keep.length} faces, ${count(holes.length, 'hole')}`);
+  }
+}
+
+/* -------------------------------------------------------- callback editor */
+
+// Monaco appends "vs/..." to baseUrl itself, so the worker needs the parent.
+const MONACO_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/';
+const MONACO = `${MONACO_BASE}vs`;
+
+const DEFAULT_CALLBACK = `// Runs once, with every face. The loop is yours, so you can sort, group or
+// bucket the faces however you like before deciding what to do with them.
+//
+//   faces   [{ id, area, centroid: [x, y], height, stack }]
+//   stack   [{ hue, t }] bottom layer first — hue is 0..2, t is mm thick
+//   levels  [${'${levels}'}]
+//   hues    the three hue angles, in degrees
+//
+// Assign to face.stack to repaint. Nothing is applied if this throws.
+//
+// Example — the ten largest faces get a tall violet cap:
+//   [...faces].sort((a, b) => b.area - a.area).slice(0, 10)
+//     .forEach(f => f.stack = [{ hue: 0, t: levels[0] }, { hue: 2, t: levels[4] }]);
+
+for (const face of faces) {
+  // nothing yet
+}
+`;
+
+/** Starting points, picked from the menu in the editor's header. */
+const TEMPLATES = [
+  ['Random single hue', `// One layer per face, random colour and height.
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
+
+for (const face of faces) {
+  face.stack = [{ hue: Math.floor(Math.random() * hues.length), t: pick(levels) }];
+}
+`],
+  ['Random stacks', `// One to three layers per face, each a random colour and thickness.
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
+
+for (const face of faces) {
+  const depth = 1 + Math.floor(Math.random() * 3);
+  face.stack = Array.from({ length: depth }, () => ({
+    hue: Math.floor(Math.random() * hues.length),
+    t: pick(levels),
+  }));
+}
+`],
+  ['Hue by rotation', `// Cycle through the palette rows in face order.
+for (const face of faces) {
+  face.stack = [{ hue: face.id % hues.length, t: levels[2] }];
+}
+`],
+  ['Colour by area', `// Rank the faces by size, then give each third of them its own hue,
+// with the height rising the same way.
+const sorted = [...faces].sort((a, b) => a.area - b.area);
+
+sorted.forEach((face, rank) => {
+  const share = rank / sorted.length;                 // 0 at the smallest, 1 at the largest
+  const step = (n) => Math.min(n - 1, Math.floor(share * n));
+  face.stack = [{ hue: step(hues.length), t: levels[step(levels.length)] }];
+});
+`],
+  ['Height by area', `// Bigger faces stand taller. Colours are left alone.
+const areas = faces.map((f) => f.area);
+const min = Math.min(...areas), max = Math.max(...areas);
+
+for (const face of faces) {
+  const share = max > min ? (face.area - min) / (max - min) : 0;
+  const hue = face.stack.length ? face.stack[0].hue : 0;
+  face.stack = [{ hue, t: levels[Math.round(share * (levels.length - 1))] }];
+}
+`],
+  ['Radial rings', `// Rings stepping out from the middle of the drawing.
+const xs = faces.map((f) => f.centroid[0]);
+const ys = faces.map((f) => f.centroid[1]);
+const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+const reach = Math.max(...faces.map((f) => Math.hypot(f.centroid[0] - cx, f.centroid[1] - cy))) || 1;
+
+for (const face of faces) {
+  const away = Math.hypot(face.centroid[0] - cx, face.centroid[1] - cy) / reach;
+  const ring = Math.round(away * (levels.length - 1));
+  face.stack = [{ hue: ring % hues.length, t: levels[ring] }];
+}
+`],
+  ['Vertical gradient', `// Low at the foot of the drawing, tall at the top.
+const ys = faces.map((f) => f.centroid[1]);
+const low = Math.min(...ys), high = Math.max(...ys);
+
+for (const face of faces) {
+  const share = high > low ? (face.centroid[1] - low) / (high - low) : 0;
+  face.stack = [{ hue: 0, t: levels[Math.round(share * (levels.length - 1))] }];
+}
+`],
+  ['Checkerboard', `// Alternate two colours over a grid of squares.
+const cell = 10;   // mm
+
+for (const face of faces) {
+  const even = (Math.floor(face.centroid[0] / cell)
+              + Math.floor(face.centroid[1] / cell)) % 2 === 0;
+  face.stack = [{ hue: even ? 0 : 1, t: even ? levels[1] : levels[3] }];
+}
+`],
+  ['Cap the tall ones', `// Keep what is there, but crown anything already standing high.
+const tall = faces.filter((f) => f.height >= levels[levels.length - 2]);
+
+for (const face of tall) {
+  face.stack = [...face.stack, { hue: hues.length - 1, t: levels[0] }];
+}
+`],
+  ['Flatten', `// Everything back to one thin layer.
+for (const face of faces) {
+  face.stack = [{ hue: 0, t: levels[0] }];
+}
+`],
+];
+
+let callbackCode = null;      // null until first opened, then the user's text
+let editor = null;            // the Monaco instance, or null when we fell back
+
+const defaultCallback = () => DEFAULT_CALLBACK.replace(
+  '${levels}',
+  Array.from({ length: LEVELS }, (_, i) =>
+    levelHeight(i, model ? model.lo : 0.2, model ? model.hi : 2).toFixed(2)).join(', '),
+);
+
+/** Monaco from the CDN; resolves to null if it cannot be reached. */
+async function loadMonaco() {
+  if (window.monaco) return window.monaco;
+  try {
+    await new Promise((resolve, reject) => {
+      const tag = document.createElement('script');
+      tag.src = `${MONACO}/loader.js`;
+      tag.onload = resolve;
+      tag.onerror = () => reject(new Error('could not load the editor'));
+      document.head.append(tag);
+    });
+    window.MonacoEnvironment = {
+      getWorkerUrl: () => URL.createObjectURL(new Blob([
+        `self.MonacoEnvironment={baseUrl:'${MONACO_BASE}'};`
+        + `importScripts('${MONACO}/base/worker/workerMain.js');`,
+      ], { type: 'text/javascript' })),
+    };
+    window.require.config({ paths: { vs: MONACO } });
+    await new Promise((resolve) => window.require(['vs/editor/editor.main'], resolve));
+    return window.monaco;
+  } catch {
+    return null;
+  }
+}
+
+async function openEditor() {
+  if (!model) return setStatus('generate a model first', true);
+  if (callbackCode === null) callbackCode = defaultCallback();
+  if (!$('templatePick').options.length) fillTemplates();
+  $('editorOverlay').hidden = false;
+  editorSay('');
+
+  const host = $('editorHost');
+  if (editor) { setEditorText(callbackCode); editor.layout(); editor.focus(); return; }
+
+  const monaco = await loadMonaco();
+  if (!monaco) {
+    // Offline or blocked: a plain textarea still lets the callback be written.
+    host.innerHTML = '<textarea spellcheck="false"></textarea>';
+    setEditorText(callbackCode);
+    editorSay('the code editor could not be loaded — using a plain text box');
+    return;
+  }
+  editor = monaco.editor.create(host, {
+    value: callbackCode,
+    language: 'javascript',
+    theme: 'vs-dark',
+    automaticLayout: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    fontSize: 13,
+    tabSize: 2,
+  });
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, runCallback);
+  loaded = callbackCode;
+  editor.focus();
+}
+
+const editorText = () =>
+  editor ? editor.getValue() : ($('editorHost').querySelector('textarea')?.value ?? '');
+
+function setEditorText(text) {
+  if (editor) editor.setValue(text);
+  else {
+    const box = $('editorHost').querySelector('textarea');
+    if (box) box.value = text;
+  }
+  loaded = text;
+}
+
+let loaded = '';   // what was last put in the box, to spot hand edits
+
+function fillTemplates() {
+  const menu = $('templatePick');
+  menu.textContent = '';
+  menu.append(new Option('Load a template…', ''));
+  menu.append(new Option('Do nothing (default)', 'default'));
+  TEMPLATES.forEach(([name], i) => menu.append(new Option(name, String(i))));
+}
+
+$('templatePick').onchange = (e) => {
+  const choice = e.target.value;
+  e.target.value = '';                 // behave like a menu, not a setting
+  if (choice === '') return;
+  if (editorText().trim() !== loaded.trim()
+      && !confirm('Replace the script you have written?')) return;
+  const [name, code] = choice === 'default'
+    ? ['the default', defaultCallback()]
+    : TEMPLATES[Number(choice)];
+  setEditorText(code);
+  editorSay(`loaded ${choice === 'default' ? name : `"${name}"`} — press Run to apply it`);
+};
+
+function editorSay(text, isError = false) {
+  $('editorStatus').textContent = text;
+  $('editorStatus').className = isError ? 'error' : 'muted';
+}
+
+function closeEditor() {
+  callbackCode = editorText() || callbackCode;
+  $('editorOverlay').hidden = true;
+}
+
+/** A layer list the script handed back, checked before anything is committed. */
+function validStack(raw, id) {
+  if (!Array.isArray(raw)) throw new Error(`face ${id}: stack must be an array`);
+  const layers = raw.map((layer, n) => {
+    const t = Number(layer?.t);
+    const hue = Math.trunc(Number(layer?.hue ?? 0));
+    if (!Number.isFinite(t) || t < 0) {
+      throw new Error(`face ${id}, layer ${n}: t must be a number of millimetres`);
+    }
+    if (!Number.isFinite(hue) || hue < 0 || hue >= HUES.length) {
+      throw new Error(`face ${id}, layer ${n}: hue must be 0..${HUES.length - 1}`);
+    }
+    return { hue, t };
+  });
+  return layers.length ? layers : [{ hue: 0, t: 0 }];
+}
+
+function runCallback() {
+  if (!model) return;
+  const code = editorText();
+  const levels = Array.from({ length: LEVELS }, (_, i) =>
+    levelHeight(i, model.lo, model.hi));
+
+  // The script works on copies; the model is only touched once it has run
+  // cleanly and every stack it produced has been checked.
+  const faces = stacks.map((stack, i) => ({
+    id: i,
+    area: model.regions[i].area,
+    centroid: model.regions[i].centroid,
+    height: totalHeight(stack),
+    stack: stack.map((l) => ({ ...l })),
+  }));
+
+  let next;
+  try {
+    const fn = new Function('faces', 'levels', 'hues', 'hueName', code);
+    fn(faces, levels, [...HUES], hueName);
+    next = faces.map((face, i) => validStack(face.stack, i));
+  } catch (err) {
+    editorSay(String(err && err.message ? err.message : err), true);
+    return;
+  }
+
+  for (let i = 0; i < next.length; i++) setStack(i, next[i]);
+  callbackCode = code;
+  $('editorOverlay').hidden = true;
+  const slabs = next.reduce((n, s) => n + s.length, 0);
+  setStatus(`callback applied — ${next.length} faces, ${count(slabs, 'layer')}`);
+}
+
+$('callback').onclick = openEditor;
+$('editorClose').onclick = closeEditor;
+$('editorRun').onclick = runCallback;
+$('editorReset').onclick = () => {
+  callbackCode = defaultCallback();
+  setEditorText(callbackCode);
+  editorSay('back to the default callback');
+};
+$('editorOverlay').addEventListener('pointerdown', (e) => {
+  if (e.target === $('editorOverlay')) closeEditor();
+});
+
+/* --------------------------------------------- projects kept on the server */
+
+let shelf = [];      // [{name, size, saved}]
+
+const ago = (iso) => {
+  const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return new Date(iso).toLocaleDateString();
+};
+
+async function refreshShelf() {
+  try {
+    const res = await fetch('/api/projects');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    shelf = data.projects ?? [];
+  } catch {
+    shelf = [];               // the shelf is a convenience; never block on it
+  }
+  const box = $('shelf');
+  box.textContent = '';
+  if (!shelf.length) {
+    box.textContent = 'nothing saved on the server yet';
+    box.className = 'muted';
+    return;
+  }
+  box.className = '';
+  for (const item of shelf) {
+    const row = document.createElement('div');
+    row.className = 'shelf-row';
+
+    const open = document.createElement('button');
+    open.className = 'ghost shelf-open';
+    open.textContent = item.name;
+    open.title = `Saved ${ago(item.saved)} · ${(item.size / 1024).toFixed(0)} KB`;
+    open.onclick = () => openFromServer(item.name);
+
+    const del = document.createElement('button');
+    del.className = 'ghost';
+    del.textContent = '✕';
+    del.title = `Delete "${item.name}"`;
+    del.onclick = () => removeFromServer(item.name);
+
+    row.append(open, del);
+    box.append(row);
+  }
+}
+
+async function openFromServer(name) {
+  setStatus(`opening "${name}"…`);
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    $('projectName').value = name;
+    await applyProject(data);
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+}
+
+$('saveToServer').onclick = async () => {
+  if (!model || !picked) return;
+  const name = $('projectName').value.trim();
+  if (!name) return setStatus('give the project a name first', true);
+  if (shelf.some((p) => p.name === name)
+      && !confirm(`"${name}" already exists on the server. Replace it?`)) return;
+
+  setStatus('saving to the server…');
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(await buildProject()),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    await refreshShelf();
+    setStatus(`saved "${name}" on the server — ${summary()}`);
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+};
+
+async function removeFromServer(name) {
+  if (!confirm(`Delete the saved project "${name}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    await refreshShelf();
+    setStatus(`deleted "${name}"`);
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+}
+
+refreshShelf();
+
+/* -------------------------------------------------------------- download */
+
+/** The form for a build, carrying every painted height so the STL matches the preview. */
+function buildForm() {
+  const form = shapeForm();
+  // Every layer, so the STL is exactly what the preview shows.
+  form.append('stacks', JSON.stringify(Object.fromEntries(stacks.map((stack, i) => [
+    i, stack.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` })),
+  ]))));
+  const frame = frameStack();
+  if (frame) {
+    form.append('wallStack', JSON.stringify(
+      frame.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` }))));
+  }
+  return form;
+}
+
+function saveBlob(buf, type, filename) {
+  // Saving several files at once means several live URLs; revoking the
+  // previous one straight away would cancel a download still in flight.
+  const url = URL.createObjectURL(new Blob([buf], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function requestBuild(url, form, button) {
+  setStatus('building…');
+  button.disabled = true;
+  try {
+    const res = await fetch(url, { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error([err.error ?? res.statusText, err.log].filter(Boolean).join('\n'));
+    }
+    return {
+      buf: await res.arrayBuffer(),
+      info: JSON.parse(decodeURIComponent(res.headers.get('x-stats'))),
+    };
+  } finally {
+    button.disabled = false;
+  }
+}
+
+const baseName = () => picked.name.replace(DRAWING, '');
+
+$('download').onclick = async () => {
+  if (!model) return;
+  try {
+    const { buf, info } = await requestBuild('/api/convert', buildForm(), $('download'));
+    saveBlob(buf, 'application/sla', baseName() + '.stl');
+    setStatus('saved');
+    stats.textContent = `${info.walls + info.regions} solids · ${info.regions} raised faces · `
+      + `${info.triangles.toLocaleString()} triangles\n${info.size.join(' × ')} mm`;
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+};
+
+$('export3mf').onclick = async () => {
+  if (!model) return;
+  try {
+    const { buf, info } = await requestBuild('/api/export3mf', buildForm(), $('export3mf'));
+    saveBlob(buf, 'model/3mf', baseName() + '.3mf');
+    const most = Math.max(...info.files.map((f) => f.extruder));
+    setStatus(`saved a 3MF using ${count(most, 'extruder')}`
+      + (most > 4 ? '\nthat is more than four — switch to the mixed frame to fit' : ''));
+    stats.textContent = info.files
+      .map((f) => `extruder ${f.extruder} — ${f.file}, ${f.triangles.toLocaleString()} triangles`)
+      .join('\n');
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+};
+
+const fromBase64 = (b64) => {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+};
+
+$('exportZip').onclick = async () => {
+  if (!model) return;
+  const form = buildForm();      // the stacks already carry each layer's colour
+
+  setStatus('building…');
+  $('exportZip').disabled = true;
+  try {
+    const res = await fetch('/api/export', { method: 'POST', body: form });
+    const info = await res.json();
+    if (!res.ok) {
+      throw new Error([info.error ?? res.statusText, info.log].filter(Boolean).join('\n'));
+    }
+    // One save per file. Browsers ask once before allowing several downloads.
+    for (const f of info.files) {
+      saveBlob(fromBase64(f.stl), 'application/sla', `${baseName()}-${f.file}`);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    setStatus(`saved ${info.files.length} STL files`
+      + '\nyour browser may ask to allow multiple downloads');
+    stats.textContent = info.files
+      .map((f) => `${baseName()}-${f.file} — ${f.solids} solids, `
+        + `${f.triangles.toLocaleString()} triangles`)
+      .join('\n');
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  } finally {
+    $('exportZip').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

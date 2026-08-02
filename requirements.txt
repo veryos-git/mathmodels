@@ -1,0 +1,6 @@
+# Installed automatically into .venv by tools/setup.ts on `deno task start`.
+ezdxf==1.4.4          # reads the DXF and flattens curves to polylines
+svgelements==1.9.6    # the same for SVG: shapes, transforms, units, <use>
+shapely==2.1.2        # buffering the walls and finding the enclosed regions
+trimesh==4.12.2       # extruding polygons and writing the STL
+mapbox-earcut==2.0.0  # the triangulator trimesh uses for extrude_polygon
