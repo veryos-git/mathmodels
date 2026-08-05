@@ -28,16 +28,23 @@
   #drop small { color: #6b7280; }
   #file { display: none; }
 
-  fieldset { margin: 16px 0 0; padding: 10px 12px; border: 1px solid #2a2e35; border-radius: 8px; }
+  /* min-width:0 beats the UA's min-content sizing: without it the palette's
+     widest row pushes the whole sidebar out instead of scrolling inside it */
+  fieldset { margin: 16px 0 0; padding: 10px 12px; border: 1px solid #2a2e35; border-radius: 8px;
+             min-width: 0; }
   legend { color: #9aa3af; font-size: 12px; padding: 0 4px; }
   #layers { display: grid; gap: 4px; max-height: 150px; overflow-y: auto; }
   #layers label { display: flex; gap: 8px; align-items: center; margin: 0; color: #ddd;
                   font-size: 13px; cursor: pointer; }
   #layers span { color: #6b7280; margin-left: auto; font-size: 11px; }
 
-  /* palette: one row per hue, brightest (lowest) to darkest (tallest) */
+  /* palette: one row per hue, brightest (lowest) to darkest (tallest).
+     The column count is set from JS — with a fine layer height there are far
+     more shades than fit, so the whole block scrolls sideways as one. */
+  #paletteScroll { overflow-x: auto; padding-bottom: 4px; }
   #swatches { display: grid; gap: 6px; }
-  .hue-row { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 6px; }
+  .hue-row { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 2px;
+             width: max-content; min-width: 100%; }
   .hue-pick { width: 26px; height: 34px; padding: 0; border: 1px solid #2a2e35;
               border-radius: 5px; background: #1d2127; cursor: pointer; }
   .hue-pick::-webkit-color-swatch-wrapper { padding: 2px; }
@@ -48,10 +55,19 @@
   .swatch:hover { border-color: #6b7280; }
   .swatch[aria-pressed=true] { border-color: #fff; }
   .swatch[aria-pressed=true]::after { content: '✓'; position: absolute; inset: 0;
-            display: grid; place-items: center; color: #fff; font-size: 15px;
+            display: grid; place-items: center; color: #fff; font-size: 11px;
             text-shadow: 0 0 3px rgba(0,0,0,.8); }
-  .scale { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 6px; margin-top: 5px;
-           font-size: 10px; color: #6b7280; text-align: center; }
+  .scale { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 2px; margin-top: 5px;
+           font-size: 10px; color: #6b7280; text-align: center;
+           width: max-content; min-width: 100%; }
+  /* Only every so many heights are labelled. The text is taken out of flow so
+     a wide label cannot stretch its column — it just spills over the blank
+     cells either side, leaving the scale lined up with the swatches. */
+  .scale div { position: relative; height: 13px; }
+  .scale span { position: absolute; left: 50%; transform: translateX(-50%);
+                white-space: nowrap; }
+  /* the tallest one has no room to its right, so it hangs off the left instead */
+  .scale div:last-child span { left: auto; right: 0; transform: none; }
 
   button { margin-top: 16px; width: 100%; padding: 10px; border: 0; border-radius: 6px;
            background: #3b82f6; color: #fff; font-weight: 600; cursor: pointer; }
@@ -160,11 +176,13 @@
       <input type="number" id="wallHeight" value="2.0" step="0.1" min="0.1"></div>
   </div>
   <div class="row">
+    <div><label for="wallOverlap" title="How far each face reaches into the wall around it, so the two fuse when printed">wall overlap (mm)</label>
+      <input type="number" id="wallOverlap" value="0.1" step="0.05" min="0"></div>
     <div><label for="frameLayer" title="Thickness of each frame layer">frame layer (mm)</label>
       <input type="number" id="frameLayer" value="0.2" step="0.05" min="0.01"></div>
-    <div><label for="blackFrame" title="Print the frame in its own filament instead">frame colour</label>
-      <label class="check"><input type="checkbox" id="blackFrame"> use black frame</label></div>
   </div>
+  <label class="check" title="Print the frame in its own filament instead">
+    <input type="checkbox" id="blackFrame" checked> use black frame</label>
   <div class="row">
     <div><label for="regionMin">lowest face (mm)</label>
       <input type="number" id="regionMin" value="0.2" step="0.1" min="0"></div>
@@ -172,10 +190,16 @@
       <input type="number" id="regionMax" value="2.0" step="0.1" min="0.1"></div>
   </div>
   <div class="row">
+    <div><label for="layerHeight" title="Your slicer's layer height — every shade in the palette is a whole number of these">layer height (mm)</label>
+      <input type="number" id="layerHeight" value="0.2" step="0.01" min="0.01"></div>
     <div><label for="sagitta">curve accuracy (mm)</label>
       <input type="number" id="sagitta" value="0.02" step="0.01" min="0.001"></div>
-    <div><label for="scale" title="Multiply every coordinate — handy for SVGs with no physical size">scale (×)</label>
-      <input type="number" id="scale" value="1" step="0.1" min="0.001"></div>
+  </div>
+  <div class="row">
+    <div><label for="ySize" title="How tall the finished model is, walls included — the width follows the drawing's proportions">y size (mm)</label>
+      <input type="number" id="ySize" value="50" step="1" min="0.1"></div>
+    <div><label for="scale" title="What the y size works out to — set it yourself to scale by hand">scale (×)</label>
+      <input type="number" id="scale" value="1" step="any" min="0.000001"></div>
   </div>
 
   <label for="seed">seed (empty = random)</label>
@@ -188,10 +212,12 @@
 
   <fieldset id="paintBox" hidden>
     <legend>palette</legend>
-    <div id="swatches"></div>
-    <div class="scale" id="levelScale"></div>
+    <div id="paletteScroll">
+      <div id="swatches"></div>
+      <div class="scale" id="levelScale"></div>
+    </div>
     <label for="height">selected face height (mm)</label>
-    <input type="number" id="height" step="0.05" min="0" disabled>
+    <input type="number" id="height" step="0.1" min="0" disabled>
     <div class="muted" id="selInfo">left click paints · right click stacks · middle removes</div>
     <div class="btn-row">
       <button class="ghost" id="randomise" title="Random hue and height for every face">Random all</button>
@@ -264,11 +290,14 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const round3 = (v) => Math.round(v * 1000) / 1000;
+const round6 = (v) => Math.round(v * 1e6) / 1e6;
 
 /* --------------------------------------------------------------- palette */
 
-// Four rows: the frame no longer needs a filament of its own, so the fourth
-// slot on the printer is free for a colour. 120 fills the widest gap.
+// Four rows, 120 filling the widest gap. All four plus a solid frame is five
+// filaments; turning the black frame off puts the frame back on the palette's
+// own colours and brings that back to four.
 const DEFAULT_HUES = [35, 120, 186, 288];
 let HUES = [...DEFAULT_HUES];     // one row each, editable via the row's swatch
 
@@ -277,30 +306,83 @@ let HUES = [...DEFAULT_HUES];     // one row each, editable via the row's swatch
 const HUE_WORDS = ['red', 'orange', 'amber', 'yellow', 'lime', 'green',
                    'teal', 'cyan', 'azure', 'blue', 'violet', 'magenta'];
 const hueName = (deg) => HUE_WORDS[Math.round(((deg % 360) + 360) % 360 / 30) % 12];
-const LEVELS = 5;
+
+// A shade per printed layer would be dozens of swatches on a tall model, so a
+// row stops here and steps by several layers at a time instead.
+const MAX_LEVELS = 20;
 
 // The palette runs brightest -> darkest across the lowest -> tallest range,
-// so a face's shade always tells you how far it is raised.
-const LIGHT_HI = 0.76, LIGHT_LO = 0.30;
+// so a face's shade always tells you how far it is raised. Saturation climbs
+// with it: with twenty steps in a row, lightness alone is too fine to read.
+const LIGHT_HI = 0.84, LIGHT_LO = 0.22;
+const SAT_LO = 0.45, SAT_HI = 0.70;
+
+/** The slicer layer height every palette step is a whole multiple of. */
+function layerHeight() {
+  const v = Number($('layerHeight').value);
+  return v > 0 ? v : 0.1;
+}
+
+/** Round a height to a whole number of print layers. */
+const snapToLayer = (v, layer = layerHeight()) => round3(Math.round(v / layer) * layer);
+
+/**
+ * The heights the palette offers: one per print layer from the lowest face to
+ * the tallest, so every shade is something the printer can actually stop at.
+ * A range too tall for MAX_LEVELS steps by several layers at a time instead.
+ */
+function levelsFor(lo, hi, layer) {
+  const base = snapToLayer(lo, layer);
+  const cap = Math.max(snapToLayer(hi, layer), base);
+  const rungs = Math.round((cap - base) / layer);
+  if (rungs < 1) return [base];                 // no room for a second shade
+
+  const per = Math.ceil(rungs / (MAX_LEVELS - 1));   // layers per step
+  const out = [];
+  for (let k = 0; k <= rungs; k += per) out.push(round3(base + k * layer));
+  if (out[out.length - 1] !== cap) out.push(cap);    // always offer the tallest
+  return out;
+}
+
+// Rebuilt only when the range or the layer height moves: every click on a face
+// asks for this list.
+let levelCache = { key: '', list: [] };
+
+/** The palette's heights for a lo..hi range, brightest/lowest first. */
+function levels(lo, hi) {
+  const layer = layerHeight();
+  const key = `${lo}|${hi}|${layer}`;
+  if (levelCache.key !== key) levelCache = { key, list: levelsFor(lo, hi, layer) };
+  return levelCache.list;
+}
 
 /** Height of palette level `i` (0 = brightest/lowest) for a lo..hi range. */
 function levelHeight(i, lo, hi) {
-  return lo + (hi - lo) * i / (LEVELS - 1);
+  const list = levels(lo, hi);
+  return list[clamp(i, 0, list.length - 1)];
 }
 
-/** The colour a face gets, from its hue row and how high it stands. */
+/**
+ * The colour a face gets, from its hue row and how high it stands. The HSL is
+ * given as sRGB: three.js otherwise reads it as linear and hands it back
+ * through the transfer function, which flattens the ramp towards white — with
+ * this many steps there is no contrast left to lose.
+ */
 function shadeFor(hue, height, lo, hi) {
   const t = hi > lo ? clamp((height - lo) / (hi - lo), 0, 1) : 0;
   const deg = HUES[hue] ?? HUES[0];
-  return new THREE.Color().setHSL(deg / 360, 0.55, LIGHT_HI - (LIGHT_HI - LIGHT_LO) * t);
+  return new THREE.Color().setHSL(deg / 360, SAT_LO + (SAT_HI - SAT_LO) * t,
+    LIGHT_HI - (LIGHT_HI - LIGHT_LO) * t, THREE.SRGBColorSpace);
 }
 
-let active = { hue: 0, level: LEVELS - 1 };   // the swatch currently held
+// Infinity so the first palette build clamps it to the tallest swatch, however
+// many the layer height turns out to give.
+let active = { hue: 0, level: Infinity };     // the swatch currently held
 
 /** Repoint one palette row at a new hue and recolour the faces using it. */
 function setHue(row, hex, lo, hi) {
   const hsl = { h: 0, s: 0, l: 0 };
-  new THREE.Color(hex).getHSL(hsl);
+  new THREE.Color(hex).getHSL(hsl, THREE.SRGBColorSpace);   // as shadeFor writes it
   // A grey pick carries no hue; keep the row's current one rather than
   // silently snapping every face on it to red.
   if (hsl.s < 0.05) {
@@ -318,24 +400,32 @@ function setHue(row, hex, lo, hi) {
 }
 
 function buildPalette(lo, hi) {
+  const list = levels(lo, hi);
+  active.level = clamp(active.level, 0, list.length - 1);
+  $('height').step = layerHeight();
+
+  // Every row and the scale under them share one set of columns, so the
+  // heights stay lined up with their swatches however many there are.
+  const columns = `26px repeat(${list.length}, minmax(10px, 1fr))`;
+
   const wrap = $('swatches');
   wrap.textContent = '';
   HUES.forEach((_, hue) => {
     const row = document.createElement('div');
     row.className = 'hue-row';
+    row.style.gridTemplateColumns = columns;
 
-    // The picker sets this row's hue; the five shades are derived from it.
+    // The picker sets this row's hue; the shades are derived from it.
     const pick = document.createElement('input');
     pick.type = 'color';
     pick.className = 'hue-pick';
-    pick.value = '#' + shadeFor(hue, levelHeight(2, lo, hi), lo, hi).getHexString();
+    pick.value = '#' + shadeFor(hue, list[list.length >> 1], lo, hi).getHexString();
     pick.title = `Change this row's colour (currently ${hueName(HUES[hue])})`;
     pick.setAttribute('aria-label', `colour of hue row ${hue + 1}`);
     pick.oninput = () => setHue(hue, pick.value, lo, hi);
     row.append(pick);
 
-    for (let level = 0; level < LEVELS; level++) {
-      const h = levelHeight(level, lo, hi);
+    list.forEach((h, level) => {
       const b = document.createElement('button');
       b.className = 'swatch';
       b.type = 'button';
@@ -351,16 +441,27 @@ function buildPalette(lo, hi) {
         b.setAttribute('aria-pressed', 'true');
       };
       row.append(b);
-    }
+    });
     wrap.append(row);
   });
-  $('levelScale').textContent = '';
-  $('levelScale').append(document.createElement('div'));   // spacer under the pickers
-  for (let level = 0; level < LEVELS; level++) {
+
+  const scale = $('levelScale');
+  scale.textContent = '';
+  scale.style.gridTemplateColumns = columns;
+  scale.append(document.createElement('div'));   // spacer under the pickers
+  // A number under every swatch would be a smear once the steps get fine, so
+  // only about five are labelled — the ends always among them, and nothing so
+  // close to the tallest that the two labels touch.
+  const every = Math.ceil(list.length / 5);
+  list.forEach((h, level) => {
     const cell = document.createElement('div');
-    cell.textContent = levelHeight(level, lo, hi).toFixed(2);
-    $('levelScale').append(cell);
-  }
+    const last = list.length - 1;
+    if (level === last || (level % every === 0 && last - level >= every)) {
+      cell.append(Object.assign(document.createElement('span'),
+        { textContent: h.toFixed(2) }));
+    }
+    scale.append(cell);
+  });
 }
 
 /* ---------------------------------------------------------------- viewer */
@@ -516,6 +617,23 @@ function frameChanged() {
 $('blackFrame').onchange = frameChanged;
 $('frameLayer').onchange = frameChanged;
 
+/**
+ * A finer layer height buys more shades between the same two heights, so the
+ * palette is rebuilt on the spot. Faces keep the heights they were painted
+ * with — retro-fitting them to the new grid would rewrite work by surprise.
+ */
+$('layerHeight').onchange = () => {
+  const layer = Number($('layerHeight').value);
+  if (!(layer > 0)) return setStatus('layer height must be greater than 0', true);
+  $('height').step = layer;
+  if (!model) return;
+  buildPalette(model.lo, model.hi);
+  const steps = levels(model.lo, model.hi);
+  const gap = steps.length > 1 ? round3(steps[1] - steps[0]) : layer;
+  setStatus(`palette is ${count(steps.length, 'shade')} per hue, `
+    + `${gap} mm apart${gap === layer ? '' : ` — ${Math.round(gap / layer)} layers a step`}`);
+};
+
 /** Rebuild one face's slabs from its stack, bottom up. */
 function rebuildRegion(i) {
   for (const m of regionMeshes[i]) { group.remove(m); m.material.dispose(); }
@@ -554,9 +672,10 @@ function buildModel(data, lo, hi, rng, keep = null) {
   // One unit prism per face, shared by all of that face's slabs.
   regionGeom = data.regions.map((region) => unitPrism(region.parts));
   regionMeshes = data.regions.map(() => []);
+  const steps = levels(lo, hi);
   stacks = data.regions.map((_, i) => keep
     ? keep[i].map((layer) => ({ ...layer }))
-    : [{ hue: 0, t: levelHeight(Math.floor(rng() * LEVELS), lo, hi) }]);
+    : [{ hue: 0, t: steps[Math.floor(rng() * steps.length)] }]);
   for (let i = 0; i < stacks.length; i++) rebuildRegion(i);
 
   drawHoleMarkers();
@@ -882,9 +1001,16 @@ $('height').onchange = () => {
   if (selected === null) return;
   const v = Number($('height').value);
   if (!Number.isFinite(v) || v < 0) return setStatus('height must be 0 or greater', true);
+  // A layer the printer cannot stop at is no use, so a typed height lands on
+  // the nearest whole number of them.
+  const t = snapToLayer(v);
   const stack = stacks[selected].map((l) => ({ ...l }));
-  stack[stack.length - 1].t = v;
+  stack[stack.length - 1].t = t;
   setStack(selected, stack);
+  if (t !== v) {
+    setStatus(`${v} mm rounded to ${t} mm — `
+      + `${count(Math.round(t / layerHeight()), 'layer')} of ${layerHeight()} mm`);
+  }
 };
 
 $('fillAll').onclick = () => {
@@ -894,7 +1020,10 @@ $('fillAll').onclick = () => {
   setStatus(`all ${stacks.length} faces set to ${h.toFixed(2)} mm`);
 };
 
-const randomHeight = () => levelHeight(Math.floor(Math.random() * LEVELS), model.lo, model.hi);
+const randomHeight = () => {
+  const steps = levels(model.lo, model.hi);
+  return steps[Math.floor(Math.random() * steps.length)];
+};
 
 $('randomise').onclick = () => {
   if (!model) return;
@@ -966,7 +1095,12 @@ function setStatus(text, isError = false) {
   status.className = isError ? 'error' : '';
 }
 
-async function pickFile(file) {
+/**
+ * `fit` is what makes *y size* the size control: a drawing dropped in is
+ * scaled to it straight away, while a project is left on the scale it was
+ * saved with — reopening one must not resize the work.
+ */
+async function pickFile(file, fit = true) {
   picked = file;
   $('dropName').textContent = file.name;
   $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
@@ -983,11 +1117,11 @@ async function pickFile(file) {
   setHoleMode(false);
   holeList();
   setStatus('reading layers…');
-  await loadLayers(file);
+  await loadLayers(file, fit);
 }
 
 /** Ask the server which layers hold geometry, and offer them as checkboxes. */
-async function loadLayers(file) {
+async function loadLayers(file, fit = true) {
   const box = $('layerBox');
   const list = $('layers');
   list.textContent = '';
@@ -995,7 +1129,9 @@ async function loadLayers(file) {
   try {
     const form = new FormData();
     form.append('file', file);
-    for (const id of ['sagitta', 'scale']) form.append(id, $(id).value);
+    // Unscaled: this is the measurement everything else is worked out from.
+    form.append('sagitta', $('sagitta').value);
+    form.append('scale', '1');
     const res = await fetch('/api/inspect', { method: 'POST', body: form });
     const info = await res.json();
     if (!res.ok) throw new Error(info.error ?? res.statusText);
@@ -1006,18 +1142,58 @@ async function loadLayers(file) {
       cb.type = 'checkbox';
       cb.value = layer.name;
       cb.checked = true;
+      cb.onchange = layerChanged;
       label.append(cb, layer.name, Object.assign(document.createElement('span'),
         { textContent: `${layer.entities}` }));
       list.append(label);
     }
     box.hidden = info.layers.length < 2;   // nothing to choose from with one layer
 
+    drawing = { x: info.size[0], y: info.size[1] };
+    if (fit) fitToYSize(); else showYSize();
+
     const skipped = info.skipped.map((s) => `${s.count}× ${s.type}`).join(', ');
-    setStatus(`${info.curves} curves, ${info.size[0]} × ${info.size[1]} mm`
+    setStatus(`${info.curves} curves, ${finishedSize()} at ×${$('scale').value}`
       + (skipped ? `\nignored (not an outline): ${skipped}` : ''));
   } catch (e) {
     setStatus(String(e.message ?? e), true);
   }
+}
+
+/* ------------------------------------------------------------------- size */
+
+// What the drawing measures before any scaling, from /api/inspect. Everything
+// about the finished size is worked out from this.
+let drawing = null;      // { x, y } in mm, or null before a drawing is read
+
+// The walls stand half their width outside the outermost curve on each side,
+// so they are part of what comes off the printer.
+const finishedY = (scale) => drawing.y * scale + Number($('wallWidth').value || 0);
+
+function finishedSize() {
+  if (!drawing) return 'unknown size';
+  const s = Number($('scale').value) || 1;
+  const wall = Number($('wallWidth').value || 0);
+  return `${(drawing.x * s + wall).toFixed(1)} × ${finishedY(s).toFixed(1)} mm`;
+}
+
+/** Set the scale so the finished model stands *y size* mm tall. */
+function fitToYSize() {
+  const target = Number($('ySize').value);
+  const wall = Number($('wallWidth').value || 0);
+  if (!drawing || !drawing.y) return false;
+  if (!(target > wall)) {
+    setStatus(`a y size of ${target} mm leaves no room for the ${wall} mm walls`, true);
+    return false;
+  }
+  $('scale').value = round6((target - wall) / drawing.y);
+  return true;
+}
+
+/** The other way round: what the scale in the box actually comes out as. */
+function showYSize() {
+  if (!drawing || !drawing.y) return;
+  $('ySize').value = round3(finishedY(Number($('scale').value) || 1));
 }
 
 /** Re-tick the layer boxes a project was saved with. */
@@ -1080,7 +1256,8 @@ $('reroll').onclick = () => {
 
 /* -------------------------------------------------------------- generate */
 
-const SHAPE_FIELDS = ['wallWidth', 'wallHeight', 'regionMin', 'regionMax', 'sagitta', 'scale'];
+const SHAPE_FIELDS = ['wallWidth', 'wallHeight', 'wallOverlap',
+                      'regionMin', 'regionMax', 'sagitta', 'scale'];
 const DRAWING = /\.(dxf|svg)$/i;
 
 /** Seeded PRNG, so the same seed lays out the same starting heights. */
@@ -1126,8 +1303,8 @@ async function generate(keep = null) {
     // lines up if it produced the same number of faces.
     let mismatch = false;
     if (keep && keep.length !== data.regions.length) {
-      setStatus(`this project was saved with ${keep.length} faces but the `
-        + `drawing now makes ${data.regions.length} — starting fresh`, true);
+      setStatus(`the painting had ${keep.length} faces but the drawing now `
+        + `makes ${data.regions.length} — starting fresh`, true);
       keep = null;
       mismatch = true;      // leave the warning on screen
     }
@@ -1148,12 +1325,118 @@ async function generate(keep = null) {
 
 $('go').onclick = () => generate();
 
+/* ------------------------------------------------------------- re-fitting */
+
+// Change a shape setting and the model comes back rebuilt but still painted:
+// only the geometry is redrawn, never the heights and hues. Rerolling those is
+// what the seed and the Random buttons are for.
+let refitting = false;      // a rebuild is in flight
+let refitAgain = false;     // and a setting moved again while it ran
+let refitNote = '';         // what to say once it lands
+
+/**
+ * Rebuild from the current settings, carrying every painted stack across.
+ * Spinner arrows fire a change per click, so overlapping calls collapse into
+ * one more pass instead of racing each other into the viewer.
+ */
+async function refit(note) {
+  refitNote = note;
+  if (!picked || !model) return;      // nothing to rebuild before the first Generate
+  if (refitting) { refitAgain = true; return; }
+  refitting = true;
+  try {
+    do {
+      refitAgain = false;
+      const keep = stacks.map((s) => s.map((l) => ({ ...l })));
+      setStatus('re-fitting the model…');
+      const how = await generate(keep);
+      if (how === 'restored' && refitNote) setStatus(refitNote);
+    } while (refitAgain);
+  } finally {
+    refitting = false;
+  }
+}
+
+/** The settings that need the server to redraw the outlines. */
+const REFIT_FIELDS = {
+  wallHeight: (v) => `the frame now stands ${v} mm tall`,
+  wallOverlap: (v) => (Number(v) > 0
+    ? `every face now reaches ${v} mm into the wall around it`
+    : 'faces meet the walls exactly, with nothing to fuse them'),
+  sagitta: (v) => `curves are now flattened to within ${v} mm`,
+};
+
+for (const [id, note] of Object.entries(REFIT_FIELDS)) {
+  $(id).onchange = () => {
+    const v = Number($(id).value);
+    if (!Number.isFinite(v) || v < 0) return setStatus(`${id} needs a number`, true);
+    refit(note($(id).value));
+  };
+}
+
+// The walls count towards the height, so widening them re-fits the scale
+// rather than quietly making the model taller than the y size says.
+$('wallWidth').onchange = () => {
+  const v = Number($('wallWidth').value);
+  if (!(v > 0)) return setStatus('wall width must be greater than 0', true);
+  if (drawing) fitToYSize();
+  refit(`walls are now ${v} mm wide — ${finishedSize()}`);
+};
+
+$('ySize').onchange = async () => {
+  if (!(Number($('ySize').value) > 0)) {
+    return setStatus('y size must be greater than 0', true);
+  }
+  if (!fitToYSize()) return;
+  await refit(`${finishedSize()} at ×${$('scale').value}`);
+  // The model no longer fits the framing the old size had.
+  if (model) frameModel();
+};
+
+// Scaling by hand is still allowed; the y size box follows it rather than
+// fighting it.
+$('scale').onchange = async () => {
+  if (!(Number($('scale').value) > 0)) {
+    return setStatus('scale must be greater than 0', true);
+  }
+  showYSize();
+  await refit(`scaled ×${$('scale').value} — ${finishedSize()}`);
+  if (model) frameModel();
+};
+
+// Ticking a layer changes what is drawn at all, so it rebuilds the same way.
+function layerChanged() {
+  const names = selectedLayers();
+  refit(names ? `reading ${count(names.split(',').length, 'layer')}` : 'reading every layer');
+}
+
+/**
+ * The palette's range is the one pair the server has no part in: the face
+ * outlines are the same, only the shades over them change. Heights stay put —
+ * a face painted at 1.7 mm is still 1.7 mm, it just sits differently in the
+ * range now.
+ */
+function rangeChanged() {
+  const lo = Number($('regionMin').value), hi = Number($('regionMax').value);
+  if (!(hi >= lo)) return setStatus('tallest face must be at least the lowest', true);
+  if (!model) return;
+  model.lo = lo;
+  model.hi = hi;
+  buildPalette(lo, hi);
+  for (let i = 0; i < stacks.length; i++) rebuildRegion(i);
+  rebuildFrame();
+  setStatus(`the palette now spans ${lo}–${hi} mm, `
+    + `${count(levels(lo, hi).length, 'shade')} per hue`);
+}
+
+$('regionMin').onchange = rangeChanged;
+$('regionMax').onchange = rangeChanged;
+
 /* --------------------------------------------------------------- project */
 
 const PROJECT = /\.v2sproj$/i;
 const PROJECT_FORMAT = 'vector2stl-project';
 
-/** Everything needed to pick the work back up, drawing included. */
 /** Everything needed to pick the work back up, drawing included. */
 async function buildProject() {
   const bytes = new Uint8Array(await picked.arrayBuffer());
@@ -1166,8 +1449,11 @@ async function buildProject() {
     version: 1,
     saved: new Date().toISOString(),
     drawing: { name: picked.name, data: btoa(bin) },
+    // layerHeight and ySize never reach the server — one drives the palette,
+    // the other the scale — but the work is not the same without them, so they
+    // travel with the rest of the settings.
     settings: Object.fromEntries(
-      [...SHAPE_FIELDS, 'seed'].map((id) => [id, $(id).value]),
+      [...SHAPE_FIELDS, 'seed', 'layerHeight', 'ySize'].map((id) => [id, $(id).value]),
     ),
     layers: selectedLayers(),
     palette: [...HUES],
@@ -1246,7 +1532,9 @@ async function applyProject(project) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
-  await pickFile(new File([bytes], project.drawing.name || 'drawing.dxf'));
+  // false: keep the scale the project was saved with, whatever the y size box
+  // happens to say — reopening work must not resize it.
+  await pickFile(new File([bytes], project.drawing.name || 'drawing.dxf'), false);
   restoreLayers(project.layers ?? '');
   holes = Array.isArray(project.holes) ? project.holes : [];
   holeList();
@@ -1267,15 +1555,18 @@ const DEFAULT_CALLBACK = `// Runs once, with every face. The loop is yours, so y
 // bucket the faces however you like before deciding what to do with them.
 //
 //   faces   [{ id, area, centroid: [x, y], height, stack }]
-//   stack   [{ hue, t }] bottom layer first — hue is 0..2, t is mm thick
-//   levels  [${'${levels}'}]
-//   hues    the three hue angles, in degrees
+//   stack   [{ hue, t }] bottom layer first — hue indexes hues, t is mm thick
+//   levels  every height the palette offers, lowest first — one per layer
+//           height, so how many there are depends on the settings:
+//           [${'${levels}'}]
+//   hues    the palette's hue angles, in degrees
 //
 // Assign to face.stack to repaint. Nothing is applied if this throws.
 //
 // Example — the ten largest faces get a tall violet cap:
 //   [...faces].sort((a, b) => b.area - a.area).slice(0, 10)
-//     .forEach(f => f.stack = [{ hue: 0, t: levels[0] }, { hue: 2, t: levels[4] }]);
+//     .forEach(f => f.stack = [{ hue: 0, t: levels[0] },
+//                              { hue: 2, t: levels[levels.length - 1] }]);
 
 for (const face of faces) {
   // nothing yet
@@ -1302,9 +1593,11 @@ for (const face of faces) {
   }));
 }
 `],
-  ['Hue by rotation', `// Cycle through the palette rows in face order.
+  ['Hue by rotation', `// Cycle through the palette rows in face order, all at the middle height.
+const mid = levels[levels.length >> 1];
+
 for (const face of faces) {
-  face.stack = [{ hue: face.id % hues.length, t: levels[2] }];
+  face.stack = [{ hue: face.id % hues.length, t: mid }];
 }
 `],
   ['Colour by area', `// Rank the faces by size, then give each third of them its own hue,
@@ -1351,11 +1644,12 @@ for (const face of faces) {
 `],
   ['Checkerboard', `// Alternate two colours over a grid of squares.
 const cell = 10;   // mm
+const at = (share) => levels[Math.round(share * (levels.length - 1))];
 
 for (const face of faces) {
   const even = (Math.floor(face.centroid[0] / cell)
               + Math.floor(face.centroid[1] / cell)) % 2 === 0;
-  face.stack = [{ hue: even ? 0 : 1, t: even ? levels[1] : levels[3] }];
+  face.stack = [{ hue: even ? 0 : 1, t: even ? at(0.25) : at(0.75) }];
 }
 `],
   ['Cap the tall ones', `// Keep what is there, but crown anything already standing high.
@@ -1375,11 +1669,14 @@ for (const face of faces) {
 let callbackCode = null;      // null until first opened, then the user's text
 let editor = null;            // the Monaco instance, or null when we fell back
 
-const defaultCallback = () => DEFAULT_CALLBACK.replace(
-  '${levels}',
-  Array.from({ length: LEVELS }, (_, i) =>
-    levelHeight(i, model ? model.lo : 0.2, model ? model.hi : 2).toFixed(2)).join(', '),
-);
+/** The list is long with a fine layer height, so it is wrapped as a comment. */
+const defaultCallback = () => {
+  const shown = levels(model ? model.lo : 0.2, model ? model.hi : 2)
+    .map((h) => h.toFixed(2));
+  const lines = [];
+  for (let i = 0; i < shown.length; i += 8) lines.push(shown.slice(i, i + 8).join(', '));
+  return DEFAULT_CALLBACK.replace('${levels}', lines.join(',\n//            '));
+};
 
 /** Monaco from the CDN; resolves to null if it cannot be reached. */
 async function loadMonaco() {
@@ -1504,8 +1801,7 @@ function validStack(raw, id) {
 function runCallback() {
   if (!model) return;
   const code = editorText();
-  const levels = Array.from({ length: LEVELS }, (_, i) =>
-    levelHeight(i, model.lo, model.hi));
+  const steps = levels(model.lo, model.hi);
 
   // The script works on copies; the model is only touched once it has run
   // cleanly and every stack it produced has been checked.
@@ -1520,7 +1816,7 @@ function runCallback() {
   let next;
   try {
     const fn = new Function('faces', 'levels', 'hues', 'hueName', code);
-    fn(faces, levels, [...HUES], hueName);
+    fn(faces, [...steps], [...HUES], hueName);
     next = faces.map((face, i) => validStack(face.stack, i));
   } catch (err) {
     editorSay(String(err && err.message ? err.message : err), true);
@@ -1694,7 +1990,15 @@ async function requestBuild(url, form, button) {
   }
 }
 
-const baseName = () => picked.name.replace(DRAWING, '');
+/**
+ * What every download is called. The project name comes first: a set of STLs
+ * belongs to the work, not to whatever the drawing file happened to be called.
+ * The same characters the server allows in a saved project survive; anything
+ * else becomes a dash, and an empty name falls back to the drawing.
+ */
+const baseName = () => $('projectName').value.trim()
+  .replace(/[^A-Za-z0-9 ._-]+/g, '-').replace(/^[-.\s]+|[-.\s]+$/g, '')
+  || picked.name.replace(DRAWING, '');
 
 $('download').onclick = async () => {
   if (!model) return;

@@ -28,11 +28,21 @@ itself, so painting is instant — nothing goes back to the server until you sav
 
 ## Painting the faces
 
-The palette has **four** hue rows and five brightness levels per row. The levels
-run **brightest = lowest** to **darkest = tallest**, spread evenly across the
-*lowest face* … *tallest face* range — with the defaults that is 0.20, 0.65,
-1.10, 1.55 and 2.00 mm. A face's shade therefore always tells you how far it
-stands proud.
+The palette has **four** hue rows and one brightness level per *print layer* of
+height. The levels run **brightest = lowest** to **darkest = tallest**, so a
+face's shade always tells you how far it stands proud.
+
+How many shades a row has follows from *layer height* and the *lowest face* …
+*tallest face* range: with the defaults — 0.2 mm layers over 0.20 to 2.00 mm —
+that is ten, at 0.20, 0.40, 0.60 … 2.00 mm. Every one of them is a whole
+number of layers, so there is no height in the palette the printer cannot stop
+at. Halve the layer height and you get twice the shades. A row tops out at
+twenty; a range too tall for that steps several layers at a time instead
+(0.20 … 8.00 mm at 0.1 mm layers becomes seventeen shades 0.5 mm apart). The
+ends of the range are themselves rounded to the nearest layer.
+
+Typing into *selected face height* rounds to the nearest layer too, and says so
+when it does.
 
 Pick a swatch, then use the mouse on a face in the view:
 
@@ -42,16 +52,16 @@ Pick a swatch, then use the mouse on a face in the view:
 | **right** | stacks another layer of this colour on top |
 | **middle** | peels the top layer back off |
 
-So picking hue 1 at 0.65 mm and left-clicking a face, then picking hue 3 at
-1.10 mm and right-clicking the same face, leaves a face 1.75 mm tall made of a
-0.65 mm layer with a 1.10 mm layer on it. Each palette height is the *thickness*
+So picking hue 1 at 0.60 mm and left-clicking a face, then picking hue 3 at
+1.10 mm and right-clicking the same face, leaves a face 1.70 mm tall made of a
+0.60 mm layer with a 1.10 mm layer on it. Each palette height is the *thickness*
 of the layer it adds. A face always keeps its bottom layer — middle-clicking the
 last one does nothing; left click to recolour it instead. Selecting a swatch
 only arms the colour, so it never disturbs a stack you have already built.
 
 Each row starts with a colour picker: change it and that row — and every face
 already painted with it — takes the new hue. Only the hue is taken from your
-choice; the five brightness steps are re-derived, because brightness has to go
+choice; the brightness steps are re-derived, because brightness has to go
 on meaning height. A grey has no hue, so it is refused rather than silently
 turning the row red. Exported file names follow whatever hue a row is on.
 
@@ -73,12 +83,30 @@ areas agree too; it reports any face that had no partner rather than guessing.
 | Setting | What it does |
 | --- | --- |
 | wall width | thickness of the ribbon each curve is buffered into |
+| wall overlap | how far each face reaches into the wall around it, so the two fuse when printed |
 | wall height | how tall the walls stand |
+| layer height | what your slicer prints in; every palette shade is a whole number of these |
 | lowest / tallest face | the ends of the palette's height range |
 | curve accuracy | max chord error when flattening arcs, circles and splines |
-| scale | multiplies every coordinate — see *Input formats* below |
+| y size | how tall the finished model is in mm, walls included; the width follows the drawing's proportions |
+| scale | what the y size works out to — set it yourself to scale by hand instead |
 | seed | fixes the starting heights so a result is reproducible |
 | layers | which layers to read; shown when a drawing has more than one |
+
+Once a model is on screen every one of these applies **as soon as you leave the
+box** — tab out, press Enter, or click the spinner arrows — and the model comes
+back rebuilt but still painted. Only the geometry is redrawn: heights and hues
+are never rerolled behind your back, which is what the seed, **↻** and the
+*Random* buttons are for. Changes made while a rebuild is running collapse into
+a single extra pass rather than piling up.
+
+*Lowest* / *tallest face* need no rebuild at all — the outlines do not depend on
+them, so only the palette and the shading change. A face painted at 1.7 mm is
+still 1.7 mm; it just sits at a different point of the range.
+
+The one thing that cannot survive is a change to the *number* of faces: widen
+the walls far enough that two faces merge and there is nothing to map the old
+painting onto, so it says so and starts fresh.
 
 ## Scripting the faces
 
@@ -90,7 +118,7 @@ deciding what each one becomes.
 ```js
 faces    // [{ id, area, centroid: [x, y], height, stack }]
 stack    // [{ hue, t }] bottom layer first — hue is 0..3, t is mm thick
-levels   // the five palette heights
+levels   // every palette height, lowest first — as many as the layer height gives
 hues     // the four hue angles, in degrees
 ```
 
@@ -117,7 +145,7 @@ for instance:
 ```js
 const sorted = [...faces].sort((a, b) => b.area - a.area);
 sorted.slice(0, 10).forEach(f => f.stack = [{ hue: 0, t: levels[0] },
-                                            { hue: 2, t: levels[4] }]);
+                                            { hue: 2, t: levels[levels.length - 1] }]);
 sorted.slice(10).forEach(f => f.stack = [{ hue: 1, t: levels[1] }]);
 ```
 
@@ -132,15 +160,23 @@ the page can.
 
 ## The frame
 
-By default the frame is **not** printed in a colour of its own. It is built from
-thin layers cycling through the palette's four hues until it reaches the wall
-height — ten 0.2 mm layers for a 2 mm frame — so it prints from filaments you
-have already loaded — which is what freed the fourth palette row.
+By default the frame is **one solid in its own colour** — *use black frame* is
+on — and exports as its own `walls.stl` on its own extruder.
+
+Turn it off and the frame is built instead from thin layers cycling through the
+palette's four hues until it reaches the wall height — ten 0.2 mm layers for a
+2 mm frame — so it prints from filaments you have already loaded, no extruder of
+its own needed.
 
 | Control | |
 | --- | --- |
-| frame layer (mm) | thickness of each band; 0.2 mm is a typical print layer |
-| use black frame | back to one solid, exported as its own `walls.stl` |
+| use black frame | one solid in its own colour (the default) |
+| frame layer (mm) | with it off, the thickness of each band; 0.2 mm is a typical print layer |
+
+Worth knowing before you slice: a solid frame is a filament of its own, so all
+four hue rows plus the frame is **five** extruders — one more than a Snapmaker
+has. The 3MF export says so when it happens. Either leave a hue row unused or
+turn the black frame off, which puts the frame back on colours already loaded.
 
 The mixed frame reads as a dark edge from the side, where all four colours are
 in view. Straight down from above you see only the **topmost** layer, so that
@@ -151,6 +187,31 @@ It is not free: each band is a full extrusion of the wall outline, so a 2 mm
 frame in 0.2 mm layers is roughly ten times the frame triangles. On the gothic
 example that took the STL from 2.9 MB to 16 MB. Slicers cope; it is only worth
 knowing before you wonder where the size came from.
+
+## Wall overlap
+
+Geometrically the faces fit the frame exactly, sharing a wall with nothing to
+spare. Printed, that shared edge is a bare vertical seam: a face only 0.2 mm
+tall is a couple of layers held in place by nothing, and it drops out of the
+frame.
+
+*wall overlap* (default **0.1 mm**) grows every face outwards into the wall
+around it, so the two solids overlap and the slicer has material to fuse across
+the join. It costs a little geometry — 0.1 mm on the gothic example takes the
+STL from 57k to 71k triangles — and nothing else:
+
+- the outside of the model does not move; the growth is clipped to the
+  silhouette, so a face on the edge of the drawing cannot spill past the frame's
+  outer face
+- face ids are settled before it is applied, so changing it never renumbers
+  what you have painted — the page re-fits the faces on the spot and keeps the
+  colours
+- it must stay under **half** the wall width, or the faces either side of a
+  wall would meet inside it; the converter refuses anything more
+- a face standing as tall as the frame shows a thin rim of its own colour on
+  the frame's top surface, which is the one place the overlap is visible
+
+Set it to `0` for the exact fit.
 
 ## Mounting holes
 
@@ -194,7 +255,29 @@ digit — enough to keep a name from ever pointing outside that directory.
 saving. Paste it into that tab's console — **without reloading** — then click a
 save button; the state it sends is intercepted and written out as a project.
 
+## How big it comes out
+
+*y size* is the size control: **50 mm** by default, and the finished model is
+that tall including the walls, which stand half their width outside the
+outermost curve on each side. The width follows from the drawing's own
+proportions — 50 mm of the example works out at 22.6 × 50.0 mm.
+
+Drop a drawing in and it is fitted straight away, whatever units it was drawn
+in, so an SVG in pixels needs no conversion. *scale* shows the multiplier that
+came out of it (`×0.597459`); set that instead and *y size* follows, so the two
+boxes always agree. Widening the walls re-fits the scale rather than quietly
+making the model taller than the size you asked for.
+
+Reopening a project keeps the scale it was saved with — the y size box does not
+get to resize finished work.
+
 ## Saving the model
+
+Downloads are named after the **project name**, not the drawing file: name it
+`Rose Window v2` and you get `Rose Window v2.stl`, `Rose Window v2.3mf`,
+`Rose Window v2-1-orange.stl` and so on, whatever `.dxf` it grew out of. The
+name is suggested from the drawing when you first drop one in, and characters a
+project name cannot hold become `-`.
 
 - **Download STL** — one file containing the walls and every face, exactly as
   previewed.
@@ -256,9 +339,10 @@ left out. Only outlines matter — fills and strokes are ignored.
 **Sizing.** SVG's y axis points down and the model's points up, so the drawing
 is flipped for you. Lengths follow the SVG spec: a page declared in physical
 units (`width="100mm"`) comes out at that size, and a unitless page is read as
-CSS pixels at 96 dpi, so `100` becomes 26.46 mm. When that is not what you
-wanted, set **scale** — for a unitless page meant to be millimetres, use
-`3.7795`.
+CSS pixels at 96 dpi, so `100` becomes 26.46 mm. In the page none of that
+matters — *y size* fits the drawing to the millimetres you want whatever it
+was drawn in. On the command line, set `--scale` yourself; for a unitless page
+meant to be millimetres, use `3.7795`.
 
 ## Command line
 
@@ -285,7 +369,8 @@ colour group `g`; `--heights` is the shorthand for a stack one layer deep.
 single file; an output named `.3mf` writes a 3MF project instead.
 
 A face's id is its index in `--regions` output. That order is pinned by area
-then centroid, so the same drawing and wall width always yield the same ids —
+then centroid *before* the overlap is applied, so the same drawing and wall
+width always yield the same ids whatever the overlap is —
 which is what lets the browser hand heights back by id. Faces left out of
 `--heights` fall back to a seeded random height; a height of `0` leaves the
 face open.

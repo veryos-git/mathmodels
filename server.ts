@@ -112,6 +112,7 @@ function shapeFlags(form: FormData): string[] {
   const args = numericFlags(form, {
     wallWidth: "--wall-width",
     wallHeight: "--wall-height",
+    wallOverlap: "--wall-overlap",
     regionMin: "--region-min",
     regionMax: "--region-max",
     regionStep: "--region-step",

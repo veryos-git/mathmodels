@@ -5,6 +5,8 @@
   extruded to `wall_height`.
 - The enclosed faces/regions between the walls are extruded to a random
   height between `region_min` and `region_max` (rounded to `region_step`).
+- Each face is grown `wall_overlap` into the wall around it, so the two fuse
+  when printed instead of meeting along a bare seam.
 
 Machine-readable stats go to stdout as JSON; human notes go to stderr.
 
@@ -296,7 +298,27 @@ def polygons_of(geom):
             yield from polygons_of(g)
 
 
-def plan_regions(curves, wall_width):
+def grow_into_walls(region, overlap, silhouette):
+    """A face widened so it bites `overlap` mm into the wall around it.
+
+    Printed, a face that only meets the frame along a vertical seam has nothing
+    holding it there — a thin one can drop straight out. Letting the two solids
+    overlap gives the slicer material to fuse across the join. The growth is
+    clipped to the silhouette so a face on the edge of the drawing cannot spill
+    past the frame's outer face.
+    """
+    # Round joins, but coarse ones: at this radius a corner arc is a fraction
+    # of a millimetre, and every segment of it is triangles in the STL.
+    grown = region.buffer(overlap, join_style="round", quad_segs=2)
+    parts = [p for p in polygons_of(grown.intersection(silhouette))
+             if p.area >= MIN_REGION_AREA]
+    # A pinch in the silhouette could in principle split the grown face; the
+    # body of it is the piece that matters, and an empty result means the face
+    # is better left as it was.
+    return max(parts, key=lambda p: p.area) if parts else region
+
+
+def plan_regions(curves, wall_width, wall_overlap=0.0):
     """The wall ribbons and the faces they enclose, in a stable order."""
     lines = [LineString(c) for c in curves]
 
@@ -315,6 +337,11 @@ def plan_regions(curves, wall_width):
     # when it asks for the STL, so the order must not depend on shapely's
     # internals. Sorting by area then centroid pins it down.
     regions.sort(key=lambda p: (-round(p.area, 6), round(p.centroid.x, 6), round(p.centroid.y, 6)))
+
+    # Ids are settled above, on the faces as drawn, so turning the overlap up
+    # or down never renumbers what the browser has already painted.
+    if wall_overlap > 0:
+        regions = [grow_into_walls(p, wall_overlap, silhouette) for p in regions]
 
     wall_polys = list(polygons_of(walls))
     if not wall_polys:
@@ -749,6 +776,9 @@ def main():
                     help="comma-separated layer names to use (default: all)")
     ap.add_argument("--wall-width", type=float, default=1.0)
     ap.add_argument("--wall-height", type=float, default=2.0)
+    ap.add_argument("--wall-overlap", type=float, default=0.1,
+                    help="how far each face reaches into the wall around it, so "
+                         "the two fuse when printed (0 for an exact fit)")
     ap.add_argument("--region-min", type=float, default=0.2)
     ap.add_argument("--region-max", type=float, default=2.0)
     ap.add_argument("--region-step", type=float, default=0.1)
@@ -771,6 +801,11 @@ def main():
     positive("wall width", args.wall_width)
     positive("wall height", args.wall_height)
     positive("region step", args.region_step)
+    if args.wall_overlap < 0:
+        raise ConvertError("wall overlap must be 0 or greater")
+    if args.wall_overlap >= args.wall_width / 2.0:
+        raise ConvertError("wall overlap must be less than half the wall width, "
+                           "or the faces either side of a wall meet inside it")
     if args.region_min < 0:
         raise ConvertError("region min must be 0 or greater")
     if args.region_max < args.region_min:
@@ -792,7 +827,7 @@ def main():
     cutter = hole_cutter(holes)
 
     curves, used, skipped = read_curves(args.input, args.sagitta, layers, args.scale)
-    wall_polys, region_polys = plan_regions(curves, args.wall_width)
+    wall_polys, region_polys = plan_regions(curves, args.wall_width, args.wall_overlap)
     summary = {
         "curves": len(curves),
         "layers": [{"name": n, "entities": c} for n, c in sorted(used.items())],
