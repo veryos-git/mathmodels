@@ -14,10 +14,20 @@ Usage:
     dxf2stl.py input.dxf output.stl [--wall-width 1.0] [--wall-height 2.0]
                 [--region-min 0.2] [--region-max 2.0] [--region-step 0.1]
                 [--seed N] [--sagitta 0.02] [--layers A,B,C]
+                [--profile profile.dxf] [--also layer2.json]
     dxf2stl.py input.dxf --inspect
+
+--profile takes a drawing holding one closed cross-section and sweeps it along
+every curve to form the frame, replacing the flat --wall-width ribbons.
+
+--also stacks another drawing on top: its JSON spec holds the drawing's "file"
+plus its own "scale", "layers", "stacks"/"heights" and "holes". Each extra
+drawing is centred on the base drawing and sits on the frame top of the one
+below; colour groups are shared, so split and 3MF exports merge the layers.
 """
 
 import argparse
+import base64
 import json
 import math
 import os
@@ -29,11 +39,14 @@ import zipfile
 from collections import defaultdict
 
 import ezdxf
+import numpy as np
 import svgelements
 import trimesh
 from ezdxf.path import make_path
-from shapely.geometry import LineString, Point, Polygon
-from shapely.ops import unary_union
+from shapely.affinity import scale as aff_scale
+from shapely.affinity import translate
+from shapely.geometry import LinearRing, LineString, Point, Polygon
+from shapely.ops import polygonize, unary_union
 
 # Entity types make_path() can turn into a polyline. Anything else (TEXT,
 # HATCH, SOLID, ...) carries no usable outline and is reported as skipped.
@@ -349,6 +362,253 @@ def plan_regions(curves, wall_width, wall_overlap=0.0):
     return wall_polys, regions
 
 
+# ---------------------------------------------------------------- profile sweep
+#
+# Advanced mode: instead of buffering every curve into a flat-topped ribbon,
+# a closed cross-section (its own DXF/SVG drawing) is swept along the curves.
+# The profile drawing's x axis runs across the path, its y axis is the height.
+
+MITER_LIMIT = 2.0
+
+def load_profile(path, sagitta):
+    """The closed cross-section to sweep, anchored centre-x / bottom edge.
+
+    The profile usually arrives as loose entities rather than one polyline,
+    so the outline is rebuilt by polygonizing. A snap-round comes first:
+    CAD exports carry ~1e-14 endpoint jitter that keeps polygonize from
+    closing rings. Interior construction lines dissolve in the union.
+    """
+    curves, _, _ = read_curves(path, sagitta)
+    snapped = [[(round(x, 6), round(y, 6)) for x, y in c] for c in curves]
+    merged = unary_union(list(polygonize(unary_union([LineString(c) for c in snapped]))))
+    polys = list(polygons_of(merged))
+    if not polys:
+        raise ConvertError("the profile drawing has no closed outline — "
+                           "the sweep profile must be one closed shape")
+    profile = max(polys, key=lambda p: p.area)
+    minx, miny, maxx, _ = profile.bounds
+    return translate(profile, xoff=-(minx + maxx) / 2.0, yoff=-miny)
+
+
+def chain_curves(curves):
+    """Curves joined end-to-end into the longest possible polylines.
+
+    Entities rarely arrive as one polyline per visual stroke, and a swept
+    joint only comes out right where the sweep runs straight through it.
+    Where several segments meet, the straightest continuation is the real
+    path — pairing them up arbitrarily turns the chain back on itself and
+    the sweep folds into garbage there.
+    """
+    segs = []
+    seen = set()
+    for c in curves:
+        pts = [(round(x, 6), round(y, 6)) for x, y in c]
+        if len(pts) < 2:
+            continue
+        # Patterns and mirrors often draw the same stroke twice; sweeping a
+        # duplicate only sends the chain straight back where it came from.
+        key = tuple(pts)
+        rkey = tuple(pts[::-1])
+        if key in seen or rkey in seen:
+            continue
+        seen.add(key)
+        segs.append(pts)
+
+    def unit(a, b):
+        d = (b[0] - a[0], b[1] - a[1])
+        n = math.hypot(*d)
+        return (d[0] / n, d[1] / n) if n else (0.0, 0.0)
+
+    def straightest(anchor, outward):
+        """The unused segment at `anchor` most in line with `outward`."""
+        best = None
+        for j, other in enumerate(segs):
+            if used[j]:
+                continue
+            if other[0] == anchor:
+                cand, forward = unit(anchor, other[1]), True
+            elif other[-1] == anchor:
+                cand, forward = unit(anchor, other[-2]), False
+            else:
+                continue
+            score = outward[0] * cand[0] + outward[1] * cand[1]
+            if best is None or score > best[0]:
+                best = (score, j, forward)
+        return best[1:] if best else None
+
+    chains = []
+    used = [False] * len(segs)
+    for i, seg in enumerate(segs):
+        if used[i]:
+            continue
+        used[i] = True
+        chain = list(seg)
+        while chain[0] != chain[-1]:
+            grown = False
+            # tail, then head; each takes the straightest continuation on offer
+            nxt = straightest(chain[-1], unit(chain[-2], chain[-1]))
+            if nxt is not None:
+                j, forward = nxt
+                chain.extend(segs[j][1:] if forward else segs[j][-2::-1])
+                used[j] = True
+                grown = True
+            if chain[0] != chain[-1]:
+                nxt = straightest(chain[0], unit(chain[1], chain[0]))
+                if nxt is not None:
+                    j, forward = nxt
+                    chain = (segs[j][:-1] if not forward else segs[j][:0:-1]) + chain
+                    used[j] = True
+                    grown = True
+            if not grown:
+                break
+        chains.append(chain)
+    return chains
+
+
+def sweep_profile(profile, chains):
+    """The frame as one mesh: the profile swept along every path.
+
+    The path lies in the drawing plane, so the moving frame is simple — the
+    profile's x runs along the path's in-plane normal, its y is z. Planar
+    paths mean no twist. Corners are mitred: the ring sits on the angle
+    bisector, pushed out by 1/cos(half the turn), exactly like a mitered
+    stroke join — so the apex of a pointed arch comes to a real point.
+    Past MITER_LIMIT the mitre is clipped to a bevel, or a cusp would spike.
+    """
+    ring = list(profile.exterior.coords)[:-1]
+    cap_v, cap_f = trimesh.creation.triangulate_polygon(profile)
+    meshes = []
+    for chain in chains:
+        closed = chain[0] == chain[-1]
+        pts = chain[:-1] if closed else chain
+        n = len(pts)
+        if n < 2:
+            continue
+        # A closed loop swept backwards mirrors an asymmetric profile.
+        if closed and not LinearRing(pts + [pts[0]]).is_ccw:
+            pts = pts[::-1]
+        P = np.array(pts)
+
+        # Per-segment left normals first; the vertex frames derive from them.
+        nseg = n if closed else n - 1
+        D = np.array([P[(i + 1) % n] - P[i] for i in range(nseg)])
+        U = D / np.maximum(np.hypot(D[:, 0], D[:, 1])[:, None], 1e-12)
+        SN = np.stack([-U[:, 1], U[:, 0]], axis=1)
+
+        N = np.zeros((n, 2))
+        for i in range(n):
+            if not closed and i == 0:
+                N[i] = SN[0]
+                continue
+            if not closed and i == n - 1:
+                N[i] = SN[-1]
+                continue
+            s = SN[i - 1] + SN[i % nseg]
+            L = np.hypot(*s)
+            if L < 1e-6:
+                # A hairpin doubles back on itself; hold the incoming normal
+                # instead of averaging two opposites into nothing.
+                N[i] = SN[i - 1]
+                continue
+            N[i] = s / L * min(2.0 / L, MITER_LIMIT)
+
+        k = len(ring)
+        verts = np.array([
+            [(P[i, 0] + px * N[i, 0], P[i, 1] + px * N[i, 1], py) for px, py in ring]
+            for i in range(n)
+        ]).reshape(n * k, 3)
+        faces = []
+        for i in range(n if closed else n - 1):
+            a, b = i, (i + 1) % n
+            for j in range(k):
+                j2 = (j + 1) % k
+                faces.append((a * k + j, b * k + j, b * k + j2))
+                faces.append((a * k + j, b * k + j2, a * k + j2))
+        meshes.append(trimesh.Trimesh(vertices=verts, faces=np.array(faces),
+                                      process=False))
+
+        if not closed:
+            for ring_i, flip in ((0, True), (n - 1, False)):
+                v = np.zeros((len(cap_v), 3))
+                v[:, 0] = P[ring_i, 0] + cap_v[:, 0] * N[ring_i, 0]
+                v[:, 1] = P[ring_i, 1] + cap_v[:, 0] * N[ring_i, 1]
+                v[:, 2] = cap_v[:, 1]
+                cap = trimesh.Trimesh(vertices=v, faces=np.array(cap_f),
+                                      process=False)
+                if flip:
+                    cap.invert()
+                meshes.append(cap)
+    return trimesh.util.concatenate(meshes)
+
+
+def polys_centre(polys):
+    """The centre of the bounding box holding every polygon."""
+    minx = min(p.bounds[0] for p in polys)
+    miny = min(p.bounds[1] for p in polys)
+    maxx = max(p.bounds[2] for p in polys)
+    maxy = max(p.bounds[3] for p in polys)
+    return ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+
+
+def plan_drawing(path, scale, layers_csv, args):
+    """One drawing read and planned into walls and faces.
+
+    This is the whole per-drawing pipeline: curves in, profile sweep if there
+    is one, then the wall ribbons and the regions they enclose. Stacking
+    several drawings means calling this once per drawing and offsetting the
+    results.
+    """
+    layers = None
+    if layers_csv:
+        layers = {name for name in layers_csv.split(",") if name}
+    curves, used, skipped = read_curves(path, args.sagitta, layers, scale)
+
+    wall_width, wall_height = args.wall_width, args.wall_height
+    frame_mesh = None
+    if args.profile:
+        profile = load_profile(args.profile, args.sagitta)
+        if args.profile_scale != 1.0:
+            if args.profile_scale <= 0:
+                raise ConvertError("profile scale must be greater than 0")
+            profile = aff_scale(profile, xfact=args.profile_scale, yfact=1.0,
+                                origin=(0.0, 0.0))
+        minx, _, maxx, maxy = profile.bounds
+        # The profile sets the frame's dimensions: its x span is the wall
+        # width the faces are planned against, its top is the wall height.
+        wall_width, wall_height = maxx - minx, maxy
+        frame_mesh = sweep_profile(profile, chain_curves(curves))
+
+    wall_polys, region_polys = plan_regions(curves, wall_width, args.wall_overlap)
+    summary = {
+        "curves": len(curves),
+        "layers": [{"name": n, "entities": c} for n, c in sorted(used.items())],
+        "skipped": [{"type": t, "count": c} for t, c in sorted(skipped.items())],
+    }
+    return {
+        "wall_polys": wall_polys,
+        "region_polys": region_polys,
+        "wall_height": wall_height,
+        "frame_mesh": frame_mesh,
+        "summary": summary,
+    }
+
+
+def shift_holes(holes, dx, dy):
+    """Mounting holes moved by a drawing layer's centring offset.
+
+    Anything malformed is passed through untouched so hole_cutter can report
+    it with its own message.
+    """
+    shifted = []
+    for hole in holes:
+        try:
+            shifted.append({**hole, "x": float(hole["x"]) + dx,
+                            "y": float(hole["y"]) + dy})
+        except (TypeError, ValueError, KeyError):
+            shifted.append(hole)
+    return shifted
+
+
 def hole_cutter(holes):
     """The union of the mounting holes, or None when there are none."""
     discs = []
@@ -411,10 +671,10 @@ def region_stacks(count, region_min, region_max, region_step, rng,
     return stacks
 
 
-def region_solids(region_polys, stacks, cutter):
+def region_solids(region_polys, stacks, cutter, z_base=0.0):
     """Every layer of every face as a solid, paired with its colour group."""
     for poly, stack in zip(region_polys, stacks):
-        z = 0.0
+        z = z_base
         for layer in stack:
             thickness = layer["t"]
             if thickness <= 0:      # a layer set to zero is left out on purpose
@@ -426,15 +686,24 @@ def region_solids(region_polys, stacks, cutter):
             z += thickness
 
 
-def wall_solids(wall_polys, wall_height, cutter, wall_stack=None):
+def wall_solids(wall_polys, wall_height, cutter, wall_stack=None, frame_mesh=None,
+                z_base=0.0):
     """The frame, either as one solid or as a stack of coloured layers.
 
     Printing the frame from thin layers of the palette's own filaments saves
     dedicating a whole colour to it; the mix reads as a dark edge.
+
+    A swept frame (profile mode) is a single ready-made mesh instead — it is
+    neither prismatic nor sliceable into palette bands.
     """
+    if frame_mesh is not None:
+        mesh = frame_mesh.copy()
+        mesh.apply_translation((0.0, 0.0, z_base))
+        yield mesh, None
+        return
     layers = wall_stack or [{"t": wall_height, "g": None}]
     for wall in wall_polys:
-        z = 0.0
+        z = z_base
         for layer in layers:
             thickness = layer["t"]
             if thickness <= 0:
@@ -446,15 +715,22 @@ def wall_solids(wall_polys, wall_height, cutter, wall_stack=None):
             z += thickness
 
 
-def build_meshes(wall_polys, region_polys, wall_height, stacks, cutter=None,
-                 wall_stack=None):
-    meshes = [solid for solid, _ in wall_solids(wall_polys, wall_height, cutter, wall_stack)]
-    n_walls = len(meshes)
-    n_layers = 0
-    for solid, _ in region_solids(region_polys, stacks, cutter):
-        meshes.append(solid)
-        n_layers += 1
-    n_regions = sum(1 for s in stacks if any(layer["t"] > 0 for layer in s))
+def build_meshes(layers, wall_stack=None):
+    """Every solid of every drawing layer, stacked by each layer's z_base."""
+    meshes = []
+    n_walls, n_regions, n_layers = 0, 0, 0
+    for drawing in layers:
+        for solid, _ in wall_solids(drawing["wall_polys"], drawing["wall_height"],
+                                    drawing["cutter"], wall_stack,
+                                    drawing["frame_mesh"], drawing["z_base"]):
+            meshes.append(solid)
+            n_walls += 1
+        for solid, _ in region_solids(drawing["region_polys"], drawing["stacks"],
+                                      drawing["cutter"], drawing["z_base"]):
+            meshes.append(solid)
+            n_layers += 1
+        n_regions += sum(1 for s in drawing["stacks"]
+                         if any(layer["t"] > 0 for layer in s))
     return meshes, n_walls, n_regions, n_layers
 
 
@@ -464,32 +740,36 @@ def safe_name(name):
     return cleaned or "group"
 
 
-def colour_buckets(wall_polys, region_polys, wall_height, stacks, cutter, wall_stack):
+def colour_buckets(layers, wall_stack):
     """Every solid, gathered under the colour group that prints it.
 
     A layered frame has its slabs filed under their own colours; a plain frame
-    keeps a group of its own.
+    keeps a group of its own. Group labels are shared across drawing layers,
+    so stacked drawings merge into the same buckets.
     """
     buckets = defaultdict(list)
-    n_walls = 0
-    for solid, group in wall_solids(wall_polys, wall_height, cutter, wall_stack):
-        buckets[group or "walls"].append(solid)
-        n_walls += 1
-    n_regions = 0
-    for solid, group in region_solids(region_polys, stacks, cutter):
-        buckets[group or "ungrouped"].append(solid)
-        n_regions += 1
+    n_walls, n_regions = 0, 0
+    for drawing in layers:
+        for solid, group in wall_solids(drawing["wall_polys"],
+                                        drawing["wall_height"], drawing["cutter"],
+                                        wall_stack, drawing["frame_mesh"],
+                                        drawing["z_base"]):
+            buckets[group or "walls"].append(solid)
+            n_walls += 1
+        for solid, group in region_solids(drawing["region_polys"],
+                                          drawing["stacks"], drawing["cutter"],
+                                          drawing["z_base"]):
+            buckets[group or "ungrouped"].append(solid)
+            n_regions += 1
 
     merged = [(label, trimesh.util.concatenate(buckets[label]), len(buckets[label]))
               for label in sorted(buckets)]
     return merged, n_walls, n_regions
 
 
-def write_group_files(outdir, wall_polys, region_polys, wall_height, stacks,
-                      cutter=None, wall_stack=None):
+def write_group_files(outdir, layers, wall_stack=None):
     """One STL per colour group, written side by side."""
-    merged, n_walls, n_regions = colour_buckets(
-        wall_polys, region_polys, wall_height, stacks, cutter, wall_stack)
+    merged, n_walls, n_regions = colour_buckets(layers, wall_stack)
     os.makedirs(outdir, exist_ok=True)
     written = []
     for label, mesh, count in merged:
@@ -500,11 +780,9 @@ def write_group_files(outdir, wall_polys, region_polys, wall_height, stacks,
     return written, n_walls, n_regions
 
 
-def write_project_3mf(path, wall_polys, region_polys, wall_height, stacks,
-                      cutter=None, wall_stack=None):
+def write_project_3mf(path, layers, wall_stack=None):
     """Every colour as its own part of one 3MF, with an extruder each."""
-    merged, n_walls, n_regions = colour_buckets(
-        wall_polys, region_polys, wall_height, stacks, cutter, wall_stack)
+    merged, n_walls, n_regions = colour_buckets(layers, wall_stack)
     # Group labels start with the palette row ("2-lime"), so that number is the
     # extruder; anything unnumbered lands on the next free slot.
     used = {int(m[0].split("-", 1)[0]) for m in merged if m[0].split("-", 1)[0].isdigit()}
@@ -714,15 +992,8 @@ def polygon_json(poly):
     }
 
 
-def load_map(path, what):
+def as_map(raw, what):
     """A JSON object (or array) of per-region values, keyed by region id."""
-    if not path:
-        return {}
-    try:
-        with open(path) as fp:
-            raw = json.load(fp)
-    except (OSError, ValueError) as exc:
-        raise ConvertError(f"could not read the {what} assignments: {exc}") from None
     if isinstance(raw, list):
         raw = dict(enumerate(raw))
     if not isinstance(raw, dict):
@@ -734,6 +1005,40 @@ def load_map(path, what):
         except (TypeError, ValueError):
             raise ConvertError(f"{key!r} is not a region id") from None
     return out
+
+
+def load_map(path, what):
+    """Per-region assignments from a JSON file, keyed by region id."""
+    if not path:
+        return {}
+    try:
+        with open(path) as fp:
+            raw = json.load(fp)
+    except (OSError, ValueError) as exc:
+        raise ConvertError(f"could not read the {what} assignments: {exc}") from None
+    return as_map(raw, what)
+
+
+def load_layer_spec(path):
+    """An --also spec: one extra drawing plus its per-layer assignments."""
+    try:
+        with open(path) as fp:
+            spec = json.load(fp)
+    except (OSError, ValueError) as exc:
+        raise ConvertError(f"could not read the layer spec: {exc}") from None
+    if not isinstance(spec, dict) or not spec.get("file"):
+        raise ConvertError('a layer spec needs at least a "file"')
+    drawing = str(spec["file"])
+    if not os.path.isabs(drawing):
+        # Relative paths resolve against the spec, not the caller's cwd.
+        drawing = os.path.join(os.path.dirname(os.path.abspath(path)), drawing)
+    spec["file"] = drawing
+    scale = spec.get("scale", 1.0)
+    if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale <= 0:
+        raise ConvertError("a layer spec's scale must be a number greater than 0")
+    if not isinstance(spec.get("holes", []), list):
+        raise ConvertError("a layer spec's holes must be a JSON array")
+    return spec
 
 
 def as_float(key, value):
@@ -786,6 +1091,20 @@ def main():
     ap.add_argument("--sagitta", type=float, default=0.02)
     ap.add_argument("--scale", type=float, default=1.0,
                     help="multiply every coordinate, for drawings in the wrong units")
+    ap.add_argument("--profile", default=None, metavar="FILE",
+                    help="DXF/SVG holding one closed cross-section; it is swept "
+                         "along every curve to form the frame, instead of "
+                         "extruding flat ribbons (its width/height replace "
+                         "--wall-width/--wall-height)")
+    ap.add_argument("--profile-scale", type=float, default=1.0,
+                    help="stretch the profile's width (its x axis); the height "
+                         "stays as drawn")
+    ap.add_argument("--also", action="append", default=[], metavar="FILE",
+                    help="JSON spec for another drawing stacked on top of the "
+                         "previous ones, centred on the base drawing: "
+                         '{"file": "...", "scale": 1.0, "layers": "A,B", '
+                         '"stacks": {...}, "heights": {...}, "holes": [...]}; '
+                         "repeatable, in stacking order")
     args = ap.parse_args()
 
     positive("sagitta", args.sagitta)
@@ -811,10 +1130,6 @@ def main():
     if args.region_max < args.region_min:
         raise ConvertError("region max must be greater than or equal to region min")
 
-    layers = None
-    if args.layers:
-        layers = {name for name in args.layers.split(",") if name}
-
     holes = []
     if args.holes:
         try:
@@ -824,30 +1139,74 @@ def main():
             raise ConvertError(f"could not read the holes: {exc}") from None
         if not isinstance(holes, list):
             raise ConvertError("holes must be a JSON array")
-    cutter = hole_cutter(holes)
 
-    curves, used, skipped = read_curves(args.input, args.sagitta, layers, args.scale)
-    wall_polys, region_polys = plan_regions(curves, args.wall_width, args.wall_overlap)
-    summary = {
-        "curves": len(curves),
-        "layers": [{"name": n, "entities": c} for n, c in sorted(used.items())],
-        "skipped": [{"type": t, "count": c} for t, c in sorted(skipped.items())],
-    }
+    specs = [load_layer_spec(p) for p in args.also]
+    if args.profile:
+        if holes or any(s.get("holes") for s in specs):
+            raise ConvertError("mounting holes cannot be cut through a swept "
+                               "frame — clear the holes or the profile")
+        if args.wall_stack:
+            raise ConvertError("a layered frame needs flat walls — "
+                               "clear the frame layers or the profile")
 
-    if args.regions:
+    # Every drawing is planned on its own first; stacking shifts them after.
+    layers = [dict(plan_drawing(args.input, args.scale, args.layers, args),
+                   holes=holes, spec=None)]
+    for spec in specs:
+        layers.append(dict(
+            plan_drawing(spec["file"], spec.get("scale", 1.0),
+                         spec.get("layers"), args),
+            holes=spec.get("holes", []), spec=spec))
+
+    # Added drawings are centred on the base drawing's centre; the base keeps
+    # its own coordinates, so single-drawing output is exactly as before.
+    cx0, cy0 = polys_centre(layers[0]["wall_polys"])
+    for drawing in layers[1:]:
+        cx, cy = polys_centre(drawing["wall_polys"])
+        dx, dy = cx0 - cx, cy0 - cy
+        drawing["wall_polys"] = [translate(p, dx, dy) for p in drawing["wall_polys"]]
+        drawing["region_polys"] = [translate(p, dx, dy)
+                                   for p in drawing["region_polys"]]
+        if drawing["frame_mesh"] is not None:
+            drawing["frame_mesh"].apply_translation((dx, dy, 0.0))
+        drawing["holes"] = shift_holes(drawing["holes"], dx, dy)
+        drawing["offset"] = (dx, dy)
+    layers[0]["offset"] = (0.0, 0.0)
+
+    # Each drawing sits on the frame top of the one below it.
+    z = 0.0
+    for drawing in layers:
+        drawing["z_base"] = z
+        drawing["cutter"] = hole_cutter(drawing["holes"])
+        z += drawing["wall_height"]
+
+    def layer_payload(drawing):
         # area and centroid describe the whole face, not the cut pieces, so
         # they stay put as holes are added and removed.
-        json.dump({
-            **summary,
-            "wallHeight": args.wall_height,
-            "walls": [polygon_json(p) for w in wall_polys for p in cut(w, cutter)],
+        payload = {
+            "wallHeight": drawing["wall_height"],
+            "zBase": round(drawing["z_base"], 6),
+            "offset": [round(v, 6) for v in drawing["offset"]],
+            "walls": [polygon_json(p)
+                      for w in drawing["wall_polys"]
+                      for p in cut(w, drawing["cutter"])],
             "regions": [
                 {"id": i, "area": round(p.area, 4),
                  "centroid": [round(p.centroid.x, 4), round(p.centroid.y, 4)],
-                 "parts": [polygon_json(q) for q in cut(p, cutter)]}
-                for i, p in enumerate(region_polys)
+                 "parts": [polygon_json(q) for q in cut(p, drawing["cutter"])]}
+                for i, p in enumerate(drawing["region_polys"])
             ],
-        }, sys.stdout)
+        }
+        if drawing["frame_mesh"] is not None:
+            # The swept frame is no longer a prism the browser can extrude,
+            # so it travels as a ready-made binary STL.
+            payload["wallMesh"] = base64.b64encode(
+                drawing["frame_mesh"].export(file_type="stl")).decode("ascii")
+        return payload
+
+    if args.regions:
+        json.dump({**layers[0]["summary"], **layer_payload(layers[0]),
+                   "drawings": [layer_payload(d) for d in layers]}, sys.stdout)
         return
 
     assigned = {k: as_float(k, v) for k, v in load_map(args.heights, "height").items()}
@@ -875,45 +1234,57 @@ def main():
             wall_stack.append({"t": round(thickness, 6),
                                "g": None if group is None else str(group)})
 
+    # One rng consumed drawing by drawing, so a single drawing's random heights
+    # are exactly what they were before stacking existed.
     rng = random.Random(args.seed)
-    stacks = region_stacks(
-        len(region_polys), args.region_min, args.region_max, args.region_step, rng,
-        assigned, groups, explicit,
-    )
+    n_assigned = len(assigned) + len(explicit)
+    for drawing in layers:
+        spec = drawing["spec"]
+        if spec is None:
+            d_assigned, d_groups, d_explicit = assigned, groups, explicit
+        else:
+            d_assigned = {k: as_float(k, v) for k, v in
+                          as_map(spec.get("heights", {}), "height").items()}
+            d_groups = {}
+            d_explicit = as_map(spec.get("stacks", {}), "stack")
+            n_assigned += len(d_assigned) + len(d_explicit)
+        drawing["stacks"] = region_stacks(
+            len(drawing["region_polys"]), args.region_min, args.region_max,
+            args.region_step, rng, d_assigned, d_groups, d_explicit,
+        )
+
+    n_holes = sum(len(drawing["holes"]) for drawing in layers)
 
     if args.output and args.output.lower().endswith(".3mf"):
-        files, n_walls, n_regions = write_project_3mf(
-            args.output, wall_polys, region_polys, args.wall_height, stacks, cutter,
-            wall_stack,
-        )
-        json.dump({**summary, "files": files, "holes": len(holes),
-                   "walls": n_walls, "regions": n_regions}, sys.stdout)
+        files, n_walls, n_regions = write_project_3mf(args.output, layers,
+                                                      wall_stack)
+        json.dump({**layers[0]["summary"], "files": files, "holes": n_holes,
+                   "walls": n_walls, "regions": n_regions,
+                   "drawings": len(layers)}, sys.stdout)
         return
 
     if args.split or args.groups:
-        files, n_walls, n_regions = write_group_files(
-            args.output, wall_polys, region_polys, args.wall_height, stacks, cutter,
-            wall_stack,
-        )
-        json.dump({**summary, "files": files, "holes": len(holes),
-                   "walls": n_walls, "regions": n_regions}, sys.stdout)
+        files, n_walls, n_regions = write_group_files(args.output, layers,
+                                                      wall_stack)
+        json.dump({**layers[0]["summary"], "files": files, "holes": n_holes,
+                   "walls": n_walls, "regions": n_regions,
+                   "drawings": len(layers)}, sys.stdout)
         return
 
-    meshes, n_walls, n_regions, n_layers = build_meshes(
-        wall_polys, region_polys, args.wall_height, stacks, cutter, wall_stack,
-    )
+    meshes, n_walls, n_regions, n_layers = build_meshes(layers, wall_stack)
 
     solid = trimesh.util.concatenate(meshes)
     solid.export(args.output)
 
     lo, hi = solid.bounds
     json.dump({
-        **summary,
+        **layers[0]["summary"],
         "walls": n_walls,
         "regions": n_regions,
         "slabs": n_layers,        # "layers" already names the drawing's layers
-        "assigned": len(assigned) + len(explicit),
-        "holes": len(holes),
+        "assigned": n_assigned,
+        "holes": n_holes,
+        "drawings": len(layers),
         "triangles": int(len(solid.faces)),
         "size": [round(float(hi[i] - lo[i]), 3) for i in range(3)],
     }, sys.stdout)

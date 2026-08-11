@@ -28,18 +28,22 @@ itself, so painting is instant — nothing goes back to the server until you sav
 
 ## Painting the faces
 
-The palette has **four** hue rows and one brightness level per *print layer* of
-height. The levels run **brightest = lowest** to **darkest = tallest**, so a
-face's shade always tells you how far it stands proud.
+The palette has **three** base hue rows and one brightness level per *print
+layer* of height. The levels run **brightest = lowest** to **darkest =
+tallest**, so a face's shade always tells you how far it stands proud. Under
+them sit the **mixes** — see below.
 
 How many shades a row has follows from *layer height* and the *lowest face* …
-*tallest face* range: with the defaults — 0.2 mm layers over 0.20 to 2.00 mm —
-that is ten, at 0.20, 0.40, 0.60 … 2.00 mm. Every one of them is a whole
+*tallest face* range: with the defaults — 0.1 mm layers over 0.20 to 1.00 mm —
+that is nine, at 0.20, 0.30, 0.40 … 1.00 mm. Every one of them is a whole
 number of layers, so there is no height in the palette the printer cannot stop
-at. Halve the layer height and you get twice the shades. A row tops out at
-twenty; a range too tall for that steps several layers at a time instead
-(0.20 … 8.00 mm at 0.1 mm layers becomes seventeen shades 0.5 mm apart). The
-ends of the range are themselves rounded to the nearest layer.
+at. The range starts at 0.20 rather than at one layer because a single 0.1 mm
+layer is too thin to print as a face of its own.
+
+Halve the layer height and you get twice the shades. A row tops out at twenty;
+a range too tall for that steps several layers at a time instead (0.20 … 8.00 mm
+at 0.1 mm layers becomes seventeen shades 0.5 mm apart). The ends of the range
+are themselves rounded to the nearest layer.
 
 Typing into *selected face height* rounds to the nearest layer too, and says so
 when it does.
@@ -48,28 +52,48 @@ Pick a swatch, then use the mouse on a face in the view:
 
 | Button | What it does |
 | --- | --- |
-| **left** | that face becomes just this colour and height |
-| **right** | stacks another layer of this colour on top |
+| **left** | that face becomes just this swatch |
+| **right** | stacks the swatch on top of what is there |
 | **middle** | peels the top layer back off |
 
-So picking hue 1 at 0.60 mm and left-clicking a face, then picking hue 3 at
-1.10 mm and right-clicking the same face, leaves a face 1.70 mm tall made of a
-0.60 mm layer with a 1.10 mm layer on it. Each palette height is the *thickness*
+So picking hue 1 at 0.30 mm and left-clicking a face, then picking hue 3 at
+0.60 mm and right-clicking the same face, leaves a face 0.90 mm tall made of a
+0.30 mm layer with a 0.60 mm layer on it. Each palette height is the *thickness*
 of the layer it adds. A face always keeps its bottom layer — middle-clicking the
 last one does nothing; left click to recolour it instead. Selecting a swatch
 only arms the colour, so it never disturbs a stack you have already built.
 
-Each row starts with a colour picker: change it and that row — and every face
-already painted with it — takes the new hue. Only the hue is taken from your
-choice; the brightness steps are re-derived, because brightness has to go
+Each base row starts with a colour picker: change it and that row — and every
+face already painted with it — takes the new hue. Only the hue is taken from
+your choice; the brightness steps are re-derived, because brightness has to go
 on meaning height. A grey has no hue, so it is refused rather than silently
 turning the row red. Exported file names follow whatever hue a row is on.
+
+### Mixes
+
+Under the base rows are the three pairings the three hues allow — **1 under 2**,
+**2 under 3**, **3 under 1** — so each hue is the lower layer of one mix and the
+upper layer of another. A mix swatch is split in two the same way: the lower
+hue across the bottom, the upper one on top, which is the one you see looking
+straight down at the print.
+
+Painting with a mix lays down **two** layers of equal thickness rather than one,
+so it has half the steps a base row does: each half has to be a printable height
+in its own right *and* the two together have to fit under the tallest face. With
+the defaults that is four mixes — 0.40, 0.60, 0.80 and 1.00 mm total, the
+figures on the scale under them — against nine plain shades. Set a tallest face
+too low for two layers and the mixes step aside with a note saying so.
+
+Nothing else treats a mix as special: it is an ordinary two-layer stack, so
+right-clicking one stacks both its layers, middle-click peels them off one at a
+time, and each layer exports to its own colour's file. The mixes need no
+filament of their own.
 
 | Control | What it does |
 | --- | --- |
 | selected face height | exact thickness for the top layer of the selected face |
 | **Fill all** | gives every face the selected swatch |
-| **Random all** | random hue and height for every face |
+| **Random all** | random base hue and height for every face |
 | **Random heights** | new heights for every face, leaving the colour scheme alone |
 | **Mirror ⇄** | copies the left half's colours onto the right, reflected through the middle |
 | **Top view** | locks the camera straight down and stops orbiting, so clicks can't spin the model |
@@ -77,6 +101,36 @@ turning the row red. Exported file names follow whatever hue a row is on.
 
 Mirroring pairs faces by reflected centroid and only accepts a pair when the
 areas agree too; it reports any face that had no partner rather than guessing.
+
+## Stacked drawings
+
+One drawing is the usual case, but you can stack several: **add drawing…**
+under *drawings* picks another DXF or SVG and puts it on its own **layer** —
+a complete model of its own, frame and faces, sitting **on top of the frame
+of the layer below** and centred on it horizontally. Dropping a second file
+on the page asks whether to add it as a layer or start over.
+
+Every layer shares the one palette: three hues, one brightness scale, the
+same mixes. Painting is per face wherever it sits — click a face on any layer
+and it takes the swatch; **Fill all** and **Random all** paint every layer at
+once. The checkbox on each layer's row hides it, which is how you reach a
+lower layer's faces once a taller stack is in the way.
+
+Because the colours are shared, exporting never grows: three hues and a solid
+frame still come out as three colour STLs plus `walls.stl`, each file holding
+its colour's pieces from **every** layer, already aligned on top of each
+other. The 3MF likewise keeps its extruder count.
+
+Each layer keeps its own DXF-sublayer selection, its own mounting holes, and
+its own scale — every drawing is fitted to the shared *y size* on its own.
+Wall sizes, the palette range, the sweep profile and the seed are shared by
+all layers: change them and every layer rebuilds together. Projects with
+several layers save as version 2 and reopen with the stack intact; a single
+layer saves exactly as before.
+
+A layer's height is the frame height of everything under it, so a face you
+paint *taller than the frame* pokes into the layer above — keep face heights
+under the wall height when stacking.
 
 ## Settings
 
@@ -101,8 +155,8 @@ are never rerolled behind your back, which is what the seed, **↻** and the
 a single extra pass rather than piling up.
 
 *Lowest* / *tallest face* need no rebuild at all — the outlines do not depend on
-them, so only the palette and the shading change. A face painted at 1.7 mm is
-still 1.7 mm; it just sits at a different point of the range.
+them, so only the palette and the shading change. A face painted at 0.7 mm is
+still 0.7 mm; it just sits at a different point of the range.
 
 The one thing that cannot survive is a change to the *number* of faces: widen
 the walls far enough that two faces merge and there is nothing to map the old
@@ -117,9 +171,9 @@ deciding what each one becomes.
 
 ```js
 faces    // [{ id, area, centroid: [x, y], height, stack }]
-stack    // [{ hue, t }] bottom layer first — hue is 0..3, t is mm thick
+stack    // [{ hue, t }] bottom layer first — hue is 0..2, t is mm thick
 levels   // every palette height, lowest first — as many as the layer height gives
-hues     // the four hue angles, in degrees
+hues     // the three hue angles, in degrees
 ```
 
 **Load a template…** in the header drops in a working starting point:
@@ -164,8 +218,8 @@ By default the frame is **one solid in its own colour** — *use black frame* is
 on — and exports as its own `walls.stl` on its own extruder.
 
 Turn it off and the frame is built instead from thin layers cycling through the
-palette's four hues until it reaches the wall height — ten 0.2 mm layers for a
-2 mm frame — so it prints from filaments you have already loaded, no extruder of
+palette's three hues until it reaches the wall height — five 0.2 mm layers for a
+1 mm frame — so it prints from filaments you have already loaded, no extruder of
 its own needed.
 
 | Control | |
@@ -173,20 +227,21 @@ its own needed.
 | use black frame | one solid in its own colour (the default) |
 | frame layer (mm) | with it off, the thickness of each band; 0.2 mm is a typical print layer |
 
-Worth knowing before you slice: a solid frame is a filament of its own, so all
-four hue rows plus the frame is **five** extruders — one more than a Snapmaker
-has. The 3MF export says so when it happens. Either leave a hue row unused or
-turn the black frame off, which puts the frame back on colours already loaded.
+Three base hues plus a solid frame is **four** extruders, which is what a
+Snapmaker holds — the mixes need no filament of their own, since they are built
+from hues already loaded. The 3MF export still counts them and says so if a
+model ever needs more.
 
-The mixed frame reads as a dark edge from the side, where all four colours are
+The mixed frame reads as a dark edge from the side, where all three colours are
 in view. Straight down from above you see only the **topmost** layer, so that
 band's colour is what the frame's top surface will be — change *frame layer* to
 land the last band on the hue you want.
 
-It is not free: each band is a full extrusion of the wall outline, so a 2 mm
-frame in 0.2 mm layers is roughly ten times the frame triangles. On the gothic
-example that took the STL from 2.9 MB to 16 MB. Slicers cope; it is only worth
-knowing before you wonder where the size came from.
+It is not free: each band is a full extrusion of the wall outline, so the frame
+costs one solid per band — a 2 mm frame in 0.2 mm layers is roughly ten times
+the frame triangles, which on the gothic example took the STL from 2.9 MB to
+16 MB. Slicers cope; it is only worth knowing before you wonder where the size
+came from.
 
 ## Wall overlap
 
@@ -213,6 +268,45 @@ STL from 57k to 71k triangles — and nothing else:
 
 Set it to `0` for the exact fit.
 
+## Sweep profile (advanced)
+
+By default the frame is not flat: the bundled **`default_profile.dxf`** — a
+small triangular moulding — is loaded when the page opens and swept along every
+curve of the drawing, the way a CAD sweep runs a profile along a path. The
+profile row under the wall settings shows what is loaded; **sweep profile…**
+picks a different DXF or SVG, and the row's ✕ goes back to flat walls (the
+classic behaviour: every curve buffered to *wall width* and extruded to *wall
+height*). The example under `advanced_profile_sweep/` (a triangular section on
+a gothic window) shows the shape of it.
+
+**profile width (×)** stretches the section sideways — ×2 doubles the frame's
+width while its height stays as drawn.
+
+The profile drawing's own axes become the sweep's: **x runs across the path**,
+**y is the height**. It is re-anchored to the centre of its base — draw the
+section sitting on the x axis, centred on the origin, and it lands on the path
+exactly. Loose entities are fine: the outline is rebuilt from whatever closes
+into a ring, and construction lines inside it are ignored. The profile is used
+at the millimetres it was drawn in — it never scales with the drawing.
+
+While a profile is set:
+
+- its width and height take over from *wall width* and *wall height* (the
+  boxes grey out); the faces, the *y size* fit and the palette keep working
+  against those dimensions, so painting is unchanged
+- the frame is always **one solid in its own colour** — the palette-cycled
+  frame layers are hidden, a sloped moulding has no flat bands to paint
+- **mounting holes are off**: cutting them would need a mesh boolean the
+  converter does not have, and placing one is refused
+
+Corners are mitred — a pointed arch comes to a real point — up to a limit of
+twice the offset; sharper cusps are bevelled rather than spiking. Curves that
+meet end-to-end are chained into continuous paths first (the straightest
+continuation wins at a junction), and duplicate strokes are swept once.
+
+Projects carry the profile and its width scale, so a saved sweep reopens as
+one.
+
 ## Mounting holes
 
 Holes are cut straight through the part, for hanging it once it is printed.
@@ -228,7 +322,7 @@ when a hole splits a face in two or swallows a small one whole.
 ## Saving and reopening a project
 
 A project holds everything needed to pick the work back up: the drawing itself,
-every setting, the layer selection, the palette's four hues, the frame choice,
+every setting, the layer selection, the palette's three hues, the frame choice,
 every face's stack of coloured layers, the holes, and the callback script. There are two places to put one.
 
 **On the server** — type a name under *saved projects* and press **Save**. It
@@ -241,7 +335,10 @@ page to reopen. Use this to move work between machines or to keep a copy
 outside the app.
 
 Either way the drawing is embedded rather than referenced, so a project stands
-alone. Face ids are derived from the drawing and the wall settings; if a project
+alone. With several stacked drawings the project holds every layer — its
+drawing, scale, sublayers, faces and holes — and is written as format
+version 2; single-drawing projects keep version 1, and both open in either
+direction. Face ids are derived from the drawing and the wall settings; if a project
 no longer produces the same number of faces, it says so and starts fresh instead
 of pinning colours to the wrong faces.
 
@@ -307,18 +404,19 @@ is not in the mesh at all**. It lives in `Metadata/model_settings.config`:
 The export writes that flavour: the one Snapmaker's slicer (a Bambu Studio
 fork) reads, with the production extension and a `[Content_Types].xml`,
 `_rels/.rels` and `3D/_rels/3dmodel.model.rels` to match. Palette row *n*
-becomes extruder *n*, so orange is extruder 1 and violet is extruder 4.
+becomes extruder *n*, so orange is extruder 1 and violet is extruder 3; a solid
+frame takes the next one after those.
 
 Every part is placed with the **same** transform, centred on the 270 × 270 bed,
 so the colours stay registered on top of each other. This matters: importing
 loose STLs makes the slicer centre each one independently, which pulls them out
-of alignment — in the reference file this project was built from, the four
+of alignment — in the reference file this project was built from, the loose
 colours sat up to 22 mm away from the frame.
 
 No printer profile is written, so opening the file uses whatever printer and
-filaments you already have selected rather than overriding them. A solid frame
-needs a fifth extruder, which a four-colour printer does not have — the mixed
-frame keeps the whole model within four.
+filaments you already have selected rather than overriding them. Three hues and
+a solid frame come to four extruders; turning the black frame off puts the
+frame on the palette's own colours and brings that down to three.
 
 ## Input formats
 
@@ -361,12 +459,24 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --stacks stacks.json
 .venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --split
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.3mf  --stacks stacks.json
+# advanced: sweep a closed cross-section along every curve for the frame
+.venv/bin/python tools/dxf2stl.py paths.dxf out.stl --profile profile.dxf --profile-scale 1.5
+# advanced: stack another drawing on top, centred on the base drawing —
+# layer2.json: {"file": "other.dxf", "scale": 0.6, "layers": "A,B",
+#               "stacks": {...}, "heights": {...}, "holes": [...]}
+.venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --also layer2.json
 ```
 
 A face is a stack of layers, bottom first, each with a thickness `t` and a
 colour group `g`; `--heights` is the shorthand for a stack one layer deep.
 `--split` writes one STL per group into the output directory instead of a
 single file; an output named `.3mf` writes a 3MF project instead.
+
+`--also` is repeatable, in stacking order: each extra drawing is centred on
+the base drawing and sits on the frame top of the one below it. Everything
+but the drawing, its scale, its layers and its assignments is shared —
+one wall size, one profile, one seed, and one set of colour groups, so
+`--split` and 3MF exports merge the stacked layers into the same files.
 
 A face's id is its index in `--regions` output. That order is pinned by area
 then centroid *before* the overlap is applied, so the same drawing and wall
@@ -384,17 +494,28 @@ go to stderr.
 | Route | |
 | --- | --- |
 | `POST /api/inspect` | multipart `file` (.dxf or .svg) → `{layers, skipped, curves, size}` |
-| `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes |
+| `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/convert` | `file` + settings + `stacks` → STL body, stats in the `x-stats` header |
 | `POST /api/export` | as above plus `groups` → JSON listing one base64 STL per group |
 | `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders |
 | `GET /api/example.dxf` | the bundled `sketch.dxf` |
+| `GET /api/default-profile.dxf` | the bundled sweep profile (404 if absent) |
 | `GET /api/projects` | the saved projects, newest first |
 | `GET/PUT/DELETE /api/projects/:name` | read, write or remove one |
 
 `stacks`, `heights` and `groups` are JSON objects keyed by face id; `holes` is a
-JSON array. All are sent as form fields, and `holes` applies to every route.
-Uploads are capped at 16 MB. Failures return `{error, log}` with a 4xx status.
+JSON array. All are sent as form fields, and `holes` applies to every route. A
+second file field, `profile`, switches the frame to a swept cross-section (see
+*Sweep profile*) — with `profileScale` stretching its width — and refuses
+`holes` and `wallStack`. Uploads are capped at 16 MB. Failures return `{error, log}` with a 4xx status.
+
+Stacked drawings: `file` is repeatable (base layer first, 8 max), and the
+building routes take per-layer fields for layer N (N = 2, 3, …) with the N
+suffix — `scaleN`, `layersN`, `stacksN`, `heightsN`, `holesN`. Everything
+else is shared. `/api/regions` then adds a `drawings` array with one entry
+per layer (`walls`, `regions`, `wallHeight`, `wallMesh?`, `zBase`, `offset`);
+the top-level keys keep describing the base layer. Colour groups are shared,
+so `/api/export` still returns one file per colour plus the walls.
 
 ## Layout
 
