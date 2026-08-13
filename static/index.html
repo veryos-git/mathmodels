@@ -640,7 +640,7 @@ scene.add(group);
 // knows which entry to edit.
 let layers = [];         // [{ file, drawing, scale, model, regionMeshes, regionGeom,
                          //    wallGeom, sweptGeom, wallMeshes, group, stacks, holes,
-                         //    holeMarkers, zBase, offset, subEl }]
+                         //    holeMarkers, zBase, offset, sublayers, picks }]
 let grid = null;
 let home = null;
 let selected = null;     // { li, id } of the face last clicked
@@ -945,8 +945,10 @@ function drawHoleMarkers() {
     l.holeMarkers.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
     l.holeMarkers = null;
   }
-  layers.forEach((l, li) => {
+  for (const l of layers) {
     l.holeMarkers = new THREE.Group();
+    // A hidden drawing's holes are hidden with it.
+    l.holeMarkers.visible = l.group.visible;
     const top = l.zBase + (l.model ? l.model.wallHeight : 1);
     for (const hole of l.holes) {
       const ring = new THREE.Mesh(
@@ -959,10 +961,9 @@ function drawHoleMarkers() {
       ring.position.set(hole.x + l.offset[0], hole.y + l.offset[1], top + 0.05);
       ring.renderOrder = 2;
       l.holeMarkers.add(ring);
-      l.holeMarkers.visible = l.group.visible;
     }
     scene.add(l.holeMarkers);
-  });
+  }
 }
 
 function holeList() {
@@ -1113,6 +1114,8 @@ function hover(sel) {
 function updateReadout() {
   if (!baseModel()) return;
   const totals = layers.flatMap((l) => l.stacks.map(totalHeight));
+  // A drawing can hold no closed faces at all, and so nothing to measure.
+  if (!totals.length) return;
   const used = totals.filter((h) => h > 0).length;
   const all = layers.flatMap((l) => l.stacks);
   const slabs = all.reduce((n, s) => n + s.length, 0);
