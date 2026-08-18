@@ -141,6 +141,9 @@
   #editorStatus { flex: 1; white-space: pre-wrap; }
   #editorStatus.error { color: #f87171; }
   #editorHost { min-height: 0; }
+  #effect { width: 100%; padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
+         border-radius: 6px; color: #ddd; }
+  #effect:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   #templatePick { padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
                   border-radius: 6px; color: #ddd; font-size: 13px; max-width: 200px; }
   #templatePick:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
@@ -229,6 +232,21 @@
     <div><label for="scale" title="What the y size works out to — set it yourself to scale by hand">scale (×)</label>
       <input type="number" id="scale" value="1" step="any" min="0.000001"></div>
   </div>
+
+  <fieldset id="effectBox">
+    <legend>effects</legend>
+    <label for="effect" title="Reshapes every face without changing what you painted on it">face effect</label>
+    <select id="effect">
+      <option value="none">none — flat faces</option>
+      <option value="maya-pyramid">maya pyramid regions</option>
+    </select>
+    <div class="row" id="pyramidRow" hidden>
+      <div><label for="effectSteps" title="How many terraces a face is built from; its painted height is shared between them">steps</label>
+        <input type="number" id="effectSteps" value="4" step="1" min="1" max="24"></div>
+      <div><label for="effectInset" title="How much further in from the outline each terrace sits">step inset (mm)</label>
+        <input type="number" id="effectInset" value="0.3" step="0.05" min="0.01"></div>
+    </div>
+  </fieldset>
 
   <label for="seed">seed (empty = random)</label>
   <div class="seed-row">
@@ -659,6 +677,7 @@ function newLayer(file = null) {
     model: null,        // { regions, lo, hi, wallHeight }
     regionMeshes: [],   // index === region id, each a list of slab meshes
     regionGeom: [],     // the unit prism of each face, shared by its slabs
+    stepGeom: [],       // effects: the prism of each terrace above the first
     wallGeom: [],       // the unit prism of each wall piece
     sweptGeom: null,    // profile mode: the swept frame as one ready-made mesh
     wallMeshes: [],     // the frame's slabs
@@ -714,11 +733,13 @@ function disposeLayer(l) {
   }
   for (const m of l.wallMeshes) m.material.dispose();
   for (const g of l.regionGeom) g.dispose();
+  for (const steps of l.stepGeom) for (const g of steps ?? []) g.dispose();
   for (const g of l.wallGeom) g.dispose();
   if (l.sweptGeom) l.sweptGeom.dispose();
   l.model = null;
   l.regionMeshes = [];
   l.regionGeom = [];
+  l.stepGeom = [];
   l.wallMeshes = [];
   l.wallGeom = [];
   l.sweptGeom = null;
@@ -853,24 +874,64 @@ $('layerHeight').onchange = () => {
     + `${gap} mm apart${gap === layer ? '' : ` — ${Math.round(gap / layer)} layers a step`}`);
 };
 
+/** The colour group a stack is painted with at height `z` — its top layer. */
+function paintAt(stack, z) {
+  let top = 0;
+  for (const layer of stack) {
+    top += layer.t;
+    if (z < top) return layer;
+  }
+  return stack[stack.length - 1];
+}
+
+/**
+ * The slabs one face is drawn from, bottom first. Without an effect that is
+ * simply the painted stack, each layer on the face's own outline. An effect
+ * reshapes the solid without touching the painting, so a slab carries both
+ * its own thickness and the painted layer whose colour it wears — the same
+ * split the converter makes, so the preview and the STL agree.
+ */
+function faceSlabs(l, i) {
+  const stack = l.stacks[i];
+  const steps = l.stepGeom[i];
+  if (!steps) {
+    let z = 0;
+    return stack.map((layer) => {
+      const slab = { geom: l.regionGeom[i], z, t: layer.t, paint: layer };
+      z += layer.t;
+      return slab;
+    });
+  }
+
+  // maya pyramid: the painted height shared between the terraces that fit.
+  const total = totalHeight(stack);
+  if (total <= 0) return [];
+  const geoms = [l.regionGeom[i], ...steps];
+  const t = total / geoms.length;
+  return geoms.map((geom, k) => ({
+    geom, z: t * k, t, paint: paintAt(stack, t * k + t / 2),
+  }));
+}
+
 /** Rebuild one face's slabs from its stack, bottom up. */
 function rebuildRegion(li, i) {
   const l = layers[li];
   for (const m of l.regionMeshes[i] ?? []) { l.group.remove(m); m.material.dispose(); }
   const meshes = [];
-  let z = 0;
-  for (const layer of l.stacks[i]) {
-    const mesh = new THREE.Mesh(l.regionGeom[i], new THREE.MeshStandardMaterial({
-      color: shadeFor(layer.hue, layer.t, l.model.lo, l.model.hi),
+  const drawn = l.model.regions[i].parts.length > 0;
+  for (const slab of faceSlabs(l, i)) {
+    const mesh = new THREE.Mesh(slab.geom, new THREE.MeshStandardMaterial({
+      // The shade is the painted layer's own, so a terrace shows the colour
+      // the palette says that height is, not the terrace's thickness.
+      color: shadeFor(slab.paint.hue, slab.paint.t, l.model.lo, l.model.hi),
       metalness: 0.05, roughness: 0.75, wireframe,
     }));
-    mesh.scale.z = Math.max(layer.t, 1e-4);
-    mesh.position.z = z;
-    mesh.visible = layer.t > 0 && l.model.regions[i].parts.length > 0;
+    mesh.scale.z = Math.max(slab.t, 1e-4);
+    mesh.position.z = slab.z;
+    mesh.visible = slab.t > 0 && drawn;
     mesh.userData = { layer: li, region: i };
     l.group.add(mesh);
     meshes.push(mesh);
-    z += layer.t;
   }
   l.regionMeshes[i] = meshes;
   if (selected && selected.li === li && selected.id === i) highlight(li, i, 0x4a4a4a);
@@ -897,8 +958,11 @@ function buildLayer(li, data, lo, hi, rng, keep = null) {
   }
   rebuildFrame(li);
 
-  // One unit prism per face, shared by all of that face's slabs.
+  // One unit prism per face, shared by all of that face's slabs — plus one
+  // per terrace when an effect stepped the face in from its own outline.
   l.regionGeom = data.regions.map((region) => unitPrism(region.parts));
+  l.stepGeom = data.regions.map((region) =>
+    region.steps ? region.steps.map((parts) => unitPrism(parts)) : null);
   l.regionMeshes = data.regions.map(() => []);
   const steps = levels(lo, hi);
   l.stacks = data.regions.map((_, i) => keep
@@ -1817,6 +1881,8 @@ $('reroll').onclick = () => {
 
 const SHAPE_FIELDS = ['wallWidth', 'wallHeight', 'wallOverlap',
                       'regionMin', 'regionMax', 'sagitta', 'scale'];
+// The face effect and its settings — shared by every drawing in the model.
+const EFFECT_FIELDS = ['effect', 'effectSteps', 'effectInset'];
 const DRAWING = /\.(dxf|svg)$/i;
 
 /** Seeded PRNG, so the same seed lays out the same starting heights. */
@@ -1836,6 +1902,8 @@ function shapeForm() {
   for (const l of layers) form.append('file', l.file);
   for (const id of SHAPE_FIELDS) form.append(id, $(id).value);
   form.append('layers', selectedLayers());
+  // One effect shapes every face of every drawing, so it travels once.
+  for (const id of EFFECT_FIELDS) form.append(id, $(id).value);
   if (profilePicked) {
     form.append('profile', profilePicked);
     form.append('profileScale', $('profileScale').value);
@@ -1994,6 +2062,43 @@ $('scale').onchange = async () => {
   if (baseModel()) frameModel();
 };
 
+/* --------------------------------------------------------------- effects */
+
+// An effect reshapes the solid each face is extruded into. The terraces of a
+// pyramid are outlines the browser cannot work out for itself, so the server
+// sends them with the faces and a change here means a rebuild.
+
+/** Only the chosen effect's own settings are on show. */
+function effectUI() {
+  $('pyramidRow').hidden = $('effect').value !== 'maya-pyramid';
+}
+
+const effectNote = () => {
+  if ($('effect').value !== 'maya-pyramid') return 'faces are flat again';
+  return `faces are stepped pyramids of ${count(Number($('effectSteps').value), 'terrace')}, `
+    + `each ${$('effectInset').value} mm further in`;
+};
+
+$('effect').onchange = () => {
+  effectUI();
+  refit(effectNote());
+};
+
+for (const id of ['effectSteps', 'effectInset']) {
+  $(id).onchange = () => {
+    const v = Number($(id).value);
+    if (!(v > 0)) {
+      return setStatus(id === 'effectSteps'
+        ? 'a face needs at least one terrace'
+        : 'the step inset must be greater than 0', true);
+    }
+    if ($('effect').value === 'none') return;   // nothing to reshape yet
+    refit(effectNote());
+  };
+}
+
+effectUI();      // a browser that restored the chooser on reload starts right
+
 // Ticking a layer changes what is drawn at all, so it rebuilds the same way.
 function layerChanged() {
   const names = selectedLayers();
@@ -2059,7 +2164,7 @@ async function buildProject() {
     // the other the scale — but the work is not the same without them, so they
     // travel with the rest of the settings.
     settings: Object.fromEntries(
-      [...SHAPE_FIELDS, 'seed', 'layerHeight', 'ySize', 'profileScale']
+      [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize', 'profileScale']
         .map((id) => [id, $(id).value]),
     ),
     layers: selectedLayers(),
@@ -2149,6 +2254,10 @@ async function applyProject(project) {
   for (const [id, value] of Object.entries(project.settings ?? {})) {
     if ($(id)) $(id).value = value;
   }
+  // A project saved before effects existed has no effect setting, so the box
+  // keeps whatever it was on: put it back to none for them.
+  if (!project.settings?.effect) $('effect').value = 'none';
+  effectUI();
   if (project.frame) {
     $('blackFrame').checked = !!project.frame.black;
     if (project.frame.layer) $('frameLayer').value = project.frame.layer;

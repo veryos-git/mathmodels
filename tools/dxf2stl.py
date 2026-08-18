@@ -15,10 +15,15 @@ Usage:
                 [--region-min 0.2] [--region-max 2.0] [--region-step 0.1]
                 [--seed N] [--sagitta 0.02] [--layers A,B,C]
                 [--profile profile.dxf] [--also layer2.json]
+                [--effect maya-pyramid] [--effect-steps 4] [--effect-inset 0.3]
     dxf2stl.py input.dxf --inspect
 
 --profile takes a drawing holding one closed cross-section and sweeps it along
 every curve to form the frame, replacing the flat --wall-width ribbons.
+
+--effect reshapes every face without touching the painting: maya-pyramid
+splits a face's painted height into terraces, each stepped one --effect-inset
+further in from its own outline than the one below it.
 
 --also stacks another drawing on top: its JSON spec holds the drawing's "file"
 plus its own "scale", "layers", "stacks"/"heights" and "holes". Each extra
@@ -671,19 +676,108 @@ def region_stacks(count, region_min, region_max, region_step, rng,
     return stacks
 
 
-def region_solids(region_polys, stacks, cutter, z_base=0.0):
+# ----------------------------------------------------------------- effects
+#
+# An effect changes the shape a face is extruded into without touching the
+# painting: the stack still says how tall the face stands and which colours it
+# is made of. Each effect turns one face's outline and stack into the slabs it
+# is really built from, bottom first, so adding another one later means adding
+# another generator here and a name to EFFECTS.
+
+EFFECTS = ("none", "maya-pyramid")
+
+# Terraces past this are refused: every one of them is another ring of outline
+# in the preview, and a pyramid that fine is better printed than previewed.
+MAX_EFFECT_STEPS = 24
+
+
+def inset_polys(poly, distance):
+    """The outline pulled `distance` mm in from its own border, as the pieces
+    that survive.
+
+    Mitred joins keep a straight edge straight and parallel to the one below
+    it, which is what makes the terraces read as steps rather than as a heap
+    of rounded-off blobs. A waisted face can be pinched into several pieces on
+    the way in, and any face vanishes once there is nothing left to give.
+    """
+    if distance <= 0:
+        return [poly]
+    return [p for p in polygons_of(poly.buffer(-distance, join_style=2, mitre_limit=2.0))
+            if p.area >= MIN_REGION_AREA]
+
+
+def colour_at(stack, z):
+    """The colour group a stack is painted with at height `z`."""
+    top = 0.0
+    for layer in stack:
+        top += layer["t"]
+        if z < top:
+            return layer.get("g")
+    return stack[-1].get("g") if stack else None
+
+
+def flat_slabs(poly, stack):
+    """No effect: one slab per painted layer, every one on the face's outline."""
+    z = 0.0
+    for layer in stack:
+        if layer["t"] > 0:      # a layer set to zero is left out on purpose
+            yield poly, z, layer["t"], layer.get("g")
+        z += layer["t"]
+
+
+def pyramid_steps(poly, steps, inset):
+    """Each terrace of a stepped pyramid as its own pieces, widest first.
+
+    The list stops early where the face runs out: a narrow sliver comes to a
+    point after a step or two while a broad one keeps going.
+    """
+    terraces = []
+    for k in range(steps):
+        faces = inset_polys(poly, inset * k)
+        if not faces:
+            break
+        terraces.append(faces)
+    return terraces
+
+
+def pyramid_slabs(poly, stack, steps, inset):
+    """A face as a stepped pyramid, in the manner of a Maya temple.
+
+    The face's painted height is split into equal terraces, each pulled one
+    `inset` further in from the outline than the terrace below it. The
+    painting is left alone: a terrace takes the colour the stack has at its
+    middle, so a face painted in bands still comes out in those bands.
+
+    The height is shared between the terraces that fit, so a face that comes
+    to a point early still stands as tall as it was painted.
+    """
+    total = sum(layer["t"] for layer in stack)
+    terraces = pyramid_steps(poly, steps, inset) if total > 0 else []
+    if not terraces:
+        return
+    thickness = total / len(terraces)
+    for k, faces in enumerate(terraces):
+        z = thickness * k
+        group = colour_at(stack, z + thickness / 2)
+        for face in faces:       # a terrace can be several pieces once pinched
+            yield face, z, thickness, group
+
+
+def face_slabs(poly, stack, effect):
+    """The slabs one face is built from, bottom first, under `effect`."""
+    if effect and effect["name"] == "maya-pyramid":
+        return pyramid_slabs(poly, stack, effect["steps"], effect["inset"])
+    return flat_slabs(poly, stack)
+
+
+def region_solids(region_polys, stacks, cutter, z_base=0.0, effect=None):
     """Every layer of every face as a solid, paired with its colour group."""
     for poly, stack in zip(region_polys, stacks):
-        z = z_base
-        for layer in stack:
-            thickness = layer["t"]
-            if thickness <= 0:      # a layer set to zero is left out on purpose
-                continue
-            for piece in cut(poly, cutter):
+        for face, z, thickness, group in face_slabs(poly, stack, effect):
+            for piece in cut(face, cutter):
                 solid = trimesh.creation.extrude_polygon(piece, thickness)
-                solid.apply_translation((0.0, 0.0, z))
-                yield solid, layer.get("g")
-            z += thickness
+                solid.apply_translation((0.0, 0.0, z_base + z))
+                yield solid, group
 
 
 def wall_solids(wall_polys, wall_height, cutter, wall_stack=None, frame_mesh=None,
@@ -726,7 +820,8 @@ def build_meshes(layers, wall_stack=None):
             meshes.append(solid)
             n_walls += 1
         for solid, _ in region_solids(drawing["region_polys"], drawing["stacks"],
-                                      drawing["cutter"], drawing["z_base"]):
+                                      drawing["cutter"], drawing["z_base"],
+                                      drawing["effect"]):
             meshes.append(solid)
             n_layers += 1
         n_regions += sum(1 for s in drawing["stacks"]
@@ -758,7 +853,7 @@ def colour_buckets(layers, wall_stack):
             n_walls += 1
         for solid, group in region_solids(drawing["region_polys"],
                                           drawing["stacks"], drawing["cutter"],
-                                          drawing["z_base"]):
+                                          drawing["z_base"], drawing["effect"]):
             buckets[group or "ungrouped"].append(solid)
             n_regions += 1
 
@@ -1099,6 +1194,13 @@ def main():
     ap.add_argument("--profile-scale", type=float, default=1.0,
                     help="stretch the profile's width (its x axis); the height "
                          "stays as drawn")
+    ap.add_argument("--effect", choices=EFFECTS, default="none",
+                    help="reshape every face: maya-pyramid steps each one in "
+                         "from its own outline, bottom to top")
+    ap.add_argument("--effect-steps", type=int, default=4, metavar="N",
+                    help="maya-pyramid: how many terraces a face is built from")
+    ap.add_argument("--effect-inset", type=float, default=0.3, metavar="MM",
+                    help="maya-pyramid: how much further in each terrace sits")
     ap.add_argument("--also", action="append", default=[], metavar="FILE",
                     help="JSON spec for another drawing stacked on top of the "
                          "previous ones, centred on the base drawing: "
@@ -1129,6 +1231,14 @@ def main():
         raise ConvertError("region min must be 0 or greater")
     if args.region_max < args.region_min:
         raise ConvertError("region max must be greater than or equal to region min")
+
+    effect = None
+    if args.effect != "none":
+        if not 1 <= args.effect_steps <= MAX_EFFECT_STEPS:
+            raise ConvertError(f"effect steps must be 1 to {MAX_EFFECT_STEPS}")
+        positive("effect inset", args.effect_inset)
+        effect = {"name": args.effect, "steps": args.effect_steps,
+                  "inset": args.effect_inset}
 
     holes = []
     if args.holes:
@@ -1178,11 +1288,27 @@ def main():
     for drawing in layers:
         drawing["z_base"] = z
         drawing["cutter"] = hole_cutter(drawing["holes"])
+        drawing["effect"] = effect        # one effect for the whole model
         z += drawing["wall_height"]
 
-    def layer_payload(drawing):
+    def region_payload(i, poly, cutter):
         # area and centroid describe the whole face, not the cut pieces, so
         # they stay put as holes are added and removed.
+        payload = {
+            "id": i, "area": round(poly.area, 4),
+            "centroid": [round(poly.centroid.x, 4), round(poly.centroid.y, 4)],
+            "parts": [polygon_json(q) for q in cut(poly, cutter)],
+        }
+        if effect and effect["name"] == "maya-pyramid":
+            # The terraces above the first, so the browser can show the same
+            # steps the STL is built from instead of guessing at an offset.
+            payload["steps"] = [
+                [polygon_json(q) for face in faces for q in cut(face, cutter)]
+                for faces in pyramid_steps(poly, effect["steps"], effect["inset"])[1:]
+            ]
+        return payload
+
+    def layer_payload(drawing):
         payload = {
             "wallHeight": drawing["wall_height"],
             "zBase": round(drawing["z_base"], 6),
@@ -1190,12 +1316,8 @@ def main():
             "walls": [polygon_json(p)
                       for w in drawing["wall_polys"]
                       for p in cut(w, drawing["cutter"])],
-            "regions": [
-                {"id": i, "area": round(p.area, 4),
-                 "centroid": [round(p.centroid.x, 4), round(p.centroid.y, 4)],
-                 "parts": [polygon_json(q) for q in cut(p, drawing["cutter"])]}
-                for i, p in enumerate(drawing["region_polys"])
-            ],
+            "regions": [region_payload(i, p, drawing["cutter"])
+                        for i, p in enumerate(drawing["region_polys"])],
         }
         if drawing["frame_mesh"] is not None:
             # The swept frame is no longer a prism the browser can extrude,
@@ -1260,7 +1382,7 @@ def main():
                                                       wall_stack)
         json.dump({**layers[0]["summary"], "files": files, "holes": n_holes,
                    "walls": n_walls, "regions": n_regions,
-                   "drawings": len(layers)}, sys.stdout)
+                   "drawings": len(layers), "effect": args.effect}, sys.stdout)
         return
 
     if args.split or args.groups:
@@ -1268,7 +1390,7 @@ def main():
                                                       wall_stack)
         json.dump({**layers[0]["summary"], "files": files, "holes": n_holes,
                    "walls": n_walls, "regions": n_regions,
-                   "drawings": len(layers)}, sys.stdout)
+                   "drawings": len(layers), "effect": args.effect}, sys.stdout)
         return
 
     meshes, n_walls, n_regions, n_layers = build_meshes(layers, wall_stack)
@@ -1285,6 +1407,7 @@ def main():
         "assigned": n_assigned,
         "holes": n_holes,
         "drawings": len(layers),
+        "effect": args.effect,
         "triangles": int(len(solid.faces)),
         "size": [round(float(hi[i] - lo[i]), 3) for i in range(3)],
     }, sys.stdout)

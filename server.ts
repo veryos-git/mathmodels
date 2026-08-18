@@ -10,6 +10,8 @@ const PORT = Number(Deno.env.get("PORT") ?? 8788);
 const MAX_UPLOAD = 16 * 1024 * 1024;
 const MAX_LAYERS = 8;
 const MAX_ASSIGNMENTS = 1024 * 1024;
+// The face effects the converter knows; "none" is simply left off.
+const EFFECTS = ["maya-pyramid"];
 const DRAWING = /\.(dxf|svg)$/i;
 
 const PROJECT_DIR = Deno.env.get("PROJECT_DIR") ?? "projects";
@@ -147,7 +149,16 @@ function shapeFlags(form: FormData): string[] {
     sagitta: "--sagitta",
     scale: "--scale",
     profileScale: "--profile-scale",
+    effectSteps: "--effect-steps",
+    effectInset: "--effect-inset",
   });
+
+  // One effect shapes every face of every drawing, so it is not a per-layer
+  // field. Only names the converter knows are passed on.
+  const effect = form.get("effect");
+  if (typeof effect === "string" && EFFECTS.includes(effect)) {
+    args.push("--effect", effect);
+  }
 
   // --seed is an int; a fractional value would only earn an argparse dump.
   const seed = form.get("seed");
