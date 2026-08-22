@@ -34,7 +34,13 @@ const MIME: Record<string, string> = {
 async function takeUpload(
   req: Request,
   dir: string,
-): Promise<{ form: FormData; file: File; paths: string[]; profilePath: string | null }> {
+): Promise<{
+  form: FormData;
+  file: File;
+  paths: string[];
+  profilePath: string | null;
+  boundaryPath: string | null;
+}> {
   if (Number(req.headers.get("content-length") ?? 0) > MAX_UPLOAD * MAX_LAYERS) {
     throw new HttpError(413, "those files are too large (16 MB each max)");
   }
@@ -67,20 +73,35 @@ async function takeUpload(
     paths.push(path);
   }
 
-  // Advanced mode: an optional second drawing holding the sweep profile.
-  const profile = form.get("profile");
-  let profilePath: string | null = null;
-  if (profile instanceof File && profile.size > 0) {
-    if (!DRAWING.test(profile.name)) {
-      throw new HttpError(400, "the profile must be a .dxf or .svg file");
-    }
-    if (profile.size > MAX_UPLOAD) {
-      throw new HttpError(413, "the profile is too large (16 MB max)");
-    }
-    profilePath = `${dir}/profile${profile.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf"}`;
-    await Deno.writeFile(profilePath, new Uint8Array(await profile.arrayBuffer()));
+  // Advanced modes each add a second drawing: one holding the sweep profile,
+  // one holding the polygon that bounds the pattern.
+  const profilePath = await takeExtra(form, "profile", "profile", dir);
+  const boundaryPath = await takeExtra(form, "boundary", "boundary", dir);
+  return { form, file, paths, profilePath, boundaryPath };
+}
+
+/**
+ * One of the optional extra drawings — the sweep profile or the boundary
+ * polygon — written beside the main upload. Missing or empty means it is off.
+ */
+async function takeExtra(
+  form: FormData,
+  field: string,
+  what: string,
+  dir: string,
+): Promise<string | null> {
+  const extra = form.get(field);
+  if (!(extra instanceof File) || extra.size === 0) return null;
+  if (!DRAWING.test(extra.name)) {
+    throw new HttpError(400, `the ${what} must be a .dxf or .svg file`);
   }
-  return { form, file, paths, profilePath };
+  if (extra.size > MAX_UPLOAD) {
+    throw new HttpError(413, `the ${what} is too large (16 MB max)`);
+  }
+  const ext = extra.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf";
+  const path = `${dir}/${field}${ext}`;
+  await Deno.writeFile(path, new Uint8Array(await extra.arrayBuffer()));
+  return path;
 }
 
 class HttpError extends Error {
@@ -118,7 +139,7 @@ function numericFlags(form: FormData, fields: Record<string, string>): string[] 
   return args;
 }
 
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+async functiocvgbnn withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await Deno.makeTempDir({ prefix: "dxf2stl-" });
   try {
     return await fn(dir);
@@ -138,7 +159,7 @@ function handleInspect(req: Request): Promise<Response> {
 }
 
 /** The shape flags shared by /api/regions and /api/convert. */
-function shapeFlags(form: FormData): string[] {
+function shapeFlags(form: FormData, boundaryPath: string | null = null): string[] {
   const args = numericFlags(form, {
     wallWidth: "--wall-width",
     wallHeight: "--wall-height",
@@ -152,6 +173,25 @@ function shapeFlags(form: FormData): string[] {
     effectSteps: "--effect-steps",
     effectInset: "--effect-inset",
   });
+
+  // A boundary polygon crops every drawing: what falls outside it is cut off.
+  // Its own placement fields only mean anything while one is loaded.
+  if (boundaryPath) {
+    args.push("--boundary", boundaryPath);
+    args.push(...numericFlags(form, {
+      boundaryScale: "--boundary-scale",
+      boundaryX: "--boundary-x",
+      boundaryY: "--boundary-y",
+    }));
+    // Centring and fitting is the default; only leaving it turns the flag off.
+    if (form.get("boundaryFit") === "0") args.push("--no-boundary-fit");
+    // The boundary is walled by default, so only turning that off travels.
+    if (form.get("boundaryWall") === "0") args.push("--no-boundary-wall");
+  }
+
+  // Confining the walls keeps the model inside its outermost line instead of
+  // letting the frame stand half its width outside the drawing.
+  if (form.get("confineWalls") === "1") args.push("--confine-walls");
 
   // One effect shapes every face of every drawing, so it is not a per-layer
   // field. Only names the converter knows are passed on.
@@ -177,11 +217,11 @@ function shapeFlags(form: FormData): string[] {
  */
 function handleRegions(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     return Response.json(await runScript([
       paths[0],
       "--regions",
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await layerSpecs(form, dir, paths),
@@ -252,12 +292,12 @@ async function layerSpecs(
 /** POST /api/convert — the DXF plus settings in, an STL out. */
 function handleConvert(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, paths, profilePath } = await takeUpload(req, dir);
+    const { form, file, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     const output = `${dir}/output.stl`;
     const args = [
       paths[0],
       output,
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "stacks", "--stacks", dir),
@@ -286,7 +326,7 @@ function handleConvert(req: Request): Promise<Response> {
  */
 function handleExport(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     // Colours travel either per layer (stacks) or per face (groups).
     const stacks = await mapFlag(form, "stacks", "--stacks", dir);
     const groups = await mapFlag(form, "groups", "--groups", dir);
@@ -299,7 +339,7 @@ function handleExport(req: Request): Promise<Response> {
       paths[0],
       output,
       "--split",
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
@@ -394,12 +434,12 @@ async function deleteProject(name: string): Promise<Response> {
  */
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, paths, profilePath } = await takeUpload(req, dir);
+    const { form, file, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     const output = `${dir}/project.3mf`;
     const stats = await runScript([
       paths[0],
       output,
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "stacks", "--stacks", dir),

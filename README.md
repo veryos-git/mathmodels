@@ -34,11 +34,11 @@ tallest**, so a face's shade always tells you how far it stands proud. Under
 them sit the **mixes** — see below.
 
 How many shades a row has follows from *layer height* and the *lowest face* …
-*tallest face* range: with the defaults — 0.1 mm layers over 0.20 to 1.00 mm —
-that is nine, at 0.20, 0.30, 0.40 … 1.00 mm. Every one of them is a whole
-number of layers, so there is no height in the palette the printer cannot stop
-at. The range starts at 0.20 rather than at one layer because a single 0.1 mm
-layer is too thin to print as a face of its own.
+*tallest face* range: with the defaults — 0.2 mm layers over 0.20 to 1.00 mm —
+that is five, at 0.20, 0.40, 0.60, 0.80 and 1.00 mm. Every one of them is a
+whole number of layers, so there is no height in the palette the printer cannot
+stop at. The range starts at 0.20 — a single layer — because anything thinner
+is too thin to print as a face of its own.
 
 Halve the layer height and you get twice the shades. A row tops out at twenty;
 a range too tall for that steps several layers at a time instead (0.20 … 8.00 mm
@@ -55,6 +55,16 @@ Pick a swatch, then use the mouse on a face in the view:
 | **left** | that face becomes just this swatch |
 | **right** | stacks the swatch on top of what is there |
 | **middle** | peels the top layer back off |
+
+Hover a face and a card follows the cursor with that face's stack drawn out:
+a bar of its layers, bottom one at the bottom, each in its own shade and sized
+by its thickness, beside the list of what they are — `teal · 0.30 mm` — and the
+face's area and total height. The bar is drawn against the full *tallest face*
+range, so a low face is a stub and a tall one nearly fills the track and the two
+can be told apart without reading a number; paint a face taller than the range
+and it sets the scale itself. The card follows every click, so stacking a layer
+shows up in it straight away, and it steps out of the way while you orbit or
+place a hole.
 
 So picking hue 1 at 0.30 mm and left-clicking a face, then picking hue 3 at
 0.60 mm and right-clicking the same face, leaves a face 0.90 mm tall made of a
@@ -137,6 +147,7 @@ under the wall height when stacking.
 | Setting | What it does |
 | --- | --- |
 | wall width | thickness of the ribbon each curve is buffered into |
+| keep walls inside the outline | trace the outermost lines along the inside of the wall, so the model comes out no wider than the drawing |
 | wall overlap | how far each face reaches into the wall around it, so the two fuse when printed |
 | wall height | how tall the walls stand |
 | layer height | what your slicer prints in; every palette shade is a whole number of these |
@@ -268,6 +279,37 @@ STL from 57k to 71k triangles — and nothing else:
 
 Set it to `0` for the exact fit.
 
+## Keeping the walls inside the outline
+
+A curve is traced down the **middle** of its wall, so the frame stands half a
+wall width outside the drawing: a 100 mm square walled 10 mm wide comes off the
+printer 110 mm across. That is usually what you want — the drawing is the
+skeleton and the wall hangs on it either side.
+
+Tick **keep walls inside the outline** and the outermost line becomes the edge
+of the model instead. That curve is moved half a wall width inwards, everything
+else is trimmed to stay behind it, and the same square comes out at exactly
+100 mm — walls still 10 mm thick, opening 80 mm. Use it when the drawing *is*
+the finished size: a part that has to fit a 100 mm slot, a tile that has to butt
+against its neighbour.
+
+Only the outside moves:
+
+- curves inside the drawing keep running down the middle of their walls, and a
+  shape sitting inside another one — an island in a face — is left alone; it has
+  nothing to do with how wide the model prints
+- a shape with no room to pull a wall into is left as drawn: an open stroke has
+  no inside, and neither has anything thinner than the wall itself
+- it applies to a swept profile too, which is confined by its own width
+- *y size* stops counting the walls, since they no longer stick out; the scale
+  is re-fitted the moment you tick the box
+
+The frame is a round-ended ribbon, so a sharp outer point comes out a fraction
+short of the line rather than over it — the wall cannot both keep its thickness
+and reach into a corner tighter than itself. Faces close to the outer wall lose
+the strip it now occupies, and thin ones can vanish into the frame entirely,
+which renumbers the faces and starts the painting fresh.
+
 ## Sweep profile (advanced)
 
 By default the frame is not flat: the bundled **`default_profile.dxf`** — a
@@ -306,6 +348,51 @@ continuation wins at a junction), and duplicate strokes are swept once.
 
 Projects carry the profile and its width scale, so a saved sweep reopens as
 one.
+
+## Cropping to a boundary
+
+Drop a **second** drawing — a closed polygon — and it **bounds** the pattern:
+everything that lies outside it is cut away. This is how a pattern becomes a
+leaf, a badge, a pendant or a window shape instead of a full sheet of it.
+
+- **boundary…** (under *drawings*) picks the polygon. It is read in the
+  pattern's *own coordinates* and scaled with it, so draw it over the pattern
+  in the same file and it lands exactly where you drew it. The ✕ goes back to
+  the whole drawing. Loading one sets *scale* to **×1 in the boundary's own
+  units** — the part comes out at exactly the size the boundary file says.
+- **centre & fit to the pattern** (on by default) re-anchors the boundary for
+  files that do not share a coordinate system: the polygon is centred on the
+  pattern's box and scaled uniformly — never stretched — until it just fits
+  inside it. This is what makes a boundary exported from one CAD tool crop an
+  SVG pattern exported from another. Turn it off to keep the boundary exactly
+  where it was drawn.
+- **wall along the boundary** (on by default) turns the boundary into a wall
+  of its own, so the cropped pattern comes out with a rim and every face along
+  the cut is enclosed like any other. Turn it off for a **flush cut**: faces
+  the boundary crosses are trimmed to it, but end open at the cut edge.
+- **boundary size (×)** resizes the polygon about its own centre, and
+  **nudge x / y** slides it over the drawing in finished millimetres — the two
+  together place a crop by eye when it was not drawn exactly where you want it.
+- **use boundary size (1:1)** puts the scale back on ×1 in the boundary's own
+  units — the exact size the boundary DXF or SVG was drawn at — with the
+  pattern scaled to whatever fills it. It is the quick way back after the
+  *y size* or *scale* boxes have moved you off it.
+
+With a boundary loaded, *y size* and *scale* fit the **crop**, not the
+pattern — the boundary is the finished outline, and *scale* ×1 means the
+boundary file's own units. The boundary is shared across stacked drawings,
+applied to each at its own scale (and, when one is set, the base drawing's
+scale so the nudge means the same place on every layer).
+
+The polygon is read from every closed outline in its file — a circle is a
+boundary, a rectangle is, and several shapes crop the pattern once each. An
+outline drawn inside another one makes a hole in it, the way a filled shape
+would: two concentric circles crop to a ring. Mounting holes still cut through
+the result; a swept profile still forms the frame (its rim follows the
+boundary). The boundary travels with a saved project, like the profile does.
+
+There is no "freehand" boundary: an open stroke encloses nothing, and the
+converter says so rather than guessing.
 
 ## Mounting holes
 
@@ -356,7 +443,9 @@ save button; the state it sends is intercepted and written out as a project.
 
 *y size* is the size control: **50 mm** by default, and the finished model is
 that tall including the walls, which stand half their width outside the
-outermost curve on each side. The width follows from the drawing's own
+outermost curve on each side — unless they are
+[kept inside the outline](#keeping-the-walls-inside-the-outline), when the
+drawing alone is the size. The width follows from the drawing's own
 proportions — 50 mm of the example works out at 22.6 × 50.0 mm.
 
 Drop a drawing in and it is fitted straight away, whatever units it was drawn
@@ -459,8 +548,17 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --stacks stacks.json
 .venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --split
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.3mf  --stacks stacks.json
+# keep the model inside its outermost line instead of straddling it
+.venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --wall-width 10 --confine-walls
 # advanced: sweep a closed cross-section along every curve for the frame
 .venv/bin/python tools/dxf2stl.py paths.dxf out.stl --profile profile.dxf --profile-scale 1.5
+# advanced: bound the pattern with a closed polygon — everything outside is cut away
+.venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --boundary crop.dxf
+# centre & fit the boundary instead of keeping it as drawn, then place it by eye
+.venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --boundary crop.dxf --boundary-fit \
+    --boundary-scale 1.2 --boundary-x 2 --boundary-y -1
+# a flush cut leaves the faces along the crop open instead of walling the boundary
+.venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --boundary crop.dxf --no-boundary-wall
 # advanced: stack another drawing on top, centred on the base drawing —
 # layer2.json: {"file": "other.dxf", "scale": 0.6, "layers": "A,B",
 #               "stacks": {...}, "heights": {...}, "holes": [...]}
@@ -507,7 +605,11 @@ go to stderr.
 JSON array. All are sent as form fields, and `holes` applies to every route. A
 second file field, `profile`, switches the frame to a swept cross-section (see
 *Sweep profile*) — with `profileScale` stretching its width — and refuses
-`holes` and `wallStack`. Uploads are capped at 16 MB. Failures return `{error, log}` with a 4xx status.
+`holes` and `wallStack`. Another file field, `boundary`, bounds the pattern
+with a closed polygon (see *Cropping to a boundary*), with `boundaryScale`,
+`boundaryX`, `boundaryY` placing it, `boundaryFit=0` keeping it as drawn
+instead of centred and fitted, and `boundaryWall=0` cutting flush instead of
+walling it. Uploads are capped at 16 MB. Failures return `{error, log}` with a 4xx status.
 
 Stacked drawings: `file` is repeatable (base layer first, 8 max), and the
 building routes take per-layer fields for layer N (N = 2, 3, …) with the N

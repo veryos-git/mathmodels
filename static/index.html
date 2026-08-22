@@ -26,7 +26,7 @@
   #drop:hover, #drop.over { border-color: #3b82f6; background: #1a2130; color: #cbd5e1; }
   #drop strong { color: #ddd; display: block; word-break: break-all; }
   #drop small { color: #6b7280; }
-  #file, #profileFile, #fileAdd { display: none; }
+  #file, #profileFile, #fileAdd, #boundaryFile { display: none; }
 
   /* min-width:0 beats the UA's min-content sizing: without it the palette's
      widest row pushes the whole sidebar out instead of scrolling inside it */
@@ -124,6 +124,25 @@
              background: rgba(20,22,26,.85); border: 1px solid #2a2e35; border-radius: 6px;
              padding: 6px 10px; pointer-events: none; white-space: pre-line; }
   #tools button[aria-pressed=true] { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  /* the hovered face's stack, drawn under the cursor */
+  #faceCard { position: absolute; z-index: 5; pointer-events: none; display: flex; gap: 10px;
+              font-size: 12px; color: #cbd5e1; background: rgba(20,22,26,.94);
+              border: 1px solid #2a2e35; border-radius: 8px; padding: 8px 10px;
+              box-shadow: 0 8px 20px rgba(0,0,0,.5); }
+  #faceCard[hidden] { display: none; }   /* display:flex would otherwise win */
+  #faceCard .bar { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #faceCard .tick { font-size: 10px; color: #4b5563; }
+  #faceCard .track { width: 20px; border: 1px solid #2a2e35; border-radius: 3px;
+                     background: #101216; overflow: hidden;
+                     display: flex; flex-direction: column-reverse; }
+  /* the hairline is what separates one layer from the next in the bar */
+  #faceCard .slab { width: 100%; box-shadow: inset 0 1px 0 rgba(0,0,0,.45); }
+  #faceCard .side { display: grid; align-content: start; gap: 3px; }
+  #faceCard .title { color: #ddd; }
+  #faceCard .row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #faceCard .chip { width: 9px; height: 9px; border-radius: 2px; flex: none;
+                    border: 1px solid rgba(255,255,255,.15); }
+  #faceCard .foot { color: #6b7280; margin-top: 2px; }
 
   /* callback editor */
   #editorOverlay { position: fixed; inset: 0; z-index: 20; background: rgba(8,10,13,.72);
@@ -190,12 +209,43 @@
   </fieldset>
   <input type="file" id="fileAdd" accept=".dxf,.svg,application/dxf,image/svg+xml">
 
+  <fieldset id="boundaryBox">
+    <legend>boundary</legend>
+    <div class="seed-row" title="A DXF or SVG holding a closed polygon drawn over the pattern: everything outside it is cut off">
+      <button class="ghost" id="boundaryPick">boundary…</button>
+      <span class="muted" id="boundaryName">off — the whole drawing</span>
+      <button class="ghost" id="boundaryClear" hidden title="Use the whole drawing again">✕</button>
+    </div>
+    <input type="file" id="boundaryFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+    <div id="boundaryOpts" hidden>
+      <label class="check" title="Centre the boundary on the pattern and scale it uniformly to just fit inside it — the right choice when the two files came out of different coordinate systems. Off keeps the boundary exactly where it was drawn.">
+        <input type="checkbox" id="boundaryFit" checked> centre &amp; fit to the pattern</label>
+      <label class="check" title="Wall the boundary, so the cropped pattern comes out with a rim around it — off cuts flush and leaves the faces along the cut open">
+        <input type="checkbox" id="boundaryWall" checked> wall along the boundary</label>
+      <div class="row">
+        <div><label for="boundaryScale" title="Resizes the boundary about its own centre, so the same polygon can crop a bigger or smaller piece">boundary size (×)</label>
+          <input type="number" id="boundaryScale" value="1" step="0.05" min="0.01"></div>
+        <div><label for="boundaryX" title="Slide the boundary across the drawing, in finished millimetres">nudge x (mm)</label>
+          <input type="number" id="boundaryX" value="0" step="1"></div>
+      </div>
+      <div class="row">
+        <div><label for="boundaryY" title="Slide the boundary up or down the drawing, in finished millimetres">nudge y (mm)</label>
+          <input type="number" id="boundaryY" value="0" step="1"></div>
+      </div>
+      <div class="seed-row" style="margin-top:8px">
+        <button class="ghost" id="boundary1to1" title="Set the model to the boundary's exact drawn size — scale ×1 means the boundary file's own units">use boundary size (1:1)</button>
+      </div>
+    </div>
+  </fieldset>
+
   <div class="row">
     <div><label for="wallWidth">wall width (mm)</label>
       <input type="number" id="wallWidth" value="1.0" step="0.1" min="0.1"></div>
     <div><label for="wallHeight">wall height (mm)</label>
       <input type="number" id="wallHeight" value="1.0" step="0.1" min="0.1"></div>
   </div>
+  <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the drawing — instead of the frame standing half a wall width outside it">
+    <input type="checkbox" id="confineWalls"> keep walls inside the outline</label>
   <div class="seed-row" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
     <button class="ghost" id="profilePick">sweep profile…</button>
     <span class="muted" id="profileName">off — flat walls</span>
@@ -222,7 +272,7 @@
   </div>
   <div class="row">
     <div><label for="layerHeight" title="Your slicer's layer height — every shade in the palette is a whole number of these">layer height (mm)</label>
-      <input type="number" id="layerHeight" value="0.1" step="0.01" min="0.01"></div>
+      <input type="number" id="layerHeight" value="0.2" step="0.01" min="0.01"></div>
     <div><label for="sagitta">curve accuracy (mm)</label>
       <input type="number" id="sagitta" value="0.02" step="0.01" min="0.001"></div>
   </div>
@@ -241,7 +291,7 @@
       <option value="maya-pyramid">maya pyramid regions</option>
     </select>
     <div class="row" id="pyramidRow" hidden>
-      <div><label for="effectSteps" title="How many terraces a face is built from; its painted height is shared between them">steps</label>
+      <div><label for="effectSteps" title="How many terraces a face is built from; its painted height is shared between them, never thinner than 0.2 mm each">steps</label>
         <input type="number" id="effectSteps" value="4" step="1" min="1" max="24"></div>
       <div><label for="effectInset" title="How much further in from the outline each terrace sits">step inset (mm)</label>
         <input type="number" id="effectInset" value="0.3" step="0.05" min="0.01"></div>
@@ -324,12 +374,13 @@
     <button class="ghost" id="wire" hidden>Wireframe</button>
   </div>
   <div id="readout" hidden></div>
+  <div id="faceCard" hidden></div>
 </main>
 
 <script type="importmap">
 { "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
 } }
 </script>
 <script type="module">
@@ -373,7 +424,7 @@ const SAT_LO = 0.45, SAT_HI = 0.70;
 /** The slicer layer height every palette step is a whole multiple of. */
 function layerHeight() {
   const v = Number($('layerHeight').value);
-  return v > 0 ? v : 0.1;
+  return v > 0 ? v : 0.2;
 }
 
 /** Round a height to a whole number of print layers. */
@@ -754,6 +805,7 @@ function disposeLayer(l) {
 function disposeModels() {
   for (const l of layers) disposeLayer(l);
   selected = hovered = null;
+  $('faceCard').hidden = true;
 }
 
 /** Remove a layer outright; the ones above close ranks on the next rebuild. */
@@ -903,10 +955,14 @@ function faceSlabs(l, i) {
     });
   }
 
-  // maya pyramid: the painted height shared between the terraces that fit.
+  // maya pyramid: the painted height shared between the terraces that fit,
+  // never thinner than the 0.2 mm a terrace needs to print — the same clamp
+  // the converter applies, so the preview and the STL agree. The epsilon
+  // keeps an exact multiple (0.6 / 0.2) from losing a terrace to floats.
   const total = totalHeight(stack);
   if (total <= 0) return [];
-  const geoms = [l.regionGeom[i], ...steps];
+  const fit = Math.max(1, Math.floor(total / 0.2 + 1e-9));
+  const geoms = [l.regionGeom[i], ...steps].slice(0, fit);
   const t = total / geoms.length;
   return geoms.map((geom, k) => ({
     geom, z: t * k, t, paint: paintAt(stack, t * k + t / 2),
@@ -1123,6 +1179,7 @@ function setStack(li, id, stack) {
   layers[li].stacks[id] = stack;
   rebuildRegion(li, id);
   if (same(selected, { li, id })) showSelection(selected);
+  if (same(hovered, { li, id })) drawFaceCard(hovered);
   updateReadout();
 }
 
@@ -1168,11 +1225,107 @@ function select(sel) {
   showSelection(sel);
 }
 
-function hover(sel) {
+function hover(sel, event) {
   if (hovered && !same(hovered, selected)) highlight(hovered.li, hovered.id, 0x000000);
   hovered = sel;
   if (sel && !same(sel, selected)) highlight(sel.li, sel.id, 0x222222);
   canvas.style.cursor = sel ? 'pointer' : '';
+  drawFaceCard(sel, event);
+}
+
+/* ------------------------------------------------------- the hover card */
+//
+// A face is a stack of coloured layers, which reads better as a picture than
+// as a sentence: the card under the cursor draws the hovered face as a bar,
+// bottom layer at the bottom, against the full height range the palette
+// offers. Two faces can then be told apart at a glance — one short bar, one
+// tall one — instead of by reading two numbers.
+
+const CARD_TRACK = 110;     // px the height range is drawn in
+let cardAt = null;          // where the pointer last was, to redraw in place
+let cardShows = '';         // what it is already drawing, so a move only moves it
+
+function tag(name, className, text) {
+  const node = document.createElement(name);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** Put the card beside the cursor, flipped where the viewer runs out. */
+function placeFaceCard() {
+  const card = $('faceCard');
+  if (!cardAt || card.hidden) return;
+  const box = card.parentElement.getBoundingClientRect();
+  const x = cardAt.x - box.left, y = cardAt.y - box.top;
+  const right = x + 16 + card.offsetWidth <= box.width - 8;
+  const below = y + 16 + card.offsetHeight <= box.height - 8;
+  card.style.left = `${Math.max(8, right ? x + 16 : x - 16 - card.offsetWidth)}px`;
+  card.style.top = `${Math.max(8, below ? y + 16 : y - 16 - card.offsetHeight)}px`;
+}
+
+/**
+ * Draw the hovered face's stack. `event` moves the card; without one it is
+ * redrawn where it already is, which is what repainting under the cursor needs.
+ */
+function drawFaceCard(sel, event) {
+  const card = $('faceCard');
+  const l = sel && layers[sel.li];
+  // Placing a hole is a different job — the card would only be in the way.
+  if (!sel || !l?.model || holeMode) { card.hidden = true; return; }
+  if (event) cardAt = { x: event.clientX, y: event.clientY };
+
+  const { lo, hi } = l.model;
+  const stack = l.stacks[sel.id] ?? [];
+  const total = totalHeight(stack);
+
+  // Sliding along one face redraws nothing: the card only moves. Everything
+  // the drawing depends on is in the key, palette rows included.
+  const shows = [sel.li, sel.id, lo, hi, HUES,
+                 stack.map((layer) => `${layer.hue}@${layer.t}`)].join('/');
+  if (shows === cardShows && !card.hidden) return placeFaceCard();
+  cardShows = shows;
+
+  // Painted taller than the palette's top? Then that face sets the scale.
+  const top = Math.max(hi, total);
+  const shade = (layer) => shadeFor(layer.hue, layer.t, lo, hi).getStyle();
+
+  const bar = tag('div', 'bar');
+  bar.append(tag('div', 'tick', top.toFixed(2)));
+  const track = tag('div', 'track');
+  track.style.height = `${CARD_TRACK}px`;
+  for (const layer of stack) {          // column-reverse: bottom layer first
+    if (!(layer.t > 0)) continue;
+    const slab = tag('div', 'slab');
+    // A hair-thin layer still gets a sliver, or it would read as missing.
+    slab.style.height = `${Math.max(2, (layer.t / top) * CARD_TRACK)}px`;
+    slab.style.background = shade(layer);
+    track.append(slab);
+  }
+  bar.append(track, tag('div', 'tick', '0'));
+
+  const side = tag('div', 'side');
+  side.append(tag('div', 'title',
+    `${faceName(sel)} · ${l.model.regions[sel.id].area.toFixed(1)} mm²`));
+  if (total > 0) {
+    for (const layer of [...stack].reverse()) {   // the face's top layer first
+      const row = tag('div', 'row');
+      const chip = tag('div', 'chip');
+      chip.style.background = shade(layer);
+      row.append(chip, tag('span', '',
+        `${hueName(HUES[layer.hue])} · ${layer.t.toFixed(2)} mm`));
+      side.append(row);
+    }
+    side.append(tag('div', 'foot',
+      `${count(stack.length, 'layer')} · ${total.toFixed(2)} mm tall`));
+  } else {
+    side.append(tag('div', 'foot', 'open — nothing painted'));
+  }
+
+  card.textContent = '';
+  card.append(bar, side);
+  card.hidden = false;
+  placeFaceCard();
 }
 
 function updateReadout() {
@@ -1283,8 +1436,16 @@ function regionAt(event) {
 // user was orbiting and should not repaint whatever ends up under the cursor.
 let pressAt = null;
 canvas.addEventListener('pointerdown', (e) => { pressAt = { x: e.clientX, y: e.clientY }; });
-canvas.addEventListener('pointermove', (e) => { if (!pressAt) hover(regionAt(e)); });
+canvas.addEventListener('pointermove', (e) => {
+  // Mid-drag the user is orbiting, not reading: leave the highlight alone and
+  // take the card off the view until the pointer is free again.
+  if (pressAt) { $('faceCard').hidden = true; return; }
+  hover(regionAt(e), e);
+});
 canvas.addEventListener('pointerleave', () => hover(null));
+// Zooming moves the model out from under the cursor, so the card it left
+// behind would be describing whatever used to be there.
+canvas.addEventListener('wheel', () => { $('faceCard').hidden = true; }, { passive: true });
 // The browser's own middle-click autoscroll and right-click menu would fight
 // the stacking gestures, so both are suppressed over the canvas.
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1572,18 +1733,6 @@ async function loadStacked(l, fit = true) {
 let profilePicked = null;  // the profile drawing (File), null in standard mode
 let profileDims = null;    // { x, y } mm — what the profile measures
 
-/** The profile's own dimensions, measured by the server. */
-async function inspectSize(file) {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('sagitta', $('sagitta').value);
-  form.append('scale', '1');
-  const res = await fetch('/api/inspect', { method: 'POST', body: form });
-  const info = await res.json();
-  if (!res.ok) throw new Error(info.error ?? res.statusText);
-  return { x: info.size[0], y: info.size[1] };
-}
-
 /** Settings a swept frame takes over get out of the way while one is set. */
 function profileUI() {
   const on = !!profilePicked;
@@ -1647,6 +1796,110 @@ function scaledProfileWidth() {
   return profileDims ? profileDims.x * (Number($('profileScale').value) || 1) : 0;
 }
 
+/* ------------------------------------------------------------- boundary */
+
+// A second drawing — a closed polygon drawn over the pattern — bounds it:
+// whatever falls outside is cut off. It is read in the pattern's own
+// coordinates and scaled with it, so it lands where it was drawn; its own
+// size multiplier and nudge (in finished millimetres) place it by eye.
+let boundaryPicked = null;  // the boundary drawing (File), null to use the whole drawing
+let boundaryDims = null;    // { x, y } mm — what the boundary measures
+
+/** The boundary's own dimensions, measured by the server. */
+async function inspectSize(file) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('sagitta', $('sagitta').value);
+  form.append('scale', '1');
+  const res = await fetch('/api/inspect', { method: 'POST', body: form });
+  const info = await res.json();
+  if (!res.ok) throw new Error(info.error ?? res.statusText);
+  return { x: info.size[0], y: info.size[1] };
+}
+
+/** Show or hide the boundary controls and the ✕, and refresh the label. */
+function boundaryUI() {
+  const on = !!boundaryPicked;
+  $('boundaryName').textContent = boundaryPicked ? boundaryPicked.name : 'off — the whole drawing';
+  $('boundaryClear').hidden = !on;
+  $('boundaryOpts').hidden = !on;
+}
+
+/** Set (or clear, with null) the boundary polygon. */
+async function setBoundary(file) {
+  boundaryPicked = file;
+  boundaryDims = file ? await inspectSize(file) : null;
+  boundaryUI();
+}
+
+$('boundaryPick').onclick = () => $('boundaryFile').click();
+$('boundaryFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';              // picking the same file twice still fires
+  if (!file) return;
+  if (!DRAWING.test(file.name)) {
+    return setStatus('the boundary must be a .dxf or .svg file', true);
+  }
+  try {
+    await setBoundary(file);
+    // A boundary is a finished part, so it comes in at its own drawn size:
+    // scale ×1 now means the boundary file's units, not the pattern's.
+    useBoundarySize();
+    refit(`cropped to ${file.name} — ${boundaryDims.x.toFixed(1)} × `
+      + `${boundaryDims.y.toFixed(1)} mm at ×1`);
+  } catch (err) {
+    setStatus(String(err.message ?? err), true);
+  }
+};
+$('boundaryClear').onclick = async () => {
+  await setBoundary(null);
+  if (drawing) fitToYSize();
+  refit('back to the whole drawing');
+};
+
+// The boundary's own controls move the crop, so a change means a rebuild.
+// Growing the boundary also changes the finished size, so the scale re-fits
+// to the y size; nudging only slides it and leaves the size alone.
+for (const id of ['boundaryScale', 'boundaryX', 'boundaryY']) {
+  $(id).onchange = () => {
+    const v = Number($(id).value);
+    if (!Number.isFinite(v)) return setStatus(`${id} needs a number`, true);
+    if (id === 'boundaryScale' && !(v > 0)) {
+      return setStatus('boundary size must be greater than 0', true);
+    }
+    if (id === 'boundaryScale' && drawing) fitToYSize();
+    refit(id === 'boundaryScale'
+      ? `boundary is now ×${v} across — ${finishedSize()}`
+      : id === 'boundaryX'
+        ? `boundary nudged ${v} mm across — ${finishedSize()}`
+        : `boundary nudged ${v} mm up — ${finishedSize()}`);
+  };
+}
+
+// Walling the boundary is a pure geometry change: the finished size is the
+// same, so only the outlines are redrawn.
+$('boundaryWall').onchange = () => {
+  refit($('boundaryWall').checked
+    ? 'the boundary is walled — the crop has a rim'
+    : 'flush cut — faces end open at the boundary');
+};
+
+// Centring and fitting moves the boundary over the pattern but leaves the
+// finished size alone — it only decides which part of the pattern is kept.
+$('boundaryFit').onchange = () => {
+  refit($('boundaryFit').checked
+    ? `boundary centred and fitted — ${finishedSize()}`
+    : `boundary kept as drawn — ${finishedSize()}`);
+};
+
+// Back to the boundary's own units whenever the user wants it.
+$('boundary1to1').onclick = () => {
+  useBoundarySize();
+  refit(`boundary at its drawn size — ${finishedSize()}`);
+};
+
+boundaryUI();      // a browser that restored the state on reload starts right
+
 /* ------------------------------------------------------------------- size */
 
 // What the drawing measures before any scaling, from /api/inspect. Everything
@@ -1655,21 +1908,73 @@ let drawing = null;      // { x, y } in mm, or null before a drawing is read
 
 // The walls stand half their width outside the outermost curve on each side,
 // so they are part of what comes off the printer. In profile mode the profile's
-// own (scaled) width takes over from the wall width box.
-const frameWidth = () => profileDims ? scaledProfileWidth() : Number($('wallWidth').value || 0);
+// own (scaled) width takes over from the wall width box; confined, the frame
+// is pulled inside the drawing and adds nothing to it at all.
+const frameWidth = () =>
+  $('confineWalls').checked ? 0
+    : profileDims ? scaledProfileWidth()
+    : Number($('wallWidth').value || 0);
 
-const finishedY = (scale) => drawing.y * scale + frameWidth();
+// With a boundary loaded, the crop — not the pattern — is the finished
+// outline: what the model measures is the boundary's box (times its own size
+// multiplier). So the *scale* box reads the boundary's scale — ×1 is the
+// boundary file's own units — and the pattern is scaled underneath it by
+// whatever leaves the boundary at that size. The nudge only slides the box,
+// so it never changes the size.
+const boundaryRatio = () => {
+  if (!boundaryPicked || !$('boundaryFit').checked || !drawing || !boundaryDims) {
+    return 1;
+  }
+  const bx = boundaryDims.x || 1, by = boundaryDims.y || 1;
+  return Math.min(drawing.x / bx, drawing.y / by);
+};
+
+const outline = () => {
+  if (!boundaryPicked) return drawing;
+  const bs = Number($('boundaryScale').value) || 1;
+  return { x: boundaryDims.x * bs, y: boundaryDims.y * bs };
+};
+
+// The scale the pattern is actually drawn at on the server. The box reads the
+// finished outline's scale; with a centred-and-fitted boundary the pattern has
+// to be scaled by an extra 1/k so the boundary still lands at the box's scale
+// (the server's own fit cancels it out).
+const patternScale = () => {
+  const s = Number($('scale').value) || 1;
+  return boundaryPicked ? s / boundaryRatio() : s;
+};
+
+// Set the model to the boundary's exact drawn size: the boundary ×1 in its own
+// units, the pattern scaled to whatever fills it.
+function useBoundarySize() {
+  $('boundaryScale').value = 1;
+  $('scale').value = 1;
+  showYSize();
+}
+
+const finishedY = (scale) => {
+  const d = outline();
+  return d ? d.y * scale + frameWidth() : 0;
+};
 
 function finishedSize() {
-  if (!drawing) return 'unknown size';
+  const d = outline();
+  if (!d) return 'unknown size';
   const s = Number($('scale').value) || 1;
-  return `${(drawing.x * s + frameWidth()).toFixed(1)} × ${finishedY(s).toFixed(1)} mm`;
+  return `${(d.x * s + frameWidth()).toFixed(1)} × ${finishedY(s).toFixed(1)} mm`;
 }
 
 /** A stacked drawing's own scale, fitted to the same y size as the base. */
 function fitLayer(l) {
   const target = Number($('ySize').value);
   const wall = frameWidth();
+  // A boundary is drawn in the base drawing's coordinates and its nudge is in
+  // finished millimetres, so it only lands on the same place of every stacked
+  // drawing when they all share one pattern scale — the base drawing's.
+  if (boundaryPicked) {
+    l.scale = patternScale();
+    return;
+  }
   if (!l.drawing?.y || !(target > wall)) return;
   l.scale = round6((target - wall) / l.drawing.y);
 }
@@ -1678,12 +1983,13 @@ function fitLayer(l) {
 function fitToYSize() {
   const target = Number($('ySize').value);
   const wall = frameWidth();
-  if (!drawing || !drawing.y) return false;
+  const d = outline();
+  if (!d || !d.y) return false;
   if (!(target > wall)) {
     setStatus(`a y size of ${target} mm leaves no room for the ${wall} mm walls`, true);
     return false;
   }
-  $('scale').value = round6((target - wall) / drawing.y);
+  $('scale').value = round6((target - wall) / d.y);
   // Every stacked drawing is fitted to the same height, on its own proportions.
   for (const l of layers.slice(1)) fitLayer(l);
   return true;
@@ -1691,7 +1997,8 @@ function fitToYSize() {
 
 /** The other way round: what the scale in the box actually comes out as. */
 function showYSize() {
-  if (!drawing || !drawing.y) return;
+  const d = outline();
+  if (!d || !d.y) return;
   $('ySize').value = round3(finishedY(Number($('scale').value) || 1));
 }
 
@@ -1900,13 +2207,26 @@ function shapeForm() {
   // The drawings go in stacking order, base first; everything else about the
   // shape is shared, so it is sent once.
   for (const l of layers) form.append('file', l.file);
-  for (const id of SHAPE_FIELDS) form.append(id, $(id).value);
+  for (const id of SHAPE_FIELDS) {
+    if (id === 'scale') continue;   // sent below, as the pattern's own scale
+    form.append(id, $(id).value);
+  }
+  form.append('scale', String(patternScale()));
+  if ($('confineWalls').checked) form.append('confineWalls', '1');
   form.append('layers', selectedLayers());
   // One effect shapes every face of every drawing, so it travels once.
   for (const id of EFFECT_FIELDS) form.append(id, $(id).value);
   if (profilePicked) {
     form.append('profile', profilePicked);
     form.append('profileScale', $('profileScale').value);
+  }
+  if (boundaryPicked) {
+    form.append('boundary', boundaryPicked);
+    form.append('boundaryScale', $('boundaryScale').value);
+    form.append('boundaryX', $('boundaryX').value);
+    form.append('boundaryY', $('boundaryY').value);
+    if (!$('boundaryFit').checked) form.append('boundaryFit', '0');
+    if (!$('boundaryWall').checked) form.append('boundaryWall', '0');
   }
   if (layers[0].holes.length) form.append('holes', JSON.stringify(layers[0].holes));
 
@@ -1969,7 +2289,11 @@ async function generate(keep = null) {
     buildPalette(lo, hi);
     select(null);
     const faces = drawings.reduce((n, d) => n + d.regions.length, 0);
-    if (!keep && !mismatch) setStatus(`${faces} faces — pick a colour, then click a face`);
+    const cut = data.cropped ? `${data.cropped} curves cut off by the boundary` : '';
+    if (!keep && !mismatch) {
+      setStatus(`${faces} faces — pick a colour, then click a face`
+        + (cut ? `\n${cut}` : ''));
+    }
     return keep ? 'restored' : 'fresh';
   } catch (e) {
     setStatus(String(e.message ?? e), true);
@@ -2030,6 +2354,15 @@ for (const [id, note] of Object.entries(REFIT_FIELDS)) {
   };
 }
 
+// Confining the walls changes both the outlines and what the drawing measures
+// once printed, so the scale is re-fitted along with them.
+$('confineWalls').onchange = () => {
+  if (drawing) fitToYSize();
+  refit($('confineWalls').checked
+    ? `the walls now stay inside the outline — ${finishedSize()}`
+    : `the walls now straddle the outline — ${finishedSize()}`);
+};
+
 // The walls count towards the height, so widening them re-fits the scale
 // rather than quietly making the model taller than the y size says.
 $('wallWidth').onchange = () => {
@@ -2075,8 +2408,8 @@ function effectUI() {
 
 const effectNote = () => {
   if ($('effect').value !== 'maya-pyramid') return 'faces are flat again';
-  return `faces are stepped pyramids of ${count(Number($('effectSteps').value), 'terrace')}, `
-    + `each ${$('effectInset').value} mm further in`;
+  return `faces are stepped pyramids of up to ${count(Number($('effectSteps').value), 'terrace')}, `
+    + `each ${$('effectInset').value} mm further in and never thinner than 0.2 mm`;
 };
 
 $('effect').onchange = () => {
@@ -2160,16 +2493,26 @@ async function buildProject() {
     profile: profilePicked
       ? { name: profilePicked.name, data: await fileBase64(profilePicked) }
       : null,
+    boundary: boundaryPicked
+      ? { name: boundaryPicked.name, data: await fileBase64(boundaryPicked) }
+      : null,
     // layerHeight and ySize never reach the server — one drives the palette,
     // the other the scale — but the work is not the same without them, so they
     // travel with the rest of the settings.
     settings: Object.fromEntries(
-      [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize', 'profileScale']
+      [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize',
+        'profileScale', 'boundaryScale', 'boundaryX', 'boundaryY']
         .map((id) => [id, $(id).value]),
     ),
     layers: selectedLayers(),
     palette: [...HUES],
-    frame: { black: $('blackFrame').checked, layer: $('frameLayer').value },
+    frame: {
+      black: $('blackFrame').checked,
+      layer: $('frameLayer').value,
+      confined: $('confineWalls').checked,
+      boundaryFit: $('boundaryFit').checked,
+      boundaryWall: $('boundaryWall').checked,
+    },
     callback: callbackCode,
     faces: { stacks: layers[0].stacks },
     holes: layers[0].holes,
@@ -2262,6 +2605,10 @@ async function applyProject(project) {
     $('blackFrame').checked = !!project.frame.black;
     if (project.frame.layer) $('frameLayer').value = project.frame.layer;
   }
+  // Always set, not only when the project carries a frame: a project from
+  // before confining existed straddles the outline, exactly as it did, and
+  // must not inherit the box from whatever was on screen before it.
+  $('confineWalls').checked = !!project.frame?.confined;
   callbackCode = typeof project.callback === 'string' ? project.callback : null;
   // A project saved with fewer rows keeps every hue it has, at the same index,
   // so its face stacks still point at the colours they were painted with. Any
@@ -2284,6 +2631,25 @@ async function applyProject(project) {
     }
   } else {
     await setProfile(null);
+  }
+
+  // So must the boundary polygon, whose placement fields are already in the
+  // boxes above (the settings loop restores them).
+  if (project.boundary?.data) {
+    try {
+      await setBoundary(new File([fromBase64(project.boundary.data)],
+        project.boundary.name || 'boundary.dxf'));
+    } catch {
+      await setBoundary(null);  // an unreadable boundary should not block the project
+    }
+  } else {
+    await setBoundary(null);
+  }
+  if (project.frame?.boundaryWall !== undefined) {
+    $('boundaryWall').checked = !!project.frame.boundaryWall;
+  }
+  if (project.frame?.boundaryFit !== undefined) {
+    $('boundaryFit').checked = !!project.frame.boundaryFit;
   }
 
   // false: keep the scale the project was saved with, whatever the y size box

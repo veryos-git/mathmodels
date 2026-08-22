@@ -15,11 +15,21 @@ Usage:
                 [--region-min 0.2] [--region-max 2.0] [--region-step 0.1]
                 [--seed N] [--sagitta 0.02] [--layers A,B,C]
                 [--profile profile.dxf] [--also layer2.json]
+                [--boundary crop.dxf] [--no-boundary-wall]
                 [--effect maya-pyramid] [--effect-steps 4] [--effect-inset 0.3]
     dxf2stl.py input.dxf --inspect
 
 --profile takes a drawing holding one closed cross-section and sweeps it along
 every curve to form the frame, replacing the flat --wall-width ribbons.
+
+--boundary takes a drawing holding a closed polygon and cuts the pattern down
+to it: whatever lies outside is thrown away, and the boundary itself is walled
+so the cropped pattern comes out with a rim (--no-boundary-wall cuts flush
+instead). The polygon is read in the drawing's own coordinates and scaled with
+it, so it is drawn over the pattern; --boundary-scale, --boundary-x and
+--boundary-y place it by eye. --boundary-fit instead centres the boundary on
+the pattern and scales it uniformly to just fit inside it, for files that do
+not share a coordinate system.
 
 --effect reshapes every face without touching the painting: maya-pyramid
 splits a face's painted height into terraces, each stepped one --effect-inset
@@ -48,10 +58,12 @@ import numpy as np
 import svgelements
 import trimesh
 from ezdxf.path import make_path
+from shapely import STRtree
 from shapely.affinity import scale as aff_scale
 from shapely.affinity import translate
 from shapely.geometry import LinearRing, LineString, Point, Polygon
 from shapely.ops import polygonize, unary_union
+from shapely.prepared import prep
 
 # Entity types make_path() can turn into a polyline. Anything else (TEXT,
 # HATCH, SOLID, ...) carries no usable outline and is reported as skipped.
@@ -304,6 +316,9 @@ def inspect(path, sagitta, scale=1.0):
 
 MIN_REGION_AREA = 1e-6
 
+# A clipped curve shorter than this is a rounding artefact, not geometry.
+MIN_CURVE_LENGTH = 1e-6
+
 
 def polygons_of(geom):
     """Yield every Polygon contained in a shapely geometry."""
@@ -336,8 +351,72 @@ def grow_into_walls(region, overlap, silhouette):
     return max(parts, key=lambda p: p.area) if parts else region
 
 
-def plan_regions(curves, wall_width, wall_overlap=0.0):
-    """The wall ribbons and the faces they enclose, in a stable order."""
+def confine_curves(curves, wall_width):
+    """The curves redrawn so the walls end on the outermost line.
+
+    A curve is normally traced down the middle of its wall, so the frame
+    stands half a wall width outside the drawing: a 100 mm square walled
+    10 mm wide comes out 110 mm across. Confined, the outermost line is where
+    the model *ends* — that curve is moved half a wall width inwards and
+    everything else is trimmed to stay behind it, so the same square comes out
+    at exactly 100 mm with its walls still 10 mm thick.
+
+    Only the outside of the drawing moves. A shape sitting inside another one
+    is an island in its face and has nothing to do with how wide the model
+    prints, so it stays as drawn — as does anything with no room to pull a
+    wall into, such as an open stroke or a shape thinner than the wall.
+    """
+    lines = [LineString(c) for c in curves]
+    walls = unary_union(lines).buffer(wall_width / 2.0, cap_style="round",
+                                      join_style="round")
+    # One piece per connected group of walls, and the shape each one draws:
+    # the piece with its faces filled in.
+    pieces = list(polygons_of(walls))
+    shapes = [Polygon(p.exterior) for p in pieces]
+    tree = STRtree(shapes)
+
+    rooms = []   # per piece: where its centrelines may run, or None to leave it
+    outer = []   # the new outermost centrelines
+    for i, shape in enumerate(shapes):
+        # `within` is reflexive, so a shape always finds itself.
+        if any(j != i for j in tree.query(shape, predicate="within")):
+            rooms.append(None)
+            continue
+        # Taking the buffer back off the shape lands on the outermost curve,
+        # and a second half width in is where that curve has to run for its
+        # wall to end there instead of straddling it.
+        room = [p for p in polygons_of(shape.buffer(-wall_width))
+                if p.area >= MIN_REGION_AREA]
+        rooms.append(unary_union(room) if room else None)
+        outer += [list(p.exterior.coords) for p in room]
+
+    if all(room is None for room in rooms):
+        return curves
+
+    # Every curve lies inside exactly one piece — its own buffer is part of it.
+    pieces_tree = STRtree(pieces)
+    out = []
+    for line, coords in zip(lines, curves):
+        found = pieces_tree.query(line, predicate="intersects")
+        room = rooms[found[0]] if len(found) else None
+        if room is None:
+            out.append(coords)
+            continue
+        clipped = line.intersection(room)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if part.geom_type == "LineString" and part.length > MIN_CURVE_LENGTH:
+                out.append(list(part.coords))
+    return out + outer
+
+
+def plan_regions(curves, wall_width, wall_overlap=0.0, clip=None):
+    """The wall ribbons and the faces they enclose, in a stable order.
+
+    `clip` is the boundary the model may not reach past: everything is cut to
+    it before the faces are worked out, so a face's id is its place among the
+    faces that survive rather than among the ones the pattern had before it
+    was cropped.
+    """
     lines = [LineString(c) for c in curves]
 
     # Walls: every curve slotted to a ribbon.
@@ -347,6 +426,13 @@ def plan_regions(curves, wall_width, wall_overlap=0.0):
     # walls plus every face they enclose, and is robust against the small
     # gaps/overlaps that flattened arcs leave at intersections.
     silhouette = unary_union([Polygon(p.exterior) for p in polygons_of(walls)])
+
+    # The boundary is where the model stops. Both are cut *after* the
+    # silhouette is filled in, so a face the boundary crosses is trimmed to it
+    # rather than lost — whatever closed that face may itself be outside.
+    if clip is not None:
+        walls = unary_union(list(polygons_of(walls.intersection(clip))))
+        silhouette = unary_union(list(polygons_of(silhouette.intersection(clip))))
 
     # Regions: connected components of the silhouette minus the walls.
     regions = [p for p in polygons_of(silhouette.difference(walls)) if p.area >= MIN_REGION_AREA]
@@ -375,17 +461,31 @@ def plan_regions(curves, wall_width, wall_overlap=0.0):
 
 MITER_LIMIT = 2.0
 
-def load_profile(path, sagitta):
-    """The closed cross-section to sweep, anchored centre-x / bottom edge.
+def closed_faces(path, sagitta, what):
+    """Every area a drawing's lines enclose, rebuilt from loose entities.
 
-    The profile usually arrives as loose entities rather than one polyline,
-    so the outline is rebuilt by polygonizing. A snap-round comes first:
-    CAD exports carry ~1e-14 endpoint jitter that keeps polygonize from
-    closing rings. Interior construction lines dissolve in the union.
+    An outline usually arrives as separate lines and arcs rather than one
+    polyline, so the rings are recovered by polygonizing. A snap-round comes
+    first: CAD exports carry ~1e-14 endpoint jitter that keeps polygonize from
+    closing rings. The result is the *smallest* faces the lines enclose, so a
+    ring drawn inside another one comes back as two — see `even_odd`.
     """
     curves, _, _ = read_curves(path, sagitta)
     snapped = [[(round(x, 6), round(y, 6)) for x, y in c] for c in curves]
-    merged = unary_union(list(polygonize(unary_union([LineString(c) for c in snapped]))))
+    faces = list(polygonize(unary_union([LineString(c) for c in snapped])))
+    if not faces:
+        raise ConvertError(f"the {what} drawing has no closed outline — "
+                           f"the {what} must be a closed shape")
+    return faces
+
+
+def load_profile(path, sagitta):
+    """The closed cross-section to sweep, anchored centre-x / bottom edge.
+
+    Interior construction lines dissolve in the union, and the largest shape
+    left is the section — a profile is one closed outline, not several.
+    """
+    merged = unary_union(closed_faces(path, sagitta, "profile"))
     polys = list(polygons_of(merged))
     if not polys:
         raise ConvertError("the profile drawing has no closed outline — "
@@ -546,6 +646,106 @@ def sweep_profile(profile, chains):
     return trimesh.util.concatenate(meshes)
 
 
+# ------------------------------------------------------------- boundary crop
+#
+# A second drawing — a closed polygon — bounds the pattern: whatever lies
+# outside it is cut away. The polygon is read in the pattern's own coordinates
+# and scaled with it, so a crop drawn over the pattern lands where it was
+# drawn, with its own size multiplier and nudge on top for placing it by eye.
+
+
+def even_odd(faces):
+    """The faces a CAD fill would ink, given nested rings.
+
+    polygonize hands back the smallest faces the lines enclose, so a ring
+    inside another ring arrives as two: the inner disc, and the band between
+    them. Counting how many of those faces' outlines a face sits inside says
+    which are filled — odd is ink, even is a hole — which is what makes a
+    boundary drawn as two circles a ring rather than a disc.
+    """
+    shells = [Polygon(f.exterior) for f in faces]
+    inked = []
+    for face in faces:
+        point = face.representative_point()
+        if sum(1 for shell in shells if shell.contains(point)) % 2:
+            inked.append(face)
+    return inked
+
+
+def load_boundary(path, sagitta):
+    """The bounding polygon, in the drawing's own coordinates."""
+    boundary = unary_union(even_odd(closed_faces(path, sagitta, "boundary")))
+    polys = [p for p in polygons_of(boundary) if p.area >= MIN_REGION_AREA]
+    if not polys:
+        raise ConvertError("the boundary drawing encloses no area — "
+                           "the boundary must be a closed polygon")
+    return unary_union(polys)
+
+
+def place_boundary(boundary, scale, boundary_scale, dx, dy, fit_to=None):
+    """The boundary moved into the scaled drawing's coordinates.
+
+    As drawn, it is scaled with the pattern and stays registered on it. Fit
+    instead re-anchors it: the boundary is centred on the pattern's box and
+    scaled — uniformly, so its shape holds — until it just fits inside it.
+    That is the behaviour you want when the two files came out of different
+    coordinate systems. Its own size multiplier works about its centre, and
+    the nudge is in finished millimetres — the units the model is measured
+    in — so both mean the same thing whatever the drawing was drawn in.
+    """
+    # The drawing's scale comes first — the fit is worked out in the scaled
+    # coordinates, where the pattern's box is measured.
+    placed = aff_scale(boundary, xfact=scale, yfact=scale, origin=(0.0, 0.0))
+    if fit_to is not None:
+        (pminx, pminy, pmaxx, pmaxy) = fit_to
+        bminx, bminy, bmaxx, bmaxy = placed.bounds
+        bw, bh = bmaxx - bminx, bmaxy - bminy
+        pw, ph = pmaxx - pminx, pmaxy - pminy
+        # Uniform, so the boundary is not stretched; it just fits, so a
+        # boundary drawn square stays square.
+        k = min(pw / bw, ph / bh) if bw and bh else 1.0
+        placed = aff_scale(placed, xfact=k, yfact=k, origin="center")
+        placed = translate(placed,
+                           xoff=(pminx + pmaxx) / 2.0 - (bminx + bmaxx) / 2.0,
+                           yoff=(pminy + pmaxy) / 2.0 - (bminy + bmaxy) / 2.0)
+    if boundary_scale != 1.0:
+        placed = aff_scale(placed, xfact=boundary_scale, yfact=boundary_scale,
+                           origin="center")
+    if dx or dy:
+        placed = translate(placed, xoff=dx, yoff=dy)
+    return placed
+
+
+def clip_curves(curves, region):
+    """Every curve trimmed to the part of it that lies inside `region`.
+
+    Most curves are wholly in or wholly out, and answering that from a
+    prepared geometry is far cheaper than intersecting each one: a pattern
+    cropped to a small window is thousands of curves thrown away untouched.
+    """
+    guard = prep(region)
+    out = []
+    for coords in curves:
+        line = LineString(coords)
+        if guard.contains(line):
+            out.append(coords)
+            continue
+        if not guard.intersects(line):
+            continue
+        clipped = line.intersection(region)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if part.geom_type == "LineString" and part.length > MIN_CURVE_LENGTH:
+                out.append(list(part.coords))
+    return out
+
+
+def boundary_curves(region):
+    """The boundary's own outlines, to be walled like any other curve."""
+    return [list(ring.coords)
+            for poly in polygons_of(region)
+            for ring in (poly.exterior, *poly.interiors)]
+
+
 def polys_centre(polys):
     """The centre of the bounding box holding every polygon."""
     minx = min(p.bounds[0] for p in polys)
@@ -555,13 +755,13 @@ def polys_centre(polys):
     return ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
 
 
-def plan_drawing(path, scale, layers_csv, args):
+def plan_drawing(path, scale, layers_csv, args, boundary=None):
     """One drawing read and planned into walls and faces.
 
-    This is the whole per-drawing pipeline: curves in, profile sweep if there
-    is one, then the wall ribbons and the regions they enclose. Stacking
-    several drawings means calling this once per drawing and offsetting the
-    results.
+    This is the whole per-drawing pipeline: curves in, the boundary crop and
+    the profile sweep if there are any, then the wall ribbons and the regions
+    they enclose. Stacking several drawings means calling this once per
+    drawing and offsetting the results.
     """
     layers = None
     if layers_csv:
@@ -569,7 +769,7 @@ def plan_drawing(path, scale, layers_csv, args):
     curves, used, skipped = read_curves(path, args.sagitta, layers, scale)
 
     wall_width, wall_height = args.wall_width, args.wall_height
-    frame_mesh = None
+    profile = None
     if args.profile:
         profile = load_profile(args.profile, args.sagitta)
         if args.profile_scale != 1.0:
@@ -581,14 +781,70 @@ def plan_drawing(path, scale, layers_csv, args):
         # The profile sets the frame's dimensions: its x span is the wall
         # width the faces are planned against, its top is the wall height.
         wall_width, wall_height = maxx - minx, maxy
-        frame_mesh = sweep_profile(profile, chain_curves(curves))
 
-    wall_polys, region_polys = plan_regions(curves, wall_width, args.wall_overlap)
+    # The boundary crops the pattern. Walled — the default — the cut curves
+    # plus the boundary's own rings are the drawing from here on, so the rim
+    # closes the faces along the cut like any other wall. Cut flush instead and
+    # the pattern is planned as drawn and trimmed afterwards, so a face the cut
+    # runs through survives as the part of it that is inside.
+    crop = n_cropped = None
+    n_curves = len(curves)
+    if boundary is not None:
+        fit_to = None
+        if args.boundary_fit:
+            # The pattern's own box, in its drawing units, before scaling: the
+            # boundary is fitted to this, so the crop lands on the pattern
+            # whatever coordinate systems the two files were drawn in.
+            xs = [p[0] for c in curves for p in c]
+            ys = [p[1] for c in curves for p in c]
+            fit_to = (min(xs), min(ys), max(xs), max(ys))
+        crop = place_boundary(boundary, scale, args.boundary_scale,
+                              args.boundary_x, args.boundary_y, fit_to)
+        inside = clip_curves(curves, crop)
+        if not inside:
+            raise ConvertError("the boundary does not overlap the drawing — "
+                               "nothing of the pattern would be left")
+        n_cropped = len(curves) - len(inside)
+        n_curves = len(inside)
+        if args.boundary_wall:
+            rings = boundary_curves(crop)
+            curves = inside + rings
+            n_curves = len(curves)
+
+    # Confining moves the outermost curves, so it has to happen before
+    # anything is built on them — the sweep included.
+    if args.confine_walls:
+        curves = confine_curves(curves, wall_width)
+
+    # A swept frame is a mesh, and a mesh cannot be cut here, so the sweep
+    # follows only what lies inside the boundary. With the boundary walled the
+    # curves are already trimmed to it.
+    if profile:
+        swept = curves if crop is None or args.boundary_wall \
+            else clip_curves(curves, crop)
+        frame_mesh = sweep_profile(profile, chain_curves(swept))
+    else:
+        frame_mesh = None
+
+    # Where the model is allowed to reach. A walled boundary is a curve like
+    # any other, so its wall straddles the line with half of it outside, just
+    # as the drawing's own outermost curve does; confined, the model ends on
+    # the line. With no wall the cut is flush and the boundary itself is the
+    # edge of the model.
+    clip = None
+    if crop is not None:
+        clip = crop if args.confine_walls or not args.boundary_wall else \
+            crop.buffer(wall_width / 2.0, join_style="round", quad_segs=8)
+
+    wall_polys, region_polys = plan_regions(curves, wall_width,
+                                            args.wall_overlap, clip)
     summary = {
-        "curves": len(curves),
+        "curves": n_curves,
         "layers": [{"name": n, "entities": c} for n, c in sorted(used.items())],
         "skipped": [{"type": t, "count": c} for t, c in sorted(skipped.items())],
     }
+    if n_cropped is not None:
+        summary["cropped"] = n_cropped
     return {
         "wall_polys": wall_polys,
         "region_polys": region_polys,
@@ -690,6 +946,10 @@ EFFECTS = ("none", "maya-pyramid")
 # in the preview, and a pyramid that fine is better printed than previewed.
 MAX_EFFECT_STEPS = 24
 
+# A terrace thinner than this will not print as a layer of its own, so a short
+# face shares its height between fewer terraces instead.
+MIN_TERRACE_THICKNESS = 0.2
+
 
 def inset_polys(poly, distance):
     """The outline pulled `distance` mm in from its own border, as the pieces
@@ -749,12 +1009,18 @@ def pyramid_slabs(poly, stack, steps, inset):
     middle, so a face painted in bands still comes out in those bands.
 
     The height is shared between the terraces that fit, so a face that comes
-    to a point early still stands as tall as it was painted.
+    to a point early still stands as tall as it was painted — and a face too
+    short for that many steps is built from fewer of them, never thinner than
+    MIN_TERRACE_THICKNESS each.
     """
     total = sum(layer["t"] for layer in stack)
     terraces = pyramid_steps(poly, steps, inset) if total > 0 else []
     if not terraces:
         return
+    # The epsilon keeps a height that is an exact multiple of the minimum
+    # (0.6 / 0.2 lands just under 3 in floating point) from losing a terrace.
+    fit = max(1, int(total / MIN_TERRACE_THICKNESS + 1e-9))
+    terraces = terraces[:fit]
     thickness = total / len(terraces)
     for k, faces in enumerate(terraces):
         z = thickness * k
@@ -1176,6 +1442,10 @@ def main():
                     help="comma-separated layer names to use (default: all)")
     ap.add_argument("--wall-width", type=float, default=1.0)
     ap.add_argument("--wall-height", type=float, default=2.0)
+    ap.add_argument("--confine-walls", action="store_true",
+                    help="keep the model inside its outermost line: the outer "
+                         "curves are traced along the inside of the wall "
+                         "instead of down its middle")
     ap.add_argument("--wall-overlap", type=float, default=0.1,
                     help="how far each face reaches into the wall around it, so "
                          "the two fuse when printed (0 for an exact fit)")
@@ -1194,6 +1464,27 @@ def main():
     ap.add_argument("--profile-scale", type=float, default=1.0,
                     help="stretch the profile's width (its x axis); the height "
                          "stays as drawn")
+    ap.add_argument("--boundary", default=None, metavar="FILE",
+                    help="DXF/SVG holding a closed polygon that bounds the "
+                         "drawing: everything outside it is cut away. It is "
+                         "read in the drawing's own coordinates and scaled "
+                         "with it, so draw it over the pattern")
+    ap.add_argument("--boundary-fit", dest="boundary_fit",
+                    action=argparse.BooleanOptionalAction, default=True,
+                    help="centre the boundary on the pattern and scale it "
+                         "uniformly to just fit inside it — for files that do "
+                         "not share a coordinate system (--no-boundary-fit "
+                         "keeps the boundary as drawn)")
+    ap.add_argument("--no-boundary-wall", dest="boundary_wall",
+                    action="store_false", default=True,
+                    help="cut flush at the boundary instead of walling it, "
+                         "leaving the faces along the cut open")
+    ap.add_argument("--boundary-scale", type=float, default=1.0,
+                    help="resize the boundary about its own centre")
+    ap.add_argument("--boundary-x", type=float, default=0.0, metavar="MM",
+                    help="nudge the boundary sideways, in finished millimetres")
+    ap.add_argument("--boundary-y", type=float, default=0.0, metavar="MM",
+                    help="nudge the boundary up or down, in finished millimetres")
     ap.add_argument("--effect", choices=EFFECTS, default="none",
                     help="reshape every face: maya-pyramid steps each one in "
                          "from its own outline, bottom to top")
@@ -1259,13 +1550,22 @@ def main():
             raise ConvertError("a layered frame needs flat walls — "
                                "clear the frame layers or the profile")
 
+    # One boundary bounds every drawing in the stack. It is read once, in the
+    # drawings' own coordinates, and placed per drawing at that drawing's
+    # scale, so drawings sharing a coordinate system are cropped alike.
+    boundary = None
+    if args.boundary:
+        positive("boundary size", args.boundary_scale)
+        boundary = load_boundary(args.boundary, args.sagitta)
+
     # Every drawing is planned on its own first; stacking shifts them after.
-    layers = [dict(plan_drawing(args.input, args.scale, args.layers, args),
+    layers = [dict(plan_drawing(args.input, args.scale, args.layers, args,
+                                boundary),
                    holes=holes, spec=None)]
     for spec in specs:
         layers.append(dict(
             plan_drawing(spec["file"], spec.get("scale", 1.0),
-                         spec.get("layers"), args),
+                         spec.get("layers"), args, boundary),
             holes=spec.get("holes", []), spec=spec))
 
     # Added drawings are centred on the base drawing's centre; the base keeps
