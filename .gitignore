@@ -1,0 +1,5 @@
+# The Python environment is built locally by tools/setup.ts on `deno task
+# start`. It is machine-specific (interpreter paths, compiled wheels), so
+# committing it breaks on any other machine or Python version.
+.venv/
+__pycache__/

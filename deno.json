@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "setup": "deno run --allow-read=. --allow-write=.venv --allow-run=python3,.venv/bin/python tools/setup.ts",
+    "setup": "deno run --allow-read=. --allow-write=.venv --allow-run=python3,python3.10,python3.11,python3.12,python3.13,.venv/bin/python tools/setup.ts",
     "start": {
       "command": "deno run --allow-net --allow-read --allow-write=/tmp,projects --allow-run=.venv/bin/python --allow-env=PORT,PROJECT_DIR server.ts",
       "dependencies": ["setup"]
