@@ -26,23 +26,34 @@
   #drop:hover, #drop.over { border-color: #3b82f6; background: #1a2130; color: #cbd5e1; }
   #drop strong { color: #ddd; display: block; word-break: break-all; }
   #drop small { color: #6b7280; }
-  #file { display: none; }
+  #file, #profileFile, #fileAdd, #boundaryFile { display: none; }
 
   /* min-width:0 beats the UA's min-content sizing: without it the palette's
      widest row pushes the whole sidebar out instead of scrolling inside it */
   fieldset { margin: 16px 0 0; padding: 10px 12px; border: 1px solid #2a2e35; border-radius: 8px;
              min-width: 0; }
   legend { color: #9aa3af; font-size: 12px; padding: 0 4px; }
-  #layers { display: grid; gap: 4px; max-height: 150px; overflow-y: auto; }
-  #layers label { display: flex; gap: 8px; align-items: center; margin: 0; color: #ddd;
-                  font-size: 13px; cursor: pointer; }
-  #layers span { color: #6b7280; margin-left: auto; font-size: 11px; }
+  #layers, .sublist { display: grid; gap: 4px; max-height: 150px; overflow-y: auto; }
+  #layers label, .sublist label { display: flex; gap: 8px; align-items: center; margin: 0;
+                  color: #ddd; font-size: 13px; cursor: pointer; }
+  #layers span, .sublist span { color: #6b7280; margin-left: auto; font-size: 11px; }
+
+  /* one row per stacked drawing: visibility, name, and a ✕ above the base */
+  #drawings { display: grid; gap: 4px; font-size: 12px; margin-bottom: 4px; }
+  .drawing-row { display: flex; gap: 6px; align-items: center; }
+  .drawing-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drawing-row button { margin: 0; padding: 4px 8px; font-size: 12px; width: auto; }
+  #drawings .sublist { margin: 2px 0 4px 22px; }
+  #addDrawing { margin-top: 8px; }
 
   /* palette: one row per hue, brightest (lowest) to darkest (tallest).
      The column count is set from JS — with a fine layer height there are far
      more shades than fit, so the whole block scrolls sideways as one. */
   #paletteScroll { overflow-x: auto; padding-bottom: 4px; }
-  #swatches { display: grid; gap: 6px; }
+  #swatches, #mixes { display: grid; gap: 6px; }
+  #mixHead { margin: 12px 0 6px; font-size: 11px; color: #6b7280; }
+  /* a mix has no picker of its own: its two hues come from the rows above */
+  .mix-chip { width: 26px; height: 34px; border-radius: 5px; border: 1px solid #2a2e35; }
   .hue-row { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 2px;
              width: max-content; min-width: 100%; }
   .hue-pick { width: 26px; height: 34px; padding: 0; border: 1px solid #2a2e35;
@@ -113,6 +124,25 @@
              background: rgba(20,22,26,.85); border: 1px solid #2a2e35; border-radius: 6px;
              padding: 6px 10px; pointer-events: none; white-space: pre-line; }
   #tools button[aria-pressed=true] { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  /* the hovered face's stack, drawn under the cursor */
+  #faceCard { position: absolute; z-index: 5; pointer-events: none; display: flex; gap: 10px;
+              font-size: 12px; color: #cbd5e1; background: rgba(20,22,26,.94);
+              border: 1px solid #2a2e35; border-radius: 8px; padding: 8px 10px;
+              box-shadow: 0 8px 20px rgba(0,0,0,.5); }
+  #faceCard[hidden] { display: none; }   /* display:flex would otherwise win */
+  #faceCard .bar { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #faceCard .tick { font-size: 10px; color: #4b5563; }
+  #faceCard .track { width: 20px; border: 1px solid #2a2e35; border-radius: 3px;
+                     background: #101216; overflow: hidden;
+                     display: flex; flex-direction: column-reverse; }
+  /* the hairline is what separates one layer from the next in the bar */
+  #faceCard .slab { width: 100%; box-shadow: inset 0 1px 0 rgba(0,0,0,.45); }
+  #faceCard .side { display: grid; align-content: start; gap: 3px; }
+  #faceCard .title { color: #ddd; }
+  #faceCard .row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #faceCard .chip { width: 9px; height: 9px; border-radius: 2px; flex: none;
+                    border: 1px solid rgba(255,255,255,.15); }
+  #faceCard .foot { color: #6b7280; margin-top: 2px; }
 
   /* callback editor */
   #editorOverlay { position: fixed; inset: 0; z-index: 20; background: rgba(8,10,13,.72);
@@ -130,6 +160,9 @@
   #editorStatus { flex: 1; white-space: pre-wrap; }
   #editorStatus.error { color: #f87171; }
   #editorHost { min-height: 0; }
+  #effect { width: 100%; padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
+         border-radius: 6px; color: #ddd; }
+  #effect:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   #templatePick { padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
                   border-radius: 6px; color: #ddd; font-size: 13px; max-width: 200px; }
   #templatePick:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
@@ -169,11 +202,59 @@
     <div id="layers"></div>
   </fieldset>
 
+  <fieldset id="drawingsBox" hidden>
+    <legend>drawings</legend>
+    <div id="drawings"></div>
+    <button class="ghost" id="addDrawing" title="Stack another DXF or SVG on top of this model">add drawing…</button>
+  </fieldset>
+  <input type="file" id="fileAdd" accept=".dxf,.svg,application/dxf,image/svg+xml">
+
+  <fieldset id="boundaryBox">
+    <legend>boundary</legend>
+    <div class="seed-row" title="A DXF or SVG holding a closed polygon drawn over the pattern: everything outside it is cut off">
+      <button class="ghost" id="boundaryPick">boundary…</button>
+      <span class="muted" id="boundaryName">off — the whole drawing</span>
+      <button class="ghost" id="boundaryClear" hidden title="Use the whole drawing again">✕</button>
+    </div>
+    <input type="file" id="boundaryFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+    <div id="boundaryOpts" hidden>
+      <label class="check" title="Centre the boundary on the pattern and scale it uniformly to just fit inside it — the right choice when the two files came out of different coordinate systems. Off keeps the boundary exactly where it was drawn.">
+        <input type="checkbox" id="boundaryFit" checked> centre &amp; fit to the pattern</label>
+      <label class="check" title="Wall the boundary, so the cropped pattern comes out with a rim around it — off cuts flush and leaves the faces along the cut open">
+        <input type="checkbox" id="boundaryWall" checked> wall along the boundary</label>
+      <div class="row">
+        <div><label for="boundaryScale" title="Resizes the boundary about its own centre, so the same polygon can crop a bigger or smaller piece">boundary size (×)</label>
+          <input type="number" id="boundaryScale" value="1" step="0.05" min="0.01"></div>
+        <div><label for="boundaryX" title="Slide the boundary across the drawing, in finished millimetres">nudge x (mm)</label>
+          <input type="number" id="boundaryX" value="0" step="1"></div>
+      </div>
+      <div class="row">
+        <div><label for="boundaryY" title="Slide the boundary up or down the drawing, in finished millimetres">nudge y (mm)</label>
+          <input type="number" id="boundaryY" value="0" step="1"></div>
+      </div>
+      <div class="seed-row" style="margin-top:8px">
+        <button class="ghost" id="boundary1to1" title="Set the model to the boundary's exact drawn size — scale ×1 means the boundary file's own units">use boundary size (1:1)</button>
+      </div>
+    </div>
+  </fieldset>
+
   <div class="row">
     <div><label for="wallWidth">wall width (mm)</label>
       <input type="number" id="wallWidth" value="1.0" step="0.1" min="0.1"></div>
     <div><label for="wallHeight">wall height (mm)</label>
-      <input type="number" id="wallHeight" value="2.0" step="0.1" min="0.1"></div>
+      <input type="number" id="wallHeight" value="1.0" step="0.1" min="0.1"></div>
+  </div>
+  <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the drawing — instead of the frame standing half a wall width outside it">
+    <input type="checkbox" id="confineWalls"> keep walls inside the outline</label>
+  <div class="seed-row" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
+    <button class="ghost" id="profilePick">sweep profile…</button>
+    <span class="muted" id="profileName">off — flat walls</span>
+    <button class="ghost" id="profileClear" hidden title="Back to flat walls">✕</button>
+  </div>
+  <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+  <div class="row" id="profileScaleRow" hidden>
+    <div><label for="profileScale" title="Stretches the profile's width — its height stays as drawn">profile width (×)</label>
+      <input type="number" id="profileScale" value="1" step="0.05" min="0.05"></div>
   </div>
   <div class="row">
     <div><label for="wallOverlap" title="How far each face reaches into the wall around it, so the two fuse when printed">wall overlap (mm)</label>
@@ -187,7 +268,7 @@
     <div><label for="regionMin">lowest face (mm)</label>
       <input type="number" id="regionMin" value="0.2" step="0.1" min="0"></div>
     <div><label for="regionMax">tallest face (mm)</label>
-      <input type="number" id="regionMax" value="2.0" step="0.1" min="0.1"></div>
+      <input type="number" id="regionMax" value="1.0" step="0.1" min="0.1"></div>
   </div>
   <div class="row">
     <div><label for="layerHeight" title="Your slicer's layer height — every shade in the palette is a whole number of these">layer height (mm)</label>
@@ -202,6 +283,21 @@
       <input type="number" id="scale" value="1" step="any" min="0.000001"></div>
   </div>
 
+  <fieldset id="effectBox">
+    <legend>effects</legend>
+    <label for="effect" title="Reshapes every face without changing what you painted on it">face effect</label>
+    <select id="effect">
+      <option value="none">none — flat faces</option>
+      <option value="maya-pyramid">maya pyramid regions</option>
+    </select>
+    <div class="row" id="pyramidRow" hidden>
+      <div><label for="effectSteps" title="How many terraces a face is built from; its painted height is shared between them, never thinner than 0.2 mm each">steps</label>
+        <input type="number" id="effectSteps" value="4" step="1" min="1" max="24"></div>
+      <div><label for="effectInset" title="How much further in from the outline each terrace sits">step inset (mm)</label>
+        <input type="number" id="effectInset" value="0.3" step="0.05" min="0.01"></div>
+    </div>
+  </fieldset>
+
   <label for="seed">seed (empty = random)</label>
   <div class="seed-row">
     <input type="number" id="seed" placeholder="random" step="1">
@@ -215,6 +311,9 @@
     <div id="paletteScroll">
       <div id="swatches"></div>
       <div class="scale" id="levelScale"></div>
+      <div id="mixHead"></div>
+      <div id="mixes"></div>
+      <div class="scale" id="mixScale"></div>
     </div>
     <label for="height">selected face height (mm)</label>
     <input type="number" id="height" step="0.1" min="0" disabled>
@@ -275,17 +374,19 @@
     <button class="ghost" id="wire" hidden>Wireframe</button>
   </div>
   <div id="readout" hidden></div>
+  <div id="faceCard" hidden></div>
 </main>
 
 <script type="importmap">
 { "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
 } }
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -295,11 +396,14 @@ const round6 = (v) => Math.round(v * 1e6) / 1e6;
 
 /* --------------------------------------------------------------- palette */
 
-// Four rows, 120 filling the widest gap. All four plus a solid frame is five
-// filaments; turning the black frame off puts the frame back on the palette's
-// own colours and brings that back to four.
-const DEFAULT_HUES = [35, 120, 186, 288];
+// Three base hues, spread as far apart as three can be: everything else on the
+// palette is built by stacking two of them. Three plus a solid frame is four
+// filaments, which is what a Snapmaker holds.
+const DEFAULT_HUES = [35, 186, 288];
 let HUES = [...DEFAULT_HUES];     // one row each, editable via the row's swatch
+
+// Every pair of base hues, each one bottom of its own mix and top of another.
+const MIXES = [[0, 1], [1, 2], [2, 0]];
 
 // Only the hue is taken from the picker: brightness has to stay free to mean
 // height, which is the whole point of the palette.
@@ -320,7 +424,7 @@ const SAT_LO = 0.45, SAT_HI = 0.70;
 /** The slicer layer height every palette step is a whole multiple of. */
 function layerHeight() {
   const v = Number($('layerHeight').value);
-  return v > 0 ? v : 0.1;
+  return v > 0 ? v : 0.2;
 }
 
 /** Round a height to a whole number of print layers. */
@@ -363,6 +467,16 @@ function levelHeight(i, lo, hi) {
 }
 
 /**
+ * The half-heights a mix can be built from. A mix is two layers, one of each
+ * hue, so each half has to be a printable height in its own right and the two
+ * together must still fit under the tallest face — which works out at half the
+ * steps a base row has.
+ */
+function mixLevels(lo, hi) {
+  return levels(lo, hi).filter((h) => 2 * h <= hi + 1e-9);
+}
+
+/**
  * The colour a face gets, from its hue row and how high it stands. The HSL is
  * given as sRGB: three.js otherwise reads it as linear and hands it back
  * through the transfer function, which flattens the ramp towards white — with
@@ -375,9 +489,32 @@ function shadeFor(hue, height, lo, hi) {
     LIGHT_HI - (LIGHT_HI - LIGHT_LO) * t, THREE.SRGBColorSpace);
 }
 
-// Infinity so the first palette build clamps it to the tallest swatch, however
-// many the layer height turns out to give.
-let active = { hue: 0, level: Infinity };     // the swatch currently held
+/**
+ * The swatch currently held: one hue row, or the two of a mix, bottom first.
+ * `level` indexes whichever list that row offers. Infinity so the first palette
+ * build clamps it to the tallest swatch, however many there turn out to be.
+ */
+let active = { hues: [0], level: Infinity };
+
+const isMix = (brush = active) => brush.hues.length > 1;
+
+/** The heights the armed row offers — a mix trades half of them for a second hue. */
+const brushHeights = (lo, hi) => (isMix() ? mixLevels(lo, hi) : levels(lo, hi));
+
+/** The layers one click of the armed swatch lays down, bottom first. */
+function brushLayers() {
+  const m = baseModel();
+  const list = brushHeights(m.lo, m.hi);
+  const t = list[clamp(active.level, 0, list.length - 1)];
+  // Both halves of a mix are the same thickness, so one map covers either case.
+  return active.hues.map((hue) => ({ hue, t }));
+}
+
+/** What the armed swatch is, for a status line. */
+function brushName() {
+  const names = active.hues.map((h) => hueName(HUES[h]));
+  return isMix() ? `${names[0]} under ${names[1]}` : names[0];
+}
 
 /** Repoint one palette row at a new hue and recolour the faces using it. */
 function setHue(row, hex, lo, hi) {
@@ -392,20 +529,62 @@ function setHue(row, hex, lo, hi) {
   }
   HUES[row] = hsl.h * 360;
   buildPalette(lo, hi);
-  for (let i = 0; i < stacks.length; i++) {
-    if (stacks[i].some((l) => l.hue === row)) rebuildRegion(i);
-  }
-  rebuildFrame();          // the frame cycles the palette as well
+  layers.forEach((l, li) => {
+    for (let i = 0; i < l.stacks.length; i++) {
+      if (l.stacks[i].some((s) => s.hue === row)) rebuildRegion(li, i);
+    }
+    rebuildFrame(li);          // the frame cycles the palette as well
+  });
   setStatus(`row ${row + 1} is now ${hueName(HUES[row])}`);
+}
+
+/** Arm a swatch, and leave it the only one showing as held. */
+function arm(hues, level, button) {
+  // Only arm the colour. Repainting the selected face here would wipe a stack
+  // the moment you picked the next layer's colour.
+  active = { hues, level };
+  for (const s of $('paletteScroll').querySelectorAll('.swatch')) {
+    s.setAttribute('aria-pressed', 'false');
+  }
+  button.setAttribute('aria-pressed', 'true');
+}
+
+const held = (hues, level) => active.level === level
+  && active.hues.length === hues.length
+  && active.hues.every((h, i) => h === hues[i]);
+
+/**
+ * The heights under a row of swatches. A number under every one would be a
+ * smear once the steps get fine, so only about five are labelled — the ends
+ * always among them, and nothing so close to the last that the labels touch.
+ */
+function buildScale(scale, columns, heights) {
+  scale.textContent = '';
+  scale.style.gridTemplateColumns = columns;
+  scale.append(document.createElement('div'));   // spacer under the pickers
+  const last = heights.length - 1;
+  const every = Math.ceil(heights.length / 5);
+  heights.forEach((h, i) => {
+    const cell = document.createElement('div');
+    if (i === last || (i % every === 0 && last - i >= every)) {
+      cell.append(Object.assign(document.createElement('span'),
+        { textContent: h.toFixed(2) }));
+    }
+    scale.append(cell);
+  });
 }
 
 function buildPalette(lo, hi) {
   const list = levels(lo, hi);
-  active.level = clamp(active.level, 0, list.length - 1);
+  const halves = mixLevels(lo, hi);
+  // The armed swatch may be on a row that has just changed length — or on a mix
+  // row that a shorter range has taken away altogether.
+  if (isMix() && !halves.length) active = { hues: [active.hues[0]], level: Infinity };
+  active.level = clamp(active.level, 0, brushHeights(lo, hi).length - 1);
   $('height').step = layerHeight();
 
-  // Every row and the scale under them share one set of columns, so the
-  // heights stay lined up with their swatches however many there are.
+  // Every row and the scale under it share one set of columns, so the heights
+  // stay lined up with their swatches however many there are.
   const columns = `26px repeat(${list.length}, minmax(10px, 1fr))`;
 
   const wrap = $('swatches');
@@ -430,38 +609,76 @@ function buildPalette(lo, hi) {
       b.className = 'swatch';
       b.type = 'button';
       b.style.background = '#' + shadeFor(hue, h, lo, hi).getHexString();
-      b.title = `${h.toFixed(2)} mm`;
+      b.title = `${h.toFixed(2)} mm of ${hueName(HUES[hue])}`;
       b.setAttribute('aria-label', `hue ${hue + 1}, ${h.toFixed(2)} mm`);
-      b.setAttribute('aria-pressed', String(active.hue === hue && active.level === level));
-      b.onclick = () => {
-        // Only arm the colour. Repainting the selected face here would wipe a
-        // stack the moment you picked the next layer's colour.
-        active = { hue, level };
-        for (const s of wrap.querySelectorAll('.swatch')) s.setAttribute('aria-pressed', 'false');
-        b.setAttribute('aria-pressed', 'true');
-      };
+      b.setAttribute('aria-pressed', String(held([hue], level)));
+      b.onclick = () => arm([hue], level, b);
       row.append(b);
     });
     wrap.append(row);
   });
+  buildScale($('levelScale'), columns, list);
 
-  const scale = $('levelScale');
-  scale.textContent = '';
-  scale.style.gridTemplateColumns = columns;
-  scale.append(document.createElement('div'));   // spacer under the pickers
-  // A number under every swatch would be a smear once the steps get fine, so
-  // only about five are labelled — the ends always among them, and nothing so
-  // close to the tallest that the two labels touch.
-  const every = Math.ceil(list.length / 5);
-  list.forEach((h, level) => {
-    const cell = document.createElement('div');
-    const last = list.length - 1;
-    if (level === last || (level % every === 0 && last - level >= every)) {
-      cell.append(Object.assign(document.createElement('span'),
-        { textContent: h.toFixed(2) }));
-    }
-    scale.append(cell);
-  });
+  buildMixes(lo, hi, halves);
+}
+
+/**
+ * The mixes: one row per pair of base hues, each swatch two layers of the same
+ * thickness — the lower hue first, so from above you see the upper one.
+ */
+function buildMixes(lo, hi, halves) {
+  const wrap = $('mixes');
+  wrap.textContent = '';
+
+  if (!halves.length) {
+    // Two printable layers do not fit in the range, so there is nothing to show.
+    $('mixHead').textContent = 'mixes need a tallest face of at least '
+      + `${round3(2 * levels(lo, hi)[0])} mm — two layers have to fit`;
+    $('mixScale').textContent = '';
+    return;
+  }
+  $('mixHead').textContent = 'mixes — two hues stacked, so half the steps';
+
+  const columns = `26px repeat(${halves.length}, minmax(10px, 1fr))`;
+  for (const pair of MIXES) {
+    const [under, over] = pair;
+    const row = document.createElement('div');
+    row.className = 'hue-row';
+    row.style.gridTemplateColumns = columns;
+
+    const chip = document.createElement('div');
+    chip.className = 'mix-chip';
+    chip.style.background = mixPaint(pair, halves[halves.length >> 1], lo, hi);
+    chip.title = `${hueName(HUES[under])} under ${hueName(HUES[over])}`;
+    chip.setAttribute('aria-hidden', 'true');
+    row.append(chip);
+
+    halves.forEach((h, level) => {
+      const total = round3(2 * h);
+      const b = document.createElement('button');
+      b.className = 'swatch';
+      b.type = 'button';
+      b.style.background = mixPaint(pair, h, lo, hi);
+      b.title = `${total.toFixed(2)} mm — ${h.toFixed(2)} mm of `
+        + `${hueName(HUES[under])} under ${h.toFixed(2)} mm of ${hueName(HUES[over])}`;
+      b.setAttribute('aria-label', `hue ${under + 1} under hue ${over + 1}, `
+        + `${total.toFixed(2)} mm`);
+      b.setAttribute('aria-pressed', String(held(pair, level)));
+      b.onclick = () => arm([...pair], level, b);
+      row.append(b);
+    });
+    wrap.append(row);
+  }
+  // The scale under a mix row is what the face ends up standing, not the
+  // thickness of either layer.
+  buildScale($('mixScale'), columns, halves.map((h) => round3(2 * h)));
+}
+
+/** A mix swatch: the lower hue across the bottom, the upper one on top. */
+function mixPaint([under, over], half, lo, hi) {
+  const a = shadeFor(under, half, lo, hi).getHexString();
+  const b = shadeFor(over, half, lo, hi).getHexString();
+  return `linear-gradient(to top, #${a} 0 50%, #${b} 50% 100%)`;
 }
 
 /* ---------------------------------------------------------------- viewer */
@@ -486,21 +703,47 @@ scene.add(sun);
 const group = new THREE.Group();     // everything belonging to the current model
 scene.add(group);
 
-let model = null;        // { regions, lo, hi, wallHeight, name }
-let regionMeshes = [];   // index === region id, each a list of slab meshes
-let regionGeom = [];     // the unit prism of each face, shared by its slabs
-let wallGeom = [];       // the unit prism of each wall piece
-let wallMeshes = [];     // the frame's slabs
-let stacks = [];         // index === region id, [{hue, t}] bottom-up
+// One entry per drawing layer, base first. Each holds the whole per-drawing
+// state that used to be module-wide, plus its own scene group lifted to zBase
+// so the layers stack. Meshes carry userData { layer, region } so a click
+// knows which entry to edit.
+let layers = [];         // [{ file, drawing, scale, model, regionMeshes, regionGeom,
+                         //    wallGeom, sweptGeom, wallMeshes, group, stacks, holes,
+                         //    holeMarkers, zBase, offset, sublayers, picks }]
 let grid = null;
 let home = null;
-let selected = null;
+let selected = null;     // { li, id } of the face last clicked
 let hovered = null;
 let wireframe = false;
 let topLocked = false;
-let holes = [];          // [{x, y, d}] in model millimetres
 let holeMode = false;
-let holeMarkers = null;
+
+/** The base layer's model — the palette range lives on every layer alike. */
+const baseModel = () => layers[0]?.model ?? null;
+
+/** A fresh layer entry with its own scene group. */
+function newLayer(file = null) {
+  const l = {
+    file, drawing: null, scale: 1,     // drawing = {x,y} from /api/inspect
+    model: null,        // { regions, lo, hi, wallHeight }
+    regionMeshes: [],   // index === region id, each a list of slab meshes
+    regionGeom: [],     // the unit prism of each face, shared by its slabs
+    stepGeom: [],       // effects: the prism of each terrace above the first
+    wallGeom: [],       // the unit prism of each wall piece
+    sweptGeom: null,    // profile mode: the swept frame as one ready-made mesh
+    wallMeshes: [],     // the frame's slabs
+    group: new THREE.Group(),          // position.z = zBase, .visible toggled
+    stacks: [],         // index === region id, [{hue, t}] bottom-up
+    holes: [],          // [{x, y, d}] in the layer's own millimetres
+    holeMarkers: null,
+    zBase: 0,           // where this layer sits on the one below
+    offset: [0, 0],     // the centring shift the server applied in x/y
+    sublayers: [],      // the drawing's own DXF layers, from /api/inspect
+    picks: null,        // which of them are ticked; null means all of them
+  };
+  group.add(l.group);
+  return l;
+}
 
 const VIEW_DIR = new THREE.Vector3(0, -0.78, 0.63).normalize();
 
@@ -533,19 +776,54 @@ function unitPrism(parts) {
   return merged;
 }
 
-function disposeModel() {
-  group.clear();
-  for (const meshes of regionMeshes) {
+/** Throw away a layer's geometry and markers; its file and settings stay. */
+function disposeLayer(l) {
+  l.group.clear();
+  for (const meshes of l.regionMeshes) {
     for (const m of meshes) m.material.dispose();
   }
-  for (const m of wallMeshes) m.material.dispose();
-  for (const g of regionGeom) g.dispose();
-  for (const g of wallGeom) g.dispose();
-  regionMeshes = [];
-  regionGeom = [];
-  wallMeshes = [];
-  wallGeom = [];
+  for (const m of l.wallMeshes) m.material.dispose();
+  for (const g of l.regionGeom) g.dispose();
+  for (const steps of l.stepGeom) for (const g of steps ?? []) g.dispose();
+  for (const g of l.wallGeom) g.dispose();
+  if (l.sweptGeom) l.sweptGeom.dispose();
+  l.model = null;
+  l.regionMeshes = [];
+  l.regionGeom = [];
+  l.stepGeom = [];
+  l.wallMeshes = [];
+  l.wallGeom = [];
+  l.sweptGeom = null;
+  if (l.holeMarkers) {
+    scene.remove(l.holeMarkers);
+    l.holeMarkers.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+    l.holeMarkers = null;
+  }
+}
+
+/** Geometry of every layer gone, ahead of a rebuild. */
+function disposeModels() {
+  for (const l of layers) disposeLayer(l);
   selected = hovered = null;
+  $('faceCard').hidden = true;
+}
+
+/** Remove a layer outright; the ones above close ranks on the next rebuild. */
+function dropLayer(li) {
+  disposeLayer(layers[li]);
+  group.remove(layers[li].group);
+  layers.splice(li, 1);
+}
+
+/** Back to a blank single layer — a new base drawing replaces everything. */
+function resetLayers() {
+  while (layers.length) dropLayer(0);
+  layers.push(newLayer());
+  picked = null;
+  drawing = null;
+  setHoleMode(false);
+  holeList();
+  renderDrawings();
 }
 
 const totalHeight = (stack) => stack.reduce((sum, layer) => sum + layer.t, 0);
@@ -557,9 +835,10 @@ const MAX_FRAME_LAYERS = 400;
  * filaments already loaded instead of claiming a colour of its own. Returns
  * null when the frame should stay a single solid.
  */
-function frameStack() {
-  if ($('blackFrame').checked || !model) return null;
-  const total = model.wallHeight;
+function frameStack(l) {
+  // A swept frame is one solid by construction — no bands to slice it into.
+  if (profilePicked || $('blackFrame').checked || !l?.model) return null;
+  const total = l.model.wallHeight;
   const step = Number($('frameLayer').value);
   if (!(total > 0) || !(step > 0)) return null;
   if (total / step > MAX_FRAME_LAYERS) return null;   // guarded in the handler
@@ -571,44 +850,56 @@ function frameStack() {
   return layers;
 }
 
-/** Rebuild the frame's slabs from the current options. */
-function rebuildFrame() {
-  for (const m of wallMeshes) { group.remove(m); m.material.dispose(); }
-  wallMeshes = [];
-  if (!model) return;
+/** Rebuild one layer's frame slabs from the current options. */
+function rebuildFrame(li) {
+  const l = layers[li];
+  for (const m of l.wallMeshes) { l.group.remove(m); m.material.dispose(); }
+  l.wallMeshes = [];
+  if (!l.model) return;
 
-  const stack = frameStack();
+  // Profile mode: the swept frame arrives as a finished mesh — show it as is.
+  if (l.sweptGeom) {
+    const mesh = new THREE.Mesh(l.sweptGeom, new THREE.MeshStandardMaterial({
+      color: 0x2b2f36, metalness: 0.1, roughness: 0.8, wireframe,
+    }));
+    mesh.userData = { layer: li, region: null };
+    l.group.add(mesh);
+    l.wallMeshes.push(mesh);
+    return;
+  }
+
+  const stack = frameStack(l);
   // Mid lightness: these show which filament prints the layer, not a height.
-  const mid = (model.lo + model.hi) / 2;
-  const layers = stack ?? [{ hue: null, t: model.wallHeight }];
+  const mid = (l.model.lo + l.model.hi) / 2;
+  const slabs = stack ?? [{ hue: null, t: l.model.wallHeight }];
 
-  for (const geom of wallGeom) {
+  for (const geom of l.wallGeom) {
     let z = 0;
-    for (const layer of layers) {
+    for (const layer of slabs) {
       const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
-        color: layer.hue === null ? 0x2b2f36 : shadeFor(layer.hue, mid, model.lo, model.hi),
+        color: layer.hue === null ? 0x2b2f36 : shadeFor(layer.hue, mid, l.model.lo, l.model.hi),
         metalness: 0.1, roughness: 0.8, wireframe,
       }));
       mesh.scale.z = Math.max(layer.t, 1e-4);
       mesh.position.z = z;
-      mesh.userData.region = null;
-      group.add(mesh);
-      wallMeshes.push(mesh);
+      mesh.userData = { layer: li, region: null };
+      l.group.add(mesh);
+      l.wallMeshes.push(mesh);
       z += layer.t;
     }
   }
 }
 
 function frameChanged() {
-  if (!model) return;
-  const total = model.wallHeight;
+  if (!baseModel()) return;
+  const total = Math.max(...layers.map((l) => l.model?.wallHeight ?? 0));
   const step = Number($('frameLayer').value);
   if (!$('blackFrame').checked && (!(step > 0) || total / step > MAX_FRAME_LAYERS)) {
     return setStatus(`a ${step} mm layer would need more than ${MAX_FRAME_LAYERS} `
       + 'slabs for that frame height — use a thicker layer', true);
   }
-  rebuildFrame();
-  const stack = frameStack();
+  layers.forEach((_, li) => rebuildFrame(li));
+  const stack = frameStack(layers[0]);
   setStatus(stack
     ? `frame is ${count(stack.length, 'layer')} of ${stack[0].t} mm, cycling the palette`
     : 'frame is one solid in its own colour');
@@ -626,57 +917,127 @@ $('layerHeight').onchange = () => {
   const layer = Number($('layerHeight').value);
   if (!(layer > 0)) return setStatus('layer height must be greater than 0', true);
   $('height').step = layer;
-  if (!model) return;
-  buildPalette(model.lo, model.hi);
-  const steps = levels(model.lo, model.hi);
+  const m = baseModel();
+  if (!m) return;
+  buildPalette(m.lo, m.hi);
+  const steps = levels(m.lo, m.hi);
   const gap = steps.length > 1 ? round3(steps[1] - steps[0]) : layer;
   setStatus(`palette is ${count(steps.length, 'shade')} per hue, `
     + `${gap} mm apart${gap === layer ? '' : ` — ${Math.round(gap / layer)} layers a step`}`);
 };
 
-/** Rebuild one face's slabs from its stack, bottom up. */
-function rebuildRegion(i) {
-  for (const m of regionMeshes[i]) { group.remove(m); m.material.dispose(); }
-  const meshes = [];
-  let z = 0;
-  for (const layer of stacks[i]) {
-    const mesh = new THREE.Mesh(regionGeom[i], new THREE.MeshStandardMaterial({
-      color: shadeFor(layer.hue, layer.t, model.lo, model.hi),
-      metalness: 0.05, roughness: 0.75, wireframe,
-    }));
-    mesh.scale.z = Math.max(layer.t, 1e-4);
-    mesh.position.z = z;
-    mesh.visible = layer.t > 0 && model.regions[i].parts.length > 0;
-    mesh.userData.region = i;
-    group.add(mesh);
-    meshes.push(mesh);
-    z += layer.t;
+/** The colour group a stack is painted with at height `z` — its top layer. */
+function paintAt(stack, z) {
+  let top = 0;
+  for (const layer of stack) {
+    top += layer.t;
+    if (z < top) return layer;
   }
-  regionMeshes[i] = meshes;
-  if (i === selected) highlight(i, 0x4a4a4a);
+  return stack[stack.length - 1];
 }
 
 /**
- * Build the preview from the server's outlines. `keep` carries the painted
- * stacks across a rebuild, which is what makes adding a hole non-destructive:
- * face ids are fixed before holes are cut, so they still line up.
+ * The slabs one face is drawn from, bottom first. Without an effect that is
+ * simply the painted stack, each layer on the face's own outline. An effect
+ * reshapes the solid without touching the painting, so a slab carries both
+ * its own thickness and the painted layer whose colour it wears — the same
+ * split the converter makes, so the preview and the STL agree.
+ */
+function faceSlabs(l, i) {
+  const stack = l.stacks[i];
+  const steps = l.stepGeom[i];
+  if (!steps) {
+    let z = 0;
+    return stack.map((layer) => {
+      const slab = { geom: l.regionGeom[i], z, t: layer.t, paint: layer };
+      z += layer.t;
+      return slab;
+    });
+  }
+
+  // maya pyramid: the painted height shared between the terraces that fit,
+  // never thinner than the 0.2 mm a terrace needs to print — the same clamp
+  // the converter applies, so the preview and the STL agree. The epsilon
+  // keeps an exact multiple (0.6 / 0.2) from losing a terrace to floats.
+  const total = totalHeight(stack);
+  if (total <= 0) return [];
+  const fit = Math.max(1, Math.floor(total / 0.2 + 1e-9));
+  const geoms = [l.regionGeom[i], ...steps].slice(0, fit);
+  const t = total / geoms.length;
+  return geoms.map((geom, k) => ({
+    geom, z: t * k, t, paint: paintAt(stack, t * k + t / 2),
+  }));
+}
+
+/** Rebuild one face's slabs from its stack, bottom up. */
+function rebuildRegion(li, i) {
+  const l = layers[li];
+  for (const m of l.regionMeshes[i] ?? []) { l.group.remove(m); m.material.dispose(); }
+  const meshes = [];
+  const drawn = l.model.regions[i].parts.length > 0;
+  for (const slab of faceSlabs(l, i)) {
+    const mesh = new THREE.Mesh(slab.geom, new THREE.MeshStandardMaterial({
+      // The shade is the painted layer's own, so a terrace shows the colour
+      // the palette says that height is, not the terrace's thickness.
+      color: shadeFor(slab.paint.hue, slab.paint.t, l.model.lo, l.model.hi),
+      metalness: 0.05, roughness: 0.75, wireframe,
+    }));
+    mesh.scale.z = Math.max(slab.t, 1e-4);
+    mesh.position.z = slab.z;
+    mesh.visible = slab.t > 0 && drawn;
+    mesh.userData = { layer: li, region: i };
+    l.group.add(mesh);
+    meshes.push(mesh);
+  }
+  l.regionMeshes[i] = meshes;
+  if (selected && selected.li === li && selected.id === i) highlight(li, i, 0x4a4a4a);
+}
+
+/**
+ * One drawing layer's geometry, lifted to the frame top of the layer below.
+ * `keep` carries that layer's painted stacks across a rebuild, which is what
+ * makes adding a hole non-destructive: face ids are fixed before holes are
+ * cut, so they still line up.
+ */
+function buildLayer(li, data, lo, hi, rng, keep = null) {
+  const l = layers[li];
+  l.model = { regions: data.regions, lo, hi, wallHeight: data.wallHeight };
+  l.zBase = data.zBase ?? 0;
+  l.offset = data.offset ?? [0, 0];
+  l.group.position.z = l.zBase;
+
+  // A swept frame cannot be extruded here, so the server sends it as a mesh.
+  if (data.wallMesh) {
+    l.sweptGeom = new STLLoader().parse(fromBase64(data.wallMesh).buffer);
+  } else {
+    l.wallGeom = data.walls.map((poly) => unitPrism(poly));
+  }
+  rebuildFrame(li);
+
+  // One unit prism per face, shared by all of that face's slabs — plus one
+  // per terrace when an effect stepped the face in from its own outline.
+  l.regionGeom = data.regions.map((region) => unitPrism(region.parts));
+  l.stepGeom = data.regions.map((region) =>
+    region.steps ? region.steps.map((parts) => unitPrism(parts)) : null);
+  l.regionMeshes = data.regions.map(() => []);
+  const steps = levels(lo, hi);
+  l.stacks = data.regions.map((_, i) => keep
+    ? keep[i].map((layer) => ({ ...layer }))
+    : [{ hue: 0, t: steps[Math.floor(rng() * steps.length)] }]);
+  for (let i = 0; i < l.stacks.length; i++) rebuildRegion(li, i);
+}
+
+/**
+ * Build the preview from the server's outlines, one entry per drawing. `keep`
+ * holds the painted stacks of each layer, in the same order.
  */
 function buildModel(data, lo, hi, rng, keep = null) {
   const framed = home !== null;
-  disposeModel();
-  model = { regions: data.regions, lo, hi, wallHeight: data.wallHeight };
-
-  wallGeom = data.walls.map((poly) => unitPrism(poly));
-  rebuildFrame();
-
-  // One unit prism per face, shared by all of that face's slabs.
-  regionGeom = data.regions.map((region) => unitPrism(region.parts));
-  regionMeshes = data.regions.map(() => []);
-  const steps = levels(lo, hi);
-  stacks = data.regions.map((_, i) => keep
-    ? keep[i].map((layer) => ({ ...layer }))
-    : [{ hue: 0, t: steps[Math.floor(rng() * steps.length)] }]);
-  for (let i = 0; i < stacks.length; i++) rebuildRegion(i);
+  disposeModels();
+  // A server that only knows one drawing answers with the layer at the top
+  // level; treating that as a one-entry list keeps both shapes working.
+  const drawings = data.drawings ?? [data];
+  drawings.forEach((d, li) => buildLayer(li, d, lo, hi, rng, keep ? keep[li] : null));
 
   drawHoleMarkers();
   if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
@@ -686,71 +1047,87 @@ function buildModel(data, lo, hi, rng, keep = null) {
     $(id).hidden = false;
   }
   $('saveToServer').disabled = false;
+  renderDrawings();
   updateReadout();
 }
 
 /* ----------------------------------------------------------------- holes */
 
+/** Every layer's holes, as one flat list of { li, i, hole }. */
+const allHoles = () =>
+  layers.flatMap((l, li) => l.holes.map((hole, i) => ({ li, i, hole })));
+
 /** Rings floating just above each hole, so it stays findable from any angle. */
 function drawHoleMarkers() {
-  if (holeMarkers) {
-    scene.remove(holeMarkers);
-    holeMarkers.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+  for (const l of layers) {
+    if (!l.holeMarkers) continue;
+    scene.remove(l.holeMarkers);
+    l.holeMarkers.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+    l.holeMarkers = null;
   }
-  holeMarkers = new THREE.Group();
-  const top = model ? model.wallHeight : 1;
-  for (const hole of holes) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(hole.d / 2, hole.d / 2 + Math.max(hole.d * 0.12, 0.25), 48),
-      new THREE.MeshBasicMaterial({ color: 0xf87171, side: THREE.DoubleSide,
-        transparent: true, opacity: 0.9, depthTest: false }),
-    );
-    ring.position.set(hole.x, hole.y, top + 0.05);
-    ring.renderOrder = 2;
-    holeMarkers.add(ring);
+  for (const l of layers) {
+    l.holeMarkers = new THREE.Group();
+    // A hidden drawing's holes are hidden with it.
+    l.holeMarkers.visible = l.group.visible;
+    const top = l.zBase + (l.model ? l.model.wallHeight : 1);
+    for (const hole of l.holes) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(hole.d / 2, hole.d / 2 + Math.max(hole.d * 0.12, 0.25), 48),
+        new THREE.MeshBasicMaterial({ color: 0xf87171, side: THREE.DoubleSide,
+          transparent: true, opacity: 0.9, depthTest: false }),
+      );
+      // Holes are kept in their own drawing's millimetres; the centring shift
+      // the server applied puts the ring where the layer actually sits.
+      ring.position.set(hole.x + l.offset[0], hole.y + l.offset[1], top + 0.05);
+      ring.renderOrder = 2;
+      l.holeMarkers.add(ring);
+    }
+    scene.add(l.holeMarkers);
   }
-  scene.add(holeMarkers);
 }
 
 function holeList() {
   const box = $('holeList');
+  const all = allHoles();
   box.textContent = '';
-  if (!holes.length) {
+  if (!all.length) {
     box.textContent = 'no holes yet';
     box.className = 'muted';
     return;
   }
   box.className = '';
-  holes.forEach((hole, i) => {
+  for (const { li, i, hole } of all) {
     const row = document.createElement('div');
     row.className = 'hole-row';
-    row.append(Object.assign(document.createElement('span'),
-      { textContent: `${hole.x.toFixed(1)}, ${hole.y.toFixed(1)} mm · ⌀${hole.d}` }));
+    row.append(Object.assign(document.createElement('span'), {
+      textContent: (layers.length > 1 ? `#${li + 1} · ` : '')
+        + `${hole.x.toFixed(1)}, ${hole.y.toFixed(1)} mm · ⌀${hole.d}`,
+    }));
     const del = document.createElement('button');
     del.className = 'ghost';
     del.textContent = '✕';
     del.title = 'Remove this hole';
-    del.onclick = () => { holes.splice(i, 1); applyHoles(); };
+    del.onclick = () => { layers[li].holes.splice(i, 1); applyHoles(); };
     row.append(del);
     box.append(row);
-  });
+  }
 }
 
 /** Re-cut the model on the server so the preview shows the real holes. */
 async function applyHoles() {
   holeList();
-  if (!model) { drawHoleMarkers(); return; }
-  const keep = stacks.map((s) => s.map((l) => ({ ...l })));
-  setStatus(holes.length ? 'cutting holes…' : 'removing holes…');
+  const n = allHoles().length;
+  const m = baseModel();
+  if (!m) { drawHoleMarkers(); return; }
+  const keep = keepStacks();
+  setStatus(n ? 'cutting holes…' : 'removing holes…');
   try {
     const res = await fetch('/api/regions', { method: 'POST', body: shapeForm() });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
-    buildModel(data, model.lo, model.hi, null, keep);
+    buildModel(data, m.lo, m.hi, null, keep);
     select(null);
-    setStatus(holes.length
-      ? `${count(holes.length, 'hole')} cut through the model`
-      : 'holes removed');
+    setStatus(n ? `${count(n, 'hole')} cut through the model` : 'holes removed');
   } catch (e) {
     setStatus(String(e.message ?? e), true);
   }
@@ -762,91 +1139,209 @@ function pointAt(event) {
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(group.children, false)[0];
-  if (hit) return hit.point;
+  const hit = raycaster.intersectObjects(group.children, true)[0];
+  if (hit) return hit;
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   const at = new THREE.Vector3();
-  return raycaster.ray.intersectPlane(plane, at) ? at : null;
+  return raycaster.ray.intersectPlane(plane, at) ? { point: at, object: null } : null;
 }
 
 /** Replace a face's whole stack with a single layer. */
-function paint(id, hue, height) {
-  setStack(id, [{ hue, t: height }]);
+function paint(li, id, hue, height) {
+  setStack(li, id, [{ hue, t: height }]);
 }
 
-/** Add a layer on top of a face's stack. */
-function addLayer(id, hue, height) {
-  if (id === null || !stacks[id]) return;
-  setStack(id, [...stacks[id], { hue, t: height }]);
+/** The stack of one face, or null when that face is gone. */
+const stackOf = (sel) => (sel && layers[sel.li]?.stacks[sel.id]) || null;
+
+/**
+ * Lay the armed swatch on a face, either as the whole stack or on top of what
+ * is there. A mix puts down both its layers, so stacking one adds two.
+ */
+function brush(sel, onTop = false) {
+  const stack = stackOf(sel);
+  if (!stack) return null;
+  const paintLayers = brushLayers();
+  setStack(sel.li, sel.id, onTop ? [...stack, ...paintLayers] : paintLayers);
+  return paintLayers;
 }
 
 /** Take the topmost layer off a face, never emptying it completely. */
-function popLayer(id) {
-  if (id === null || !stacks[id]) return false;
-  if (stacks[id].length < 2) return false;
-  setStack(id, stacks[id].slice(0, -1));
+function popLayer(sel) {
+  const stack = stackOf(sel);
+  if (!stack || stack.length < 2) return false;
+  setStack(sel.li, sel.id, stack.slice(0, -1));
   return true;
 }
 
-function setStack(id, layers) {
-  if (id === null || !stacks[id]) return;
-  stacks[id] = layers;
-  rebuildRegion(id);
-  if (id === selected) showSelection(id);
+function setStack(li, id, stack) {
+  if (id === null || !layers[li]?.stacks[id]) return;
+  layers[li].stacks[id] = stack;
+  rebuildRegion(li, id);
+  if (same(selected, { li, id })) showSelection(selected);
+  if (same(hovered, { li, id })) drawFaceCard(hovered);
   updateReadout();
 }
+
+const same = (a, b) => !!a && !!b && a.li === b.li && a.id === b.id;
 
 const round2 = (v) => Math.round(v * 100) / 100;
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-function highlight(id, hex) {
-  for (const m of regionMeshes[id] ?? []) m.material.emissive.setHex(hex);
+function highlight(li, id, hex) {
+  for (const m of layers[li]?.regionMeshes[id] ?? []) m.material.emissive.setHex(hex);
 }
 
+/** How a face is named in the status line: bare with one drawing, else #n. */
+const faceName = (sel) =>
+  layers.length > 1 ? `face ${sel.id} on drawing ${sel.li + 1}` : `face ${sel.id}`;
+
 /** Describe the selected face: its stack, and the top layer in the height box. */
-function showSelection(id) {
+function showSelection(sel) {
   const box = $('height');
-  const stack = stacks[id];
+  const l = layers[sel.li];
+  const stack = l.stacks[sel.id];
   const top = stack[stack.length - 1];
   box.disabled = false;
   box.value = round2(top.t);
-  $('selInfo').textContent = `face ${id} · ${model.regions[id].area.toFixed(1)} mm² · `
+  $('selInfo').textContent = `${faceName(sel)} · `
+    + `${l.model.regions[sel.id].area.toFixed(1)} mm² · `
     + `${count(stack.length, 'layer')} · ${totalHeight(stack).toFixed(2)} mm tall`
     + (stack.length > 1
-      ? `\n${stack.map((l) => `${hueName(HUES[l.hue])} ${l.t.toFixed(2)}`).join(' + ')}`
+      ? `\n${stack.map((l2) => `${hueName(HUES[l2.hue])} ${l2.t.toFixed(2)}`).join(' + ')}`
       : '');
 }
 
-function select(id) {
-  if (selected !== null) highlight(selected, 0x000000);
-  selected = id;
-  if (id === null) {
+function select(sel) {
+  if (selected) highlight(selected.li, selected.id, 0x000000);
+  selected = sel;
+  if (!sel) {
     $('height').value = '';
     $('height').disabled = true;
     $('selInfo').textContent = 'left click paints · right click stacks · middle removes';
     return;
   }
-  highlight(id, 0x4a4a4a);
-  showSelection(id);
+  highlight(sel.li, sel.id, 0x4a4a4a);
+  showSelection(sel);
 }
 
-function hover(id) {
-  if (hovered !== null && hovered !== selected) highlight(hovered, 0x000000);
-  hovered = id;
-  if (id !== null && id !== selected) highlight(id, 0x222222);
-  canvas.style.cursor = id === null ? '' : 'pointer';
+function hover(sel, event) {
+  if (hovered && !same(hovered, selected)) highlight(hovered.li, hovered.id, 0x000000);
+  hovered = sel;
+  if (sel && !same(sel, selected)) highlight(sel.li, sel.id, 0x222222);
+  canvas.style.cursor = sel ? 'pointer' : '';
+  drawFaceCard(sel, event);
+}
+
+/* ------------------------------------------------------- the hover card */
+//
+// A face is a stack of coloured layers, which reads better as a picture than
+// as a sentence: the card under the cursor draws the hovered face as a bar,
+// bottom layer at the bottom, against the full height range the palette
+// offers. Two faces can then be told apart at a glance — one short bar, one
+// tall one — instead of by reading two numbers.
+
+const CARD_TRACK = 110;     // px the height range is drawn in
+let cardAt = null;          // where the pointer last was, to redraw in place
+let cardShows = '';         // what it is already drawing, so a move only moves it
+
+function tag(name, className, text) {
+  const node = document.createElement(name);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** Put the card beside the cursor, flipped where the viewer runs out. */
+function placeFaceCard() {
+  const card = $('faceCard');
+  if (!cardAt || card.hidden) return;
+  const box = card.parentElement.getBoundingClientRect();
+  const x = cardAt.x - box.left, y = cardAt.y - box.top;
+  const right = x + 16 + card.offsetWidth <= box.width - 8;
+  const below = y + 16 + card.offsetHeight <= box.height - 8;
+  card.style.left = `${Math.max(8, right ? x + 16 : x - 16 - card.offsetWidth)}px`;
+  card.style.top = `${Math.max(8, below ? y + 16 : y - 16 - card.offsetHeight)}px`;
+}
+
+/**
+ * Draw the hovered face's stack. `event` moves the card; without one it is
+ * redrawn where it already is, which is what repainting under the cursor needs.
+ */
+function drawFaceCard(sel, event) {
+  const card = $('faceCard');
+  const l = sel && layers[sel.li];
+  // Placing a hole is a different job — the card would only be in the way.
+  if (!sel || !l?.model || holeMode) { card.hidden = true; return; }
+  if (event) cardAt = { x: event.clientX, y: event.clientY };
+
+  const { lo, hi } = l.model;
+  const stack = l.stacks[sel.id] ?? [];
+  const total = totalHeight(stack);
+
+  // Sliding along one face redraws nothing: the card only moves. Everything
+  // the drawing depends on is in the key, palette rows included.
+  const shows = [sel.li, sel.id, lo, hi, HUES,
+                 stack.map((layer) => `${layer.hue}@${layer.t}`)].join('/');
+  if (shows === cardShows && !card.hidden) return placeFaceCard();
+  cardShows = shows;
+
+  // Painted taller than the palette's top? Then that face sets the scale.
+  const top = Math.max(hi, total);
+  const shade = (layer) => shadeFor(layer.hue, layer.t, lo, hi).getStyle();
+
+  const bar = tag('div', 'bar');
+  bar.append(tag('div', 'tick', top.toFixed(2)));
+  const track = tag('div', 'track');
+  track.style.height = `${CARD_TRACK}px`;
+  for (const layer of stack) {          // column-reverse: bottom layer first
+    if (!(layer.t > 0)) continue;
+    const slab = tag('div', 'slab');
+    // A hair-thin layer still gets a sliver, or it would read as missing.
+    slab.style.height = `${Math.max(2, (layer.t / top) * CARD_TRACK)}px`;
+    slab.style.background = shade(layer);
+    track.append(slab);
+  }
+  bar.append(track, tag('div', 'tick', '0'));
+
+  const side = tag('div', 'side');
+  side.append(tag('div', 'title',
+    `${faceName(sel)} · ${l.model.regions[sel.id].area.toFixed(1)} mm²`));
+  if (total > 0) {
+    for (const layer of [...stack].reverse()) {   // the face's top layer first
+      const row = tag('div', 'row');
+      const chip = tag('div', 'chip');
+      chip.style.background = shade(layer);
+      row.append(chip, tag('span', '',
+        `${hueName(HUES[layer.hue])} · ${layer.t.toFixed(2)} mm`));
+      side.append(row);
+    }
+    side.append(tag('div', 'foot',
+      `${count(stack.length, 'layer')} · ${total.toFixed(2)} mm tall`));
+  } else {
+    side.append(tag('div', 'foot', 'open — nothing painted'));
+  }
+
+  card.textContent = '';
+  card.append(bar, side);
+  card.hidden = false;
+  placeFaceCard();
 }
 
 function updateReadout() {
-  if (!model) return;
-  const totals = stacks.map(totalHeight);
+  if (!baseModel()) return;
+  const totals = layers.flatMap((l) => l.stacks.map(totalHeight));
+  // A drawing can hold no closed faces at all, and so nothing to measure.
+  if (!totals.length) return;
   const used = totals.filter((h) => h > 0).length;
-  const slabs = stacks.reduce((n, s) => n + s.length, 0);
+  const all = layers.flatMap((l) => l.stacks);
+  const slabs = all.reduce((n, s) => n + s.length, 0);
   const perHue = HUES.map((deg, hue) => `${hueName(deg)} `
-    + stacks.reduce((n, s) => n + s.filter((l) => l.hue === hue && l.t > 0).length, 0))
+    + all.reduce((n, s) => n + s.filter((l) => l.hue === hue && l.t > 0).length, 0))
     .join(' · ');
-  $('readout').textContent = `${model.regions.length} faces · ${used} raised · `
+  $('readout').textContent = `${all.length} faces · ${used} raised · `
     + `${slabs} layers · ${Math.min(...totals).toFixed(2)}–${Math.max(...totals).toFixed(2)} mm`
+    + (layers.length > 1 ? ` · ${count(layers.length, 'drawing')}` : '')
     + `\n${perHue}`;
 }
 
@@ -924,21 +1419,33 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
 function regionAt(event) {
-  if (!regionMeshes.length) return null;
+  // A hidden drawing is out of the way on purpose — it must not catch clicks
+  // meant for the layer underneath it.
+  const meshes = layers.filter((l) => l.group.visible)
+    .flatMap((l) => l.regionMeshes.flat());
+  if (!meshes.length) return null;
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(regionMeshes.flat(), false)[0];
-  return hit ? hit.object.userData.region : null;
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  return hit ? { li: hit.object.userData.layer, id: hit.object.userData.region } : null;
 }
 
 // Only treat a press as a click if the pointer barely moved — otherwise the
 // user was orbiting and should not repaint whatever ends up under the cursor.
 let pressAt = null;
 canvas.addEventListener('pointerdown', (e) => { pressAt = { x: e.clientX, y: e.clientY }; });
-canvas.addEventListener('pointermove', (e) => { if (!pressAt) hover(regionAt(e)); });
+canvas.addEventListener('pointermove', (e) => {
+  // Mid-drag the user is orbiting, not reading: leave the highlight alone and
+  // take the card off the view until the pointer is free again.
+  if (pressAt) { $('faceCard').hidden = true; return; }
+  hover(regionAt(e), e);
+});
 canvas.addEventListener('pointerleave', () => hover(null));
+// Zooming moves the model out from under the cursor, so the card it left
+// behind would be describing whatever used to be there.
+canvas.addEventListener('wheel', () => { $('faceCard').hidden = true; }, { passive: true });
 // The browser's own middle-click autoscroll and right-click menu would fight
 // the stacking gestures, so both are suppressed over the canvas.
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -947,33 +1454,46 @@ canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefau
 canvas.addEventListener('pointerup', (e) => {
   const moved = pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 4;
   pressAt = null;
-  if (moved || !model) return;         // that was an orbit/pan/zoom drag
+  if (moved || !baseModel()) return;    // that was an orbit/pan/zoom drag
 
   if (holeMode) {
     if (e.button !== 0) return;
-    const at = pointAt(e);
-    if (!at) return;
+    const hit = pointAt(e);
+    if (!hit) return;
     const d = Number($('holeDia').value);
     if (!(d > 0)) return setStatus('hole diameter must be greater than 0', true);
-    holes.push({ x: round2(at.x), y: round2(at.y), d });
+    // The hole belongs to whichever drawing was clicked; a click on the empty
+    // base plane means the bottom one. Holes are stored in that drawing's own
+    // millimetres, so its centring shift comes back off here.
+    const li = hit.object?.userData.layer ?? 0;
+    const l = layers[li];
+    l.holes.push({
+      x: round2(hit.point.x - l.offset[0]),
+      y: round2(hit.point.y - l.offset[1]),
+      d,
+    });
     applyHoles();
     return;
   }
 
-  const id = regionAt(e);
-  if (id === null) { if (e.button === 0) select(null); return; }
-  select(id);
-  const height = levelHeight(active.level, model.lo, model.hi);
+  const sel = regionAt(e);
+  if (!sel) { if (e.button === 0) select(null); return; }
+  select(sel);
+  const stack = () => layers[sel.li].stacks[sel.id];
 
   if (e.button === 0) {                // left: this face is just this colour
-    paint(id, active.hue, height);
-  } else if (e.button === 2) {         // right: stack another layer on top
-    addLayer(id, active.hue, height);
-    setStatus(`face ${id} is now ${count(stacks[id].length, 'layer')}, `
-      + `${totalHeight(stacks[id]).toFixed(2)} mm tall`);
+    const painted = brush(sel);
+    if (isMix()) {
+      setStatus(`${faceName(sel)} is ${brushName()}, `
+        + `${totalHeight(painted).toFixed(2)} mm tall`);
+    }
+  } else if (e.button === 2) {         // right: stack the swatch on top
+    brush(sel, true);
+    setStatus(`${faceName(sel)} is now ${count(stack().length, 'layer')}, `
+      + `${totalHeight(stack()).toFixed(2)} mm tall`);
   } else if (e.button === 1) {         // middle: peel the top layer off
-    if (popLayer(id)) {
-      setStatus(`face ${id} is back to ${count(stacks[id].length, 'layer')}`);
+    if (popLayer(sel)) {
+      setStatus(`${faceName(sel)} is back to ${count(stack().length, 'layer')}`);
     } else {
       setStatus('a face always keeps its bottom layer — left click to recolour it');
     }
@@ -995,52 +1515,67 @@ function setHoleMode(on) {
 }
 
 $('addHole').onclick = () => setHoleMode(!holeMode);
-$('clearHoles').onclick = () => { if (holes.length) { holes = []; applyHoles(); } };
+$('clearHoles').onclick = () => {
+  if (!allHoles().length) return;
+  for (const l of layers) l.holes = [];
+  applyHoles();
+};
 
 $('height').onchange = () => {
-  if (selected === null) return;
+  if (!selected) return;
   const v = Number($('height').value);
   if (!Number.isFinite(v) || v < 0) return setStatus('height must be 0 or greater', true);
   // A layer the printer cannot stop at is no use, so a typed height lands on
   // the nearest whole number of them.
   const t = snapToLayer(v);
-  const stack = stacks[selected].map((l) => ({ ...l }));
+  const stack = layers[selected.li].stacks[selected.id].map((l) => ({ ...l }));
   stack[stack.length - 1].t = t;
-  setStack(selected, stack);
+  setStack(selected.li, selected.id, stack);
   if (t !== v) {
     setStatus(`${v} mm rounded to ${t} mm — `
       + `${count(Math.round(t / layerHeight()), 'layer')} of ${layerHeight()} mm`);
   }
 };
 
+/** Every face of every drawing, as { li, id } — the bulk buttons work on all. */
+const allFaces = () =>
+  layers.flatMap((l, li) => l.stacks.map((_, id) => ({ li, id })));
+
 $('fillAll').onclick = () => {
-  if (!model) return;
-  const h = levelHeight(active.level, model.lo, model.hi);
-  for (let i = 0; i < stacks.length; i++) paint(i, active.hue, h);
-  setStatus(`all ${stacks.length} faces set to ${h.toFixed(2)} mm`);
+  if (!baseModel()) return;
+  const paintLayers = brushLayers();
+  const faces = allFaces();
+  // A fresh copy per face: two faces must never share one layer object.
+  for (const f of faces) setStack(f.li, f.id, paintLayers.map((l) => ({ ...l })));
+  setStatus(`all ${faces.length} faces set to ${brushName()}, `
+    + `${totalHeight(paintLayers).toFixed(2)} mm`);
 };
 
 const randomHeight = () => {
-  const steps = levels(model.lo, model.hi);
+  const m = baseModel();
+  const steps = levels(m.lo, m.hi);
   return steps[Math.floor(Math.random() * steps.length)];
 };
 
 $('randomise').onclick = () => {
-  if (!model) return;
-  for (let i = 0; i < stacks.length; i++) {
-    paint(i, Math.floor(Math.random() * HUES.length), randomHeight());
+  if (!baseModel()) return;
+  const faces = allFaces();
+  for (const f of faces) {
+    paint(f.li, f.id, Math.floor(Math.random() * HUES.length), randomHeight());
   }
-  setStatus(`randomised colour and height on ${stacks.length} faces`);
+  setStatus(`randomised colour and height on ${faces.length} faces`);
 };
 
 /** Reshuffle the relief without disturbing the colour scheme. */
 $('randomHeights').onclick = () => {
-  if (!model) return;
+  if (!baseModel()) return;
+  const faces = allFaces();
   // Every layer keeps its colour and gets a new thickness.
-  for (let i = 0; i < stacks.length; i++) {
-    setStack(i, stacks[i].map((l) => ({ hue: l.hue, t: randomHeight() })));
+  for (const f of faces) {
+    setStack(f.li, f.id, layers[f.li].stacks[f.id]
+      .map((l) => ({ hue: l.hue, t: randomHeight() })));
   }
-  setStatus(`randomised the height of ${stacks.length} faces`);
+  setStatus(`randomised the height of ${faces.length} faces`);
 };
 
 /**
@@ -1049,35 +1584,41 @@ $('randomHeights').onclick = () => {
  * if the areas agree too — that rejects near-misses on asymmetric drawings.
  */
 $('mirror').onclick = () => {
-  if (!model) return;
-  const box = new THREE.Box3().setFromObject(group);
-  const axis = (box.min.x + box.max.x) / 2;
-  const tolerance = Math.max(0.25, (box.max.x - box.min.x) * 0.01);
-
-  const left = model.regions.filter((r) => r.centroid[0] < axis - 1e-6);
+  if (!baseModel()) return;
   let copied = 0, unmatched = 0;
 
-  for (const right of model.regions) {
-    if (right.centroid[0] <= axis + 1e-6) continue;      // left half or on the axis
-    const wantX = 2 * axis - right.centroid[0];
-    const wantY = right.centroid[1];
+  // Each drawing is mirrored about its own middle: they are separate models
+  // that only happen to be stacked, and one may be narrower than the other.
+  layers.forEach((l, li) => {
+    if (!l.model) return;
+    const box = new THREE.Box3().setFromObject(l.group);
+    const axis = (box.min.x + box.max.x) / 2;
+    const tolerance = Math.max(0.25, (box.max.x - box.min.x) * 0.01);
 
-    let best = null, bestD = Infinity;
-    for (const cand of left) {
-      const d = Math.hypot(cand.centroid[0] - wantX, cand.centroid[1] - wantY);
-      if (d < bestD) { bestD = d; best = cand; }
+    const left = l.model.regions.filter((r) => r.centroid[0] < axis - 1e-6);
+
+    for (const right of l.model.regions) {
+      if (right.centroid[0] <= axis + 1e-6) continue;    // left half or on the axis
+      const wantX = 2 * axis - right.centroid[0];
+      const wantY = right.centroid[1];
+
+      let best = null, bestD = Infinity;
+      for (const cand of left) {
+        const d = Math.hypot(cand.centroid[0] - wantX, cand.centroid[1] - wantY);
+        if (d < bestD) { bestD = d; best = cand; }
+      }
+      // Areas of true pairs differ slightly because mirrored arcs get flattened
+      // at different sample points, so allow an absolute slack for tiny slivers.
+      const areaOk = best && Math.abs(best.area - right.area)
+        <= Math.max(0.1 * Math.max(best.area, right.area), 0.05);
+      if (best && bestD <= tolerance && areaOk) {
+        setStack(li, right.id, l.stacks[best.id].map((s) => ({ ...s })));
+        copied++;
+      } else {
+        unmatched++;
+      }
     }
-    // Areas of true pairs differ slightly because mirrored arcs get flattened
-    // at different sample points, so allow an absolute slack for tiny slivers.
-    const areaOk = best && Math.abs(best.area - right.area)
-      <= Math.max(0.1 * Math.max(best.area, right.area), 0.05);
-    if (best && bestD <= tolerance && areaOk) {
-      setStack(right.id, stacks[best.id].map((l) => ({ ...l })));
-      copied++;
-    } else {
-      unmatched++;
-    }
-  }
+  });
   setStatus(`mirrored ${copied} faces`
     + (unmatched ? `\n${unmatched} had no match on the left — the drawing is not symmetric there` : ''));
 };
@@ -1101,7 +1642,11 @@ function setStatus(text, isError = false) {
  * saved with — reopening one must not resize the work.
  */
 async function pickFile(file, fit = true) {
+  // A new base drawing is a fresh start: anything stacked on the old one, and
+  // every hole placed in it, belonged to a model that no longer exists.
+  resetLayers();
   picked = file;
+  layers[0].file = file;
   $('dropName').textContent = file.name;
   $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
   stats.textContent = '';
@@ -1113,11 +1658,35 @@ async function pickFile(file, fit = true) {
   if (!$('projectName').value.trim()) {
     $('projectName').value = file.name.replace(/\.(dxf|svg)$/i, '');
   }
-  holes = [];                       // old positions mean nothing in a new drawing
-  setHoleMode(false);
-  holeList();
   setStatus('reading layers…');
   await loadLayers(file, fit);
+  renderDrawings();
+}
+
+/** What the server makes of a drawing: its size, sublayers and curve count. */
+async function inspect(file) {
+  const form = new FormData();
+  form.append('file', file);
+  // Unscaled: this is the measurement everything else is worked out from.
+  form.append('sagitta', $('sagitta').value);
+  form.append('scale', '1');
+  const res = await fetch('/api/inspect', { method: 'POST', body: form });
+  const info = await res.json();
+  if (!res.ok) throw new Error(info.error ?? res.statusText);
+  return info;
+}
+
+/** One sublayer checkbox, ticked, calling `onPick` when it changes. */
+function layerCheck(layer, onPick) {
+  const label = document.createElement('label');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.value = layer.name;
+  cb.checked = true;
+  cb.onchange = onPick;
+  label.append(cb, layer.name, Object.assign(document.createElement('span'),
+    { textContent: `${layer.entities}` }));
+  return label;
 }
 
 /** Ask the server which layers hold geometry, and offer them as checkboxes. */
@@ -1127,29 +1696,12 @@ async function loadLayers(file, fit = true) {
   list.textContent = '';
   box.hidden = true;
   try {
-    const form = new FormData();
-    form.append('file', file);
-    // Unscaled: this is the measurement everything else is worked out from.
-    form.append('sagitta', $('sagitta').value);
-    form.append('scale', '1');
-    const res = await fetch('/api/inspect', { method: 'POST', body: form });
-    const info = await res.json();
-    if (!res.ok) throw new Error(info.error ?? res.statusText);
-
-    for (const layer of info.layers) {
-      const label = document.createElement('label');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = layer.name;
-      cb.checked = true;
-      cb.onchange = layerChanged;
-      label.append(cb, layer.name, Object.assign(document.createElement('span'),
-        { textContent: `${layer.entities}` }));
-      list.append(label);
-    }
+    const info = await inspect(file);
+    for (const layer of info.layers) list.append(layerCheck(layer, layerChanged));
     box.hidden = info.layers.length < 2;   // nothing to choose from with one layer
 
     drawing = { x: info.size[0], y: info.size[1] };
+    layers[0].drawing = drawing;
     if (fit) fitToYSize(); else showYSize();
 
     const skipped = info.skipped.map((s) => `${s.count}× ${s.type}`).join(', ');
@@ -1160,6 +1712,194 @@ async function loadLayers(file, fit = true) {
   }
 }
 
+/**
+ * The same for a stacked drawing. It has no boxes of its own on the sidebar,
+ * so its size, scale and sublayer choice live on the layer itself.
+ */
+async function loadStacked(l, fit = true) {
+  const info = await inspect(l.file);
+  l.sublayers = info.layers;
+  if (!l.picks) l.picks = info.layers.map((s) => s.name);
+  l.drawing = { x: info.size[0], y: info.size[1] };
+  if (fit) fitLayer(l);
+  return info;
+}
+
+/* -------------------------------------------------------- sweep profile */
+
+// Advanced mode: a second drawing holding one closed cross-section. The server
+// sweeps it along every path, so the frame's width and height come from the
+// profile and the wall width/height boxes step aside.
+let profilePicked = null;  // the profile drawing (File), null in standard mode
+let profileDims = null;    // { x, y } mm — what the profile measures
+
+/** Settings a swept frame takes over get out of the way while one is set. */
+function profileUI() {
+  const on = !!profilePicked;
+  $('profileName').textContent = profilePicked ? profilePicked.name : 'off — flat walls';
+  $('profileClear').hidden = !on;
+  $('profileScaleRow').hidden = !on;
+  $('wallWidth').disabled = $('wallHeight').disabled = on;
+  $('blackFrame').closest('label').hidden = on;
+  $('frameLayer').closest('div').hidden = on;
+  // A hole through a swept frame would need a mesh boolean the converter
+  // does not have, so hole placement is refused while a profile is set.
+  $('addHole').disabled = on;
+}
+
+/** Set (or clear, with null) the sweep profile. */
+async function setProfile(file) {
+  profilePicked = file;
+  profileDims = file ? await inspectSize(file) : null;
+  if (file && allHoles().length) {
+    for (const l of layers) l.holes = [];
+    setHoleMode(false);
+    holeList();
+  }
+  profileUI();
+}
+
+$('profilePick').onclick = () => $('profileFile').click();
+$('profileFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';              // picking the same file twice still fires
+  if (!file) return;
+  if (!DRAWING.test(file.name)) {
+    return setStatus('the profile must be a .dxf or .svg file', true);
+  }
+  try {
+    await setProfile(file);
+    if (drawing) fitToYSize();
+    refit(`frame swept from ${file.name} — a ${profileDims.x.toFixed(1)} × `
+      + `${profileDims.y.toFixed(1)} mm section`);
+  } catch (err) {
+    setStatus(String(err.message ?? err), true);
+  }
+};
+$('profileClear').onclick = async () => {
+  await setProfile(null);
+  if (drawing) fitToYSize();
+  refit('back to flat walls');
+};
+
+// The width scale re-fits like a wall width change: the frame is part of the
+// finished size, so the drawing's scale follows it.
+$('profileScale').onchange = () => {
+  const v = Number($('profileScale').value);
+  if (!(v > 0)) return setStatus('profile width must be greater than 0', true);
+  if (drawing) fitToYSize();
+  refit(`profile width ×${v} — ${finishedSize()}`);
+};
+
+/** The profile's width after the user's stretch, in model millimetres. */
+function scaledProfileWidth() {
+  return profileDims ? profileDims.x * (Number($('profileScale').value) || 1) : 0;
+}
+
+/* ------------------------------------------------------------- boundary */
+
+// A second drawing — a closed polygon drawn over the pattern — bounds it:
+// whatever falls outside is cut off. It is read in the pattern's own
+// coordinates and scaled with it, so it lands where it was drawn; its own
+// size multiplier and nudge (in finished millimetres) place it by eye.
+let boundaryPicked = null;  // the boundary drawing (File), null to use the whole drawing
+let boundaryDims = null;    // { x, y } mm — what the boundary measures
+
+/** The boundary's own dimensions, measured by the server. */
+async function inspectSize(file) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('sagitta', $('sagitta').value);
+  form.append('scale', '1');
+  const res = await fetch('/api/inspect', { method: 'POST', body: form });
+  const info = await res.json();
+  if (!res.ok) throw new Error(info.error ?? res.statusText);
+  return { x: info.size[0], y: info.size[1] };
+}
+
+/** Show or hide the boundary controls and the ✕, and refresh the label. */
+function boundaryUI() {
+  const on = !!boundaryPicked;
+  $('boundaryName').textContent = boundaryPicked ? boundaryPicked.name : 'off — the whole drawing';
+  $('boundaryClear').hidden = !on;
+  $('boundaryOpts').hidden = !on;
+}
+
+/** Set (or clear, with null) the boundary polygon. */
+async function setBoundary(file) {
+  boundaryPicked = file;
+  boundaryDims = file ? await inspectSize(file) : null;
+  boundaryUI();
+}
+
+$('boundaryPick').onclick = () => $('boundaryFile').click();
+$('boundaryFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';              // picking the same file twice still fires
+  if (!file) return;
+  if (!DRAWING.test(file.name)) {
+    return setStatus('the boundary must be a .dxf or .svg file', true);
+  }
+  try {
+    await setBoundary(file);
+    // A boundary is a finished part, so it comes in at its own drawn size:
+    // scale ×1 now means the boundary file's units, not the pattern's.
+    useBoundarySize();
+    refit(`cropped to ${file.name} — ${boundaryDims.x.toFixed(1)} × `
+      + `${boundaryDims.y.toFixed(1)} mm at ×1`);
+  } catch (err) {
+    setStatus(String(err.message ?? err), true);
+  }
+};
+$('boundaryClear').onclick = async () => {
+  await setBoundary(null);
+  if (drawing) fitToYSize();
+  refit('back to the whole drawing');
+};
+
+// The boundary's own controls move the crop, so a change means a rebuild.
+// Growing the boundary also changes the finished size, so the scale re-fits
+// to the y size; nudging only slides it and leaves the size alone.
+for (const id of ['boundaryScale', 'boundaryX', 'boundaryY']) {
+  $(id).onchange = () => {
+    const v = Number($(id).value);
+    if (!Number.isFinite(v)) return setStatus(`${id} needs a number`, true);
+    if (id === 'boundaryScale' && !(v > 0)) {
+      return setStatus('boundary size must be greater than 0', true);
+    }
+    if (id === 'boundaryScale' && drawing) fitToYSize();
+    refit(id === 'boundaryScale'
+      ? `boundary is now ×${v} across — ${finishedSize()}`
+      : id === 'boundaryX'
+        ? `boundary nudged ${v} mm across — ${finishedSize()}`
+        : `boundary nudged ${v} mm up — ${finishedSize()}`);
+  };
+}
+
+// Walling the boundary is a pure geometry change: the finished size is the
+// same, so only the outlines are redrawn.
+$('boundaryWall').onchange = () => {
+  refit($('boundaryWall').checked
+    ? 'the boundary is walled — the crop has a rim'
+    : 'flush cut — faces end open at the boundary');
+};
+
+// Centring and fitting moves the boundary over the pattern but leaves the
+// finished size alone — it only decides which part of the pattern is kept.
+$('boundaryFit').onchange = () => {
+  refit($('boundaryFit').checked
+    ? `boundary centred and fitted — ${finishedSize()}`
+    : `boundary kept as drawn — ${finishedSize()}`);
+};
+
+// Back to the boundary's own units whenever the user wants it.
+$('boundary1to1').onclick = () => {
+  useBoundarySize();
+  refit(`boundary at its drawn size — ${finishedSize()}`);
+};
+
+boundaryUI();      // a browser that restored the state on reload starts right
+
 /* ------------------------------------------------------------------- size */
 
 // What the drawing measures before any scaling, from /api/inspect. Everything
@@ -1167,32 +1907,98 @@ async function loadLayers(file, fit = true) {
 let drawing = null;      // { x, y } in mm, or null before a drawing is read
 
 // The walls stand half their width outside the outermost curve on each side,
-// so they are part of what comes off the printer.
-const finishedY = (scale) => drawing.y * scale + Number($('wallWidth').value || 0);
+// so they are part of what comes off the printer. In profile mode the profile's
+// own (scaled) width takes over from the wall width box; confined, the frame
+// is pulled inside the drawing and adds nothing to it at all.
+const frameWidth = () =>
+  $('confineWalls').checked ? 0
+    : profileDims ? scaledProfileWidth()
+    : Number($('wallWidth').value || 0);
+
+// With a boundary loaded, the crop — not the pattern — is the finished
+// outline: what the model measures is the boundary's box (times its own size
+// multiplier). So the *scale* box reads the boundary's scale — ×1 is the
+// boundary file's own units — and the pattern is scaled underneath it by
+// whatever leaves the boundary at that size. The nudge only slides the box,
+// so it never changes the size.
+const boundaryRatio = () => {
+  if (!boundaryPicked || !$('boundaryFit').checked || !drawing || !boundaryDims) {
+    return 1;
+  }
+  const bx = boundaryDims.x || 1, by = boundaryDims.y || 1;
+  return Math.min(drawing.x / bx, drawing.y / by);
+};
+
+const outline = () => {
+  if (!boundaryPicked) return drawing;
+  const bs = Number($('boundaryScale').value) || 1;
+  return { x: boundaryDims.x * bs, y: boundaryDims.y * bs };
+};
+
+// The scale the pattern is actually drawn at on the server. The box reads the
+// finished outline's scale; with a centred-and-fitted boundary the pattern has
+// to be scaled by an extra 1/k so the boundary still lands at the box's scale
+// (the server's own fit cancels it out).
+const patternScale = () => {
+  const s = Number($('scale').value) || 1;
+  return boundaryPicked ? s / boundaryRatio() : s;
+};
+
+// Set the model to the boundary's exact drawn size: the boundary ×1 in its own
+// units, the pattern scaled to whatever fills it.
+function useBoundarySize() {
+  $('boundaryScale').value = 1;
+  $('scale').value = 1;
+  showYSize();
+}
+
+const finishedY = (scale) => {
+  const d = outline();
+  return d ? d.y * scale + frameWidth() : 0;
+};
 
 function finishedSize() {
-  if (!drawing) return 'unknown size';
+  const d = outline();
+  if (!d) return 'unknown size';
   const s = Number($('scale').value) || 1;
-  const wall = Number($('wallWidth').value || 0);
-  return `${(drawing.x * s + wall).toFixed(1)} × ${finishedY(s).toFixed(1)} mm`;
+  return `${(d.x * s + frameWidth()).toFixed(1)} × ${finishedY(s).toFixed(1)} mm`;
+}
+
+/** A stacked drawing's own scale, fitted to the same y size as the base. */
+function fitLayer(l) {
+  const target = Number($('ySize').value);
+  const wall = frameWidth();
+  // A boundary is drawn in the base drawing's coordinates and its nudge is in
+  // finished millimetres, so it only lands on the same place of every stacked
+  // drawing when they all share one pattern scale — the base drawing's.
+  if (boundaryPicked) {
+    l.scale = patternScale();
+    return;
+  }
+  if (!l.drawing?.y || !(target > wall)) return;
+  l.scale = round6((target - wall) / l.drawing.y);
 }
 
 /** Set the scale so the finished model stands *y size* mm tall. */
 function fitToYSize() {
   const target = Number($('ySize').value);
-  const wall = Number($('wallWidth').value || 0);
-  if (!drawing || !drawing.y) return false;
+  const wall = frameWidth();
+  const d = outline();
+  if (!d || !d.y) return false;
   if (!(target > wall)) {
     setStatus(`a y size of ${target} mm leaves no room for the ${wall} mm walls`, true);
     return false;
   }
-  $('scale').value = round6((target - wall) / drawing.y);
+  $('scale').value = round6((target - wall) / d.y);
+  // Every stacked drawing is fitted to the same height, on its own proportions.
+  for (const l of layers.slice(1)) fitLayer(l);
   return true;
 }
 
 /** The other way round: what the scale in the box actually comes out as. */
 function showYSize() {
-  if (!drawing || !drawing.y) return;
+  const d = outline();
+  if (!d || !d.y) return;
   $('ySize').value = round3(finishedY(Number($('scale').value) || 1));
 }
 
@@ -1212,6 +2018,124 @@ function selectedLayers() {
   return boxes.filter((b) => b.checked).map((b) => b.value).join(',');
 }
 
+/** The sublayer filter for any drawing, base or stacked, in the server's form. */
+function layerFilter(li) {
+  if (li === 0) return selectedLayers();
+  const l = layers[li];
+  if (!l.picks || l.picks.length === l.sublayers.length) return '';
+  return l.picks.join(',');
+}
+
+/* --------------------------------------------------------- drawing stack */
+
+// One model can be several drawings, each a finished relief of its own sitting
+// on the frame of the one below. They share the palette and the wall settings,
+// so the export still comes back as one file per hue.
+const MAX_DRAWINGS = 8;
+
+/** The rows in the *drawings* panel: one per loaded drawing, base first. */
+function renderDrawings() {
+  const box = $('drawings');
+  box.textContent = '';
+  $('drawingsBox').hidden = !picked;
+  $('addDrawing').disabled = layers.length >= MAX_DRAWINGS;
+
+  layers.forEach((l, li) => {
+    const row = document.createElement('div');
+    row.className = 'drawing-row';
+
+    const see = document.createElement('input');
+    see.type = 'checkbox';
+    see.checked = l.group.visible;
+    see.title = 'Show this drawing — hide it to paint the one underneath';
+    see.onchange = () => {
+      l.group.visible = see.checked;
+      if (l.holeMarkers) l.holeMarkers.visible = see.checked;
+      if (!see.checked && selected?.li === li) select(null);
+    };
+
+    const name = document.createElement('span');
+    name.className = 'drawing-name';
+    name.textContent = `${li + 1}. ${l.file ? l.file.name : '—'}`;
+    name.title = l.drawing
+      ? `${l.drawing.x.toFixed(1)} × ${l.drawing.y.toFixed(1)} mm at ×`
+        + `${li === 0 ? $('scale').value : l.scale}`
+      : '';
+
+    row.append(see, name);
+
+    // The base drawing is the model — removing it is what dropping a new file
+    // does, so only the stacked ones get a ✕.
+    if (li > 0) {
+      const del = document.createElement('button');
+      del.className = 'ghost';
+      del.textContent = '✕';
+      del.title = 'Remove this drawing';
+      del.onclick = () => removeDrawing(li);
+      row.append(del);
+    }
+    box.append(row);
+
+    // The base drawing's sublayers already have their own panel above.
+    if (li > 0 && l.sublayers.length > 1) {
+      const list = document.createElement('div');
+      list.className = 'sublist';
+      for (const sub of l.sublayers) {
+        const label = layerCheck(sub, null);
+        const cb = label.querySelector('input');
+        cb.checked = !l.picks || l.picks.includes(sub.name);
+        cb.onchange = () => {
+          l.picks = [...list.querySelectorAll('input')]
+            .filter((b) => b.checked).map((b) => b.value);
+          refit(`drawing ${li + 1}: reading `
+            + (l.picks.length === l.sublayers.length
+              ? 'every layer' : count(l.picks.length, 'layer')));
+        };
+        list.append(label);
+      }
+      box.append(list);
+    }
+  });
+}
+
+/** Stack another drawing on top of the ones already loaded. */
+async function addDrawing(file) {
+  if (!picked) return pickFile(file);         // nothing to stack on yet
+  if (layers.length >= MAX_DRAWINGS) {
+    return setStatus(`a model can hold ${MAX_DRAWINGS} drawings at most`, true);
+  }
+  const l = newLayer(file);
+  layers.push(l);
+  setStatus(`reading ${file.name}…`);
+  try {
+    await loadStacked(l);
+  } catch (e) {
+    dropLayer(layers.length - 1);
+    return setStatus(String(e.message ?? e), true);
+  }
+  renderDrawings();
+  // The drawings already loaded keep their painting; the new one starts fresh.
+  await refit(`${file.name} stacked on top — ${count(layers.length, 'drawing')}`);
+}
+
+/** Take a stacked drawing off again; the ones above it drop down a level. */
+async function removeDrawing(li) {
+  const name = layers[li].file?.name ?? `drawing ${li + 1}`;
+  dropLayer(li);
+  if (selected?.li === li) select(null);
+  renderDrawings();
+  await refit(`removed ${name} — ${count(layers.length, 'drawing')} left`);
+}
+
+$('addDrawing').onclick = () => $('fileAdd').click();
+$('fileAdd').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';              // picking the same file twice still fires
+  if (!file) return;
+  if (!DRAWING.test(file.name)) return setStatus('stack a .dxf or .svg file', true);
+  addDrawing(file);
+};
+
 const drop = $('drop');
 drop.onclick = () => $('file').click();
 drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
@@ -1222,6 +2146,12 @@ function accept(file) {
   if (PROJECT.test(file.name)) return loadProject(file);
   if (!DRAWING.test(file.name)) {
     return setStatus('that is not a .dxf, .svg or .v2sproj file', true);
+  }
+  // A drawing dropped onto work already in progress is ambiguous: it can
+  // replace the model, or be stacked on top of it as another layer.
+  if (baseModel() && !confirm(`Start again from ${file.name}?\n\n`
+      + 'Cancel to stack it on top of this model instead.')) {
+    return addDrawing(file);
   }
   return pickFile(file);
 }
@@ -1258,6 +2188,8 @@ $('reroll').onclick = () => {
 
 const SHAPE_FIELDS = ['wallWidth', 'wallHeight', 'wallOverlap',
                       'regionMin', 'regionMax', 'sagitta', 'scale'];
+// The face effect and its settings — shared by every drawing in the model.
+const EFFECT_FIELDS = ['effect', 'effectSteps', 'effectInset'];
 const DRAWING = /\.(dxf|svg)$/i;
 
 /** Seeded PRNG, so the same seed lays out the same starting heights. */
@@ -1272,12 +2204,47 @@ function mulberry32(a) {
 
 function shapeForm() {
   const form = new FormData();
-  form.append('file', picked);
-  for (const id of SHAPE_FIELDS) form.append(id, $(id).value);
+  // The drawings go in stacking order, base first; everything else about the
+  // shape is shared, so it is sent once.
+  for (const l of layers) form.append('file', l.file);
+  for (const id of SHAPE_FIELDS) {
+    if (id === 'scale') continue;   // sent below, as the pattern's own scale
+    form.append(id, $(id).value);
+  }
+  form.append('scale', String(patternScale()));
+  if ($('confineWalls').checked) form.append('confineWalls', '1');
   form.append('layers', selectedLayers());
-  if (holes.length) form.append('holes', JSON.stringify(holes));
+  // One effect shapes every face of every drawing, so it travels once.
+  for (const id of EFFECT_FIELDS) form.append(id, $(id).value);
+  if (profilePicked) {
+    form.append('profile', profilePicked);
+    form.append('profileScale', $('profileScale').value);
+  }
+  if (boundaryPicked) {
+    form.append('boundary', boundaryPicked);
+    form.append('boundaryScale', $('boundaryScale').value);
+    form.append('boundaryX', $('boundaryX').value);
+    form.append('boundaryY', $('boundaryY').value);
+    if (!$('boundaryFit').checked) form.append('boundaryFit', '0');
+    if (!$('boundaryWall').checked) form.append('boundaryWall', '0');
+  }
+  if (layers[0].holes.length) form.append('holes', JSON.stringify(layers[0].holes));
+
+  // Stacked drawings carry their own scale, sublayer filter and holes under
+  // the field name plus their 1-based place in the stack.
+  layers.forEach((l, li) => {
+    if (li === 0) return;
+    const n = li + 1;
+    form.append(`scale${n}`, String(l.scale));
+    form.append(`layers${n}`, layerFilter(li));
+    if (l.holes.length) form.append(`holes${n}`, JSON.stringify(l.holes));
+  });
   return form;
 }
+
+/** Each drawing's painted stacks, deep-copied, to carry across a rebuild. */
+const keepStacks = () =>
+  layers.map((l) => (l.model ? l.stacks.map((s) => s.map((x) => ({ ...x }))) : null));
 
 /**
  * Ask the server for the faces and build the preview. `keep` restores painted
@@ -1300,20 +2267,33 @@ async function generate(keep = null) {
     if (!res.ok) throw new Error([data.error ?? res.statusText, data.log].filter(Boolean).join('\n'));
 
     // Face ids come from the drawing and the wall settings, so a project only
-    // lines up if it produced the same number of faces.
+    // lines up if it produced the same number of faces. Each drawing is judged
+    // on its own: a change to one must not throw away the painting on another.
+    const drawings = data.drawings ?? [data];
     let mismatch = false;
-    if (keep && keep.length !== data.regions.length) {
-      setStatus(`the painting had ${keep.length} faces but the drawing now `
-        + `makes ${data.regions.length} — starting fresh`, true);
-      keep = null;
-      mismatch = true;      // leave the warning on screen
+    if (keep) {
+      keep = drawings.map((d, li) => {
+        const had = keep[li];
+        if (!had) return null;                 // a drawing that was just added
+        if (had.length === d.regions.length) return had;
+        setStatus(`the painting on drawing ${li + 1} had ${had.length} faces but it `
+          + `now makes ${d.regions.length} — starting that one fresh`, true);
+        mismatch = true;      // leave the warning on screen
+        return null;
+      });
+      if (keep.every((k) => k === null)) keep = null;
     }
     const seed = Number($('seed').value);
     buildModel(data, lo, hi, mulberry32(Number.isFinite(seed) && $('seed').value !== ''
       ? seed : (Math.random() * 1e9) | 0), keep);
     buildPalette(lo, hi);
     select(null);
-    if (!keep && !mismatch) setStatus(`${data.regions.length} faces — pick a colour, then click a face`);
+    const faces = drawings.reduce((n, d) => n + d.regions.length, 0);
+    const cut = data.cropped ? `${data.cropped} curves cut off by the boundary` : '';
+    if (!keep && !mismatch) {
+      setStatus(`${faces} faces — pick a colour, then click a face`
+        + (cut ? `\n${cut}` : ''));
+    }
     return keep ? 'restored' : 'fresh';
   } catch (e) {
     setStatus(String(e.message ?? e), true);
@@ -1341,13 +2321,13 @@ let refitNote = '';         // what to say once it lands
  */
 async function refit(note) {
   refitNote = note;
-  if (!picked || !model) return;      // nothing to rebuild before the first Generate
+  if (!picked || !baseModel()) return;  // nothing to rebuild before the first Generate
   if (refitting) { refitAgain = true; return; }
   refitting = true;
   try {
     do {
       refitAgain = false;
-      const keep = stacks.map((s) => s.map((l) => ({ ...l })));
+      const keep = keepStacks();
       setStatus('re-fitting the model…');
       const how = await generate(keep);
       if (how === 'restored' && refitNote) setStatus(refitNote);
@@ -1374,6 +2354,15 @@ for (const [id, note] of Object.entries(REFIT_FIELDS)) {
   };
 }
 
+// Confining the walls changes both the outlines and what the drawing measures
+// once printed, so the scale is re-fitted along with them.
+$('confineWalls').onchange = () => {
+  if (drawing) fitToYSize();
+  refit($('confineWalls').checked
+    ? `the walls now stay inside the outline — ${finishedSize()}`
+    : `the walls now straddle the outline — ${finishedSize()}`);
+};
+
 // The walls count towards the height, so widening them re-fits the scale
 // rather than quietly making the model taller than the y size says.
 $('wallWidth').onchange = () => {
@@ -1390,7 +2379,7 @@ $('ySize').onchange = async () => {
   if (!fitToYSize()) return;
   await refit(`${finishedSize()} at ×${$('scale').value}`);
   // The model no longer fits the framing the old size had.
-  if (model) frameModel();
+  if (baseModel()) frameModel();
 };
 
 // Scaling by hand is still allowed; the y size box follows it rather than
@@ -1400,9 +2389,48 @@ $('scale').onchange = async () => {
     return setStatus('scale must be greater than 0', true);
   }
   showYSize();
+  // A hand-set scale only moves the base drawing; the stacked ones keep the
+  // size they were fitted to, so the y size box stays true for them.
   await refit(`scaled ×${$('scale').value} — ${finishedSize()}`);
-  if (model) frameModel();
+  if (baseModel()) frameModel();
 };
+
+/* --------------------------------------------------------------- effects */
+
+// An effect reshapes the solid each face is extruded into. The terraces of a
+// pyramid are outlines the browser cannot work out for itself, so the server
+// sends them with the faces and a change here means a rebuild.
+
+/** Only the chosen effect's own settings are on show. */
+function effectUI() {
+  $('pyramidRow').hidden = $('effect').value !== 'maya-pyramid';
+}
+
+const effectNote = () => {
+  if ($('effect').value !== 'maya-pyramid') return 'faces are flat again';
+  return `faces are stepped pyramids of up to ${count(Number($('effectSteps').value), 'terrace')}, `
+    + `each ${$('effectInset').value} mm further in and never thinner than 0.2 mm`;
+};
+
+$('effect').onchange = () => {
+  effectUI();
+  refit(effectNote());
+};
+
+for (const id of ['effectSteps', 'effectInset']) {
+  $(id).onchange = () => {
+    const v = Number($(id).value);
+    if (!(v > 0)) {
+      return setStatus(id === 'effectSteps'
+        ? 'a face needs at least one terrace'
+        : 'the step inset must be greater than 0', true);
+    }
+    if ($('effect').value === 'none') return;   // nothing to reshape yet
+    refit(effectNote());
+  };
+}
+
+effectUI();      // a browser that restored the chooser on reload starts right
 
 // Ticking a layer changes what is drawn at all, so it rebuilds the same way.
 function layerChanged() {
@@ -1419,12 +2447,15 @@ function layerChanged() {
 function rangeChanged() {
   const lo = Number($('regionMin').value), hi = Number($('regionMax').value);
   if (!(hi >= lo)) return setStatus('tallest face must be at least the lowest', true);
-  if (!model) return;
-  model.lo = lo;
-  model.hi = hi;
+  if (!baseModel()) return;
   buildPalette(lo, hi);
-  for (let i = 0; i < stacks.length; i++) rebuildRegion(i);
-  rebuildFrame();
+  layers.forEach((l, li) => {
+    if (!l.model) return;
+    l.model.lo = lo;
+    l.model.hi = hi;
+    for (let i = 0; i < l.stacks.length; i++) rebuildRegion(li, i);
+    rebuildFrame(li);
+  });
   setStatus(`the palette now spans ${lo}–${hi} mm, `
     + `${count(levels(lo, hi).length, 'shade')} per hue`);
 }
@@ -1437,37 +2468,76 @@ $('regionMax').onchange = rangeChanged;
 const PROJECT = /\.v2sproj$/i;
 const PROJECT_FORMAT = 'vector2stl-project';
 
-/** Everything needed to pick the work back up, drawing included. */
-async function buildProject() {
-  const bytes = new Uint8Array(await picked.arrayBuffer());
+/** A file's bytes as base64, chunked so the spread stays within call limits. */
+async function fileBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
   let bin = '';
   for (let i = 0; i < bytes.length; i += 8192) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
   }
-  return {
+  return btoa(bin);
+}
+
+/**
+ * Everything needed to pick the work back up, drawing included. A model made
+ * of one drawing is still written as version 1, exactly as before; the stacked
+ * drawings only appear once there is more than one of them, as version 2.
+ */
+async function buildProject() {
+  const stacked = layers.length > 1;
+  const project = {
     format: PROJECT_FORMAT,
-    version: 1,
+    version: stacked ? 2 : 1,
     saved: new Date().toISOString(),
-    drawing: { name: picked.name, data: btoa(bin) },
+    drawing: { name: picked.name, data: await fileBase64(picked) },
+    profile: profilePicked
+      ? { name: profilePicked.name, data: await fileBase64(profilePicked) }
+      : null,
+    boundary: boundaryPicked
+      ? { name: boundaryPicked.name, data: await fileBase64(boundaryPicked) }
+      : null,
     // layerHeight and ySize never reach the server — one drives the palette,
     // the other the scale — but the work is not the same without them, so they
     // travel with the rest of the settings.
     settings: Object.fromEntries(
-      [...SHAPE_FIELDS, 'seed', 'layerHeight', 'ySize'].map((id) => [id, $(id).value]),
+      [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize',
+        'profileScale', 'boundaryScale', 'boundaryX', 'boundaryY']
+        .map((id) => [id, $(id).value]),
     ),
     layers: selectedLayers(),
     palette: [...HUES],
-    frame: { black: $('blackFrame').checked, layer: $('frameLayer').value },
+    frame: {
+      black: $('blackFrame').checked,
+      layer: $('frameLayer').value,
+      confined: $('confineWalls').checked,
+      boundaryFit: $('boundaryFit').checked,
+      boundaryWall: $('boundaryWall').checked,
+    },
     callback: callbackCode,
-    faces: { stacks },
-    holes,
+    faces: { stacks: layers[0].stacks },
+    holes: layers[0].holes,
   };
+  if (stacked) {
+    // The base drawing stays where a version 1 reader expects it; the ones
+    // stacked on it, painting and all, follow in order.
+    project.drawings = await Promise.all(layers.slice(1).map(async (l) => ({
+      name: l.file.name,
+      data: await fileBase64(l.file),
+      scale: l.scale,
+      layers: layerFilter(layers.indexOf(l)),
+      stacks: l.stacks,
+      holes: l.holes,
+    })));
+  }
+  return project;
 }
 
-const summary = () => `${stacks.length} faces, ${count(holes.length, 'hole')}`;
+const summary = () => `${layers.reduce((n, l) => n + l.stacks.length, 0)} faces, `
+  + count(allHoles().length, 'hole')
+  + (layers.length > 1 ? `, ${count(layers.length, 'drawing')}` : '');
 
 $('saveProject').onclick = async () => {
-  if (!model || !picked) return;
+  if (!baseModel() || !picked) return;
   try {
     saveBlob(new TextEncoder().encode(JSON.stringify(await buildProject())),
       'application/json', baseName() + '.v2sproj');
@@ -1491,15 +2561,26 @@ async function loadProject(file) {
  * The painted faces out of a project. Projects saved before stacking existed
  * carry a flat height and hue per face; those become one-layer stacks.
  */
+// Projects painted when the palette had four rows can point at a row this one
+// does not have; those layers land on the last row instead of nowhere.
+let movedHues = 0;
+
+function readHue(raw) {
+  const hue = Math.trunc(Number(raw) || 0);
+  if (hue >= 0 && hue < HUES.length) return hue;
+  movedHues++;
+  return clamp(hue, 0, HUES.length - 1);
+}
+
 function readFaces(faces) {
   if (Array.isArray(faces.stacks)) {
     return faces.stacks.map((stack) => (Array.isArray(stack) ? stack : [])
       .filter((l) => l && Number.isFinite(Number(l.t)))
-      .map((l) => ({ hue: Number(l.hue) || 0, t: Number(l.t) })))
+      .map((l) => ({ hue: readHue(l.hue), t: Number(l.t) })))
       .map((stack) => stack.length ? stack : [{ hue: 0, t: 0 }]);
   }
   if (Array.isArray(faces.heights) && Array.isArray(faces.hues)) {
-    return faces.heights.map((t, i) => [{ hue: Number(faces.hues[i]) || 0, t: Number(t) }]);
+    return faces.heights.map((t, i) => [{ hue: readHue(faces.hues[i]), t: Number(t) }]);
   }
   return null;
 }
@@ -1516,10 +2597,18 @@ async function applyProject(project) {
   for (const [id, value] of Object.entries(project.settings ?? {})) {
     if ($(id)) $(id).value = value;
   }
+  // A project saved before effects existed has no effect setting, so the box
+  // keeps whatever it was on: put it back to none for them.
+  if (!project.settings?.effect) $('effect').value = 'none';
+  effectUI();
   if (project.frame) {
     $('blackFrame').checked = !!project.frame.black;
     if (project.frame.layer) $('frameLayer').value = project.frame.layer;
   }
+  // Always set, not only when the project carries a frame: a project from
+  // before confining existed straddles the outline, exactly as it did, and
+  // must not inherit the box from whatever was on screen before it.
+  $('confineWalls').checked = !!project.frame?.confined;
   callbackCode = typeof project.callback === 'string' ? project.callback : null;
   // A project saved with fewer rows keeps every hue it has, at the same index,
   // so its face stacks still point at the colours they were painted with. Any
@@ -1532,16 +2621,76 @@ async function applyProject(project) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
+  // The profile must be in place before generate() posts the drawing.
+  if (project.profile?.data) {
+    try {
+      await setProfile(new File([fromBase64(project.profile.data)],
+        project.profile.name || 'profile.dxf'));
+    } catch {
+      await setProfile(null);   // an unreadable profile should not block the project
+    }
+  } else {
+    await setProfile(null);
+  }
+
+  // So must the boundary polygon, whose placement fields are already in the
+  // boxes above (the settings loop restores them).
+  if (project.boundary?.data) {
+    try {
+      await setBoundary(new File([fromBase64(project.boundary.data)],
+        project.boundary.name || 'boundary.dxf'));
+    } catch {
+      await setBoundary(null);  // an unreadable boundary should not block the project
+    }
+  } else {
+    await setBoundary(null);
+  }
+  if (project.frame?.boundaryWall !== undefined) {
+    $('boundaryWall').checked = !!project.frame.boundaryWall;
+  }
+  if (project.frame?.boundaryFit !== undefined) {
+    $('boundaryFit').checked = !!project.frame.boundaryFit;
+  }
+
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
   await pickFile(new File([bytes], project.drawing.name || 'drawing.dxf'), false);
   restoreLayers(project.layers ?? '');
-  holes = Array.isArray(project.holes) ? project.holes : [];
+  layers[0].holes = Array.isArray(project.holes) ? project.holes : [];
+
+  // Version 2 stacked more drawings on the base one. Each keeps the scale and
+  // the sublayer choice it was saved with, so the model comes back as it was.
+  movedHues = 0;                    // counted across every drawing in the project
+  const keep = [readFaces(project.faces ?? {})];
+  let lost = 0;
+  for (const saved of (Array.isArray(project.drawings) ? project.drawings : [])) {
+    if (!saved?.data) { lost++; continue; }
+    const l = newLayer(new File([fromBase64(saved.data)], saved.name || 'drawing.dxf'));
+    l.picks = saved.layers ? String(saved.layers).split(',') : null;
+    layers.push(l);
+    try {
+      await loadStacked(l, false);
+    } catch {
+      dropLayer(layers.length - 1);   // an unreadable drawing is left out
+      lost++;
+      continue;
+    }
+    if (Number(saved.scale) > 0) l.scale = Number(saved.scale);
+    l.holes = Array.isArray(saved.holes) ? saved.holes : [];
+    keep.push(readFaces({ stacks: saved.stacks ?? [] }));
+  }
+  renderDrawings();
   holeList();
 
-  const keep = readFaces(project.faces ?? {});
+  const faces = keep.reduce((n, k) => n + (k?.length ?? 0), 0);
   if (await generate(keep) === 'restored') {
-    setStatus(`project opened — ${keep.length} faces, ${count(holes.length, 'hole')}`);
+    setStatus(`project opened — ${faces} faces, ${count(allHoles().length, 'hole')}`
+      + (layers.length > 1 ? `, ${count(layers.length, 'drawing')}` : '')
+      + (lost ? `\n${count(lost, 'drawing')} in the project could not be read` : '')
+      + (movedHues
+        ? `\n${count(movedHues, 'layer')} came from a palette row this version `
+          + `does not have — moved to row ${HUES.length}`
+        : ''));
   }
 }
 
@@ -1554,14 +2703,16 @@ const MONACO = `${MONACO_BASE}vs`;
 const DEFAULT_CALLBACK = `// Runs once, with every face. The loop is yours, so you can sort, group or
 // bucket the faces however you like before deciding what to do with them.
 //
-//   faces   [{ id, area, centroid: [x, y], height, stack }]
+//   faces   [{ id, layer, area, centroid: [x, y], height, stack }]
+//   layer   which drawing the face belongs to, 0 for the bottom one
 //   stack   [{ hue, t }] bottom layer first — hue indexes hues, t is mm thick
 //   levels  every height the palette offers, lowest first — one per layer
 //           height, so how many there are depends on the settings:
 //           [${'${levels}'}]
 //   hues    the palette's hue angles, in degrees
 //
-// Assign to face.stack to repaint. Nothing is applied if this throws.
+// Assign to face.stack to repaint. Nothing is applied if this throws. A mix is
+// nothing special here: two layers of the same thickness, different hues.
 //
 // Example — the ten largest faces get a tall violet cap:
 //   [...faces].sort((a, b) => b.area - a.area).slice(0, 10)
@@ -1671,8 +2822,8 @@ let editor = null;            // the Monaco instance, or null when we fell back
 
 /** The list is long with a fine layer height, so it is wrapped as a comment. */
 const defaultCallback = () => {
-  const shown = levels(model ? model.lo : 0.2, model ? model.hi : 2)
-    .map((h) => h.toFixed(2));
+  const m = baseModel();
+  const shown = levels(m ? m.lo : 0.2, m ? m.hi : 2).map((h) => h.toFixed(2));
   const lines = [];
   for (let i = 0; i < shown.length; i += 8) lines.push(shown.slice(i, i + 8).join(', '));
   return DEFAULT_CALLBACK.replace('${levels}', lines.join(',\n//            '));
@@ -1704,7 +2855,7 @@ async function loadMonaco() {
 }
 
 async function openEditor() {
-  if (!model) return setStatus('generate a model first', true);
+  if (!baseModel()) return setStatus('generate a model first', true);
   if (callbackCode === null) callbackCode = defaultCallback();
   if (!$('templatePick').options.length) fillTemplates();
   $('editorOverlay').hidden = false;
@@ -1799,31 +2950,36 @@ function validStack(raw, id) {
 }
 
 function runCallback() {
-  if (!model) return;
+  const m = baseModel();
+  if (!m) return;
   const code = editorText();
-  const steps = levels(model.lo, model.hi);
+  const steps = levels(m.lo, m.hi);
 
   // The script works on copies; the model is only touched once it has run
-  // cleanly and every stack it produced has been checked.
-  const faces = stacks.map((stack, i) => ({
+  // cleanly and every stack it produced has been checked. Every drawing's
+  // faces go in together, each carrying which one it came from.
+  const faces = layers.flatMap((l, li) => l.stacks.map((stack, i) => ({
     id: i,
-    area: model.regions[i].area,
-    centroid: model.regions[i].centroid,
+    layer: li,
+    area: l.model.regions[i].area,
+    centroid: l.model.regions[i].centroid,
     height: totalHeight(stack),
-    stack: stack.map((l) => ({ ...l })),
-  }));
+    stack: stack.map((x) => ({ ...x })),
+  })));
+  // Where each result goes, remembered before the script can rewrite the ids.
+  const where = faces.map((f) => ({ li: f.layer, id: f.id }));
 
   let next;
   try {
     const fn = new Function('faces', 'levels', 'hues', 'hueName', code);
     fn(faces, [...steps], [...HUES], hueName);
-    next = faces.map((face, i) => validStack(face.stack, i));
+    next = faces.map((face, i) => validStack(face.stack, where[i].id));
   } catch (err) {
     editorSay(String(err && err.message ? err.message : err), true);
     return;
   }
 
-  for (let i = 0; i < next.length; i++) setStack(i, next[i]);
+  for (let i = 0; i < next.length; i++) setStack(where[i].li, where[i].id, next[i]);
   callbackCode = code;
   $('editorOverlay').hidden = true;
   const slabs = next.reduce((n, s) => n + s.length, 0);
@@ -1907,7 +3063,7 @@ async function openFromServer(name) {
 }
 
 $('saveToServer').onclick = async () => {
-  if (!model || !picked) return;
+  if (!baseModel() || !picked) return;
   const name = $('projectName').value.trim();
   if (!name) return setStatus('give the project a name first', true);
   if (shelf.some((p) => p.name === name)
@@ -1944,16 +3100,33 @@ async function removeFromServer(name) {
 
 refreshShelf();
 
+// The bundled profile makes sweep mode the out-of-the-box default — the ✕ in
+// the profile row goes back to flat walls. Missing file: stay flat, no fuss.
+(async () => {
+  try {
+    const res = await fetch('/api/default-profile.dxf');
+    if (!res.ok) return;
+    await setProfile(new File([await res.blob()], 'default_profile.dxf'));
+  } catch {
+    // No default profile on this server — flat walls it is.
+  }
+})();
+
 /* -------------------------------------------------------------- download */
 
 /** The form for a build, carrying every painted height so the STL matches the preview. */
 function buildForm() {
   const form = shapeForm();
-  // Every layer, so the STL is exactly what the preview shows.
-  form.append('stacks', JSON.stringify(Object.fromEntries(stacks.map((stack, i) => [
+  // Every layer, so the STL is exactly what the preview shows. The group names
+  // are the palette's, shared by every drawing — that is what keeps a stack of
+  // them coming back as the same three hue files plus the frame.
+  const painted = (stacks) => JSON.stringify(Object.fromEntries(stacks.map((stack, i) => [
     i, stack.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` })),
-  ]))));
-  const frame = frameStack();
+  ])));
+  layers.forEach((l, li) => {
+    form.append(li === 0 ? 'stacks' : `stacks${li + 1}`, painted(l.stacks));
+  });
+  const frame = frameStack(layers[0]);
   if (frame) {
     form.append('wallStack', JSON.stringify(
       frame.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` }))));
@@ -2001,7 +3174,7 @@ const baseName = () => $('projectName').value.trim()
   || picked.name.replace(DRAWING, '');
 
 $('download').onclick = async () => {
-  if (!model) return;
+  if (!baseModel()) return;
   try {
     const { buf, info } = await requestBuild('/api/convert', buildForm(), $('download'));
     saveBlob(buf, 'application/sla', baseName() + '.stl');
@@ -2014,7 +3187,7 @@ $('download').onclick = async () => {
 };
 
 $('export3mf').onclick = async () => {
-  if (!model) return;
+  if (!baseModel()) return;
   try {
     const { buf, info } = await requestBuild('/api/export3mf', buildForm(), $('export3mf'));
     saveBlob(buf, 'model/3mf', baseName() + '.3mf');
@@ -2037,7 +3210,7 @@ const fromBase64 = (b64) => {
 };
 
 $('exportZip').onclick = async () => {
-  if (!model) return;
+  if (!baseModel()) return;
   const form = buildForm();      // the stacks already carry each layer's colour
 
   setStatus('building…');

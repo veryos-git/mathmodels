@@ -5,9 +5,13 @@
 const PYTHON = ".venv/bin/python";
 const SCRIPT = "tools/dxf2stl.py";
 const EXAMPLE = "sketch.dxf";
+const DEFAULT_PROFILE = "default_profile.dxf";
 const PORT = Number(Deno.env.get("PORT") ?? 8788);
 const MAX_UPLOAD = 16 * 1024 * 1024;
+const MAX_LAYERS = 8;
 const MAX_ASSIGNMENTS = 1024 * 1024;
+// The face effects the converter knows; "none" is simply left off.
+const EFFECTS = ["maya-pyramid"];
 const DRAWING = /\.(dxf|svg)$/i;
 
 const PROJECT_DIR = Deno.env.get("PROJECT_DIR") ?? "projects";
@@ -26,13 +30,19 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
 };
 
-/** Read the request body, writing the uploaded DXF into `dir`. */
+/** Read the request body, writing the uploaded drawings into `dir`. */
 async function takeUpload(
   req: Request,
   dir: string,
-): Promise<{ form: FormData; file: File; path: string }> {
-  if (Number(req.headers.get("content-length") ?? 0) > MAX_UPLOAD) {
-    throw new HttpError(413, "that file is too large (16 MB max)");
+): Promise<{
+  form: FormData;
+  file: File;
+  paths: string[];
+  profilePath: string | null;
+  boundaryPath: string | null;
+}> {
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_UPLOAD * MAX_LAYERS) {
+    throw new HttpError(413, "those files are too large (16 MB each max)");
   }
   let form: FormData;
   try {
@@ -40,17 +50,58 @@ async function takeUpload(
   } catch {
     throw new HttpError(400, "expected a multipart form upload");
   }
-  const file = form.get("file");
-  if (!(file instanceof File) || !DRAWING.test(file.name)) {
+  // Stacked drawings all arrive under "file", base layer first.
+  const files = form.getAll("file").filter((f): f is File => f instanceof File);
+  const file = files[0];
+  if (!file || !DRAWING.test(file.name)) {
     throw new HttpError(400, "please upload a .dxf or .svg file");
   }
-  if (file.size > MAX_UPLOAD) throw new HttpError(413, "that file is too large (16 MB max)");
-  if (file.size === 0) throw new HttpError(400, "that file is empty");
+  if (files.length > MAX_LAYERS) {
+    throw new HttpError(400, `at most ${MAX_LAYERS} drawing layers`);
+  }
+  const paths: string[] = [];
+  for (const [i, f] of files.entries()) {
+    if (!DRAWING.test(f.name)) {
+      throw new HttpError(400, "every drawing layer must be a .dxf or .svg file");
+    }
+    if (f.size > MAX_UPLOAD) throw new HttpError(413, "that file is too large (16 MB max)");
+    if (f.size === 0) throw new HttpError(400, "that file is empty");
+    // Keep the extension — the converter picks its reader from it.
+    const ext = f.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf";
+    const path = `${dir}/input${i === 0 ? "" : i + 1}${ext}`;
+    await Deno.writeFile(path, new Uint8Array(await f.arrayBuffer()));
+    paths.push(path);
+  }
 
-  // Keep the extension — the converter picks its reader from it.
-  const path = `${dir}/input${file.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf"}`;
-  await Deno.writeFile(path, new Uint8Array(await file.arrayBuffer()));
-  return { form, file, path };
+  // Advanced modes each add a second drawing: one holding the sweep profile,
+  // one holding the polygon that bounds the pattern.
+  const profilePath = await takeExtra(form, "profile", "profile", dir);
+  const boundaryPath = await takeExtra(form, "boundary", "boundary", dir);
+  return { form, file, paths, profilePath, boundaryPath };
+}
+
+/**
+ * One of the optional extra drawings — the sweep profile or the boundary
+ * polygon — written beside the main upload. Missing or empty means it is off.
+ */
+async function takeExtra(
+  form: FormData,
+  field: string,
+  what: string,
+  dir: string,
+): Promise<string | null> {
+  const extra = form.get(field);
+  if (!(extra instanceof File) || extra.size === 0) return null;
+  if (!DRAWING.test(extra.name)) {
+    throw new HttpError(400, `the ${what} must be a .dxf or .svg file`);
+  }
+  if (extra.size > MAX_UPLOAD) {
+    throw new HttpError(413, `the ${what} is too large (16 MB max)`);
+  }
+  const ext = extra.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf";
+  const path = `${dir}/${field}${ext}`;
+  await Deno.writeFile(path, new Uint8Array(await extra.arrayBuffer()));
+  return path;
 }
 
 class HttpError extends Error {
@@ -88,7 +139,7 @@ function numericFlags(form: FormData, fields: Record<string, string>): string[] 
   return args;
 }
 
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+async functiocvgbnn withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await Deno.makeTempDir({ prefix: "dxf2stl-" });
   try {
     return await fn(dir);
@@ -100,15 +151,15 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 /** POST /api/inspect — what layers and geometry does this drawing contain? */
 function handleInspect(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, path } = await takeUpload(req, dir);
+    const { form, paths } = await takeUpload(req, dir);
     // Scale and sagitta change the reported size, so honour them here too.
     const args = numericFlags(form, { sagitta: "--sagitta", scale: "--scale" });
-    return Response.json(await runScript([path, "--inspect", ...args]));
+    return Response.json(await runScript([paths[0], "--inspect", ...args]));
   });
 }
 
 /** The shape flags shared by /api/regions and /api/convert. */
-function shapeFlags(form: FormData): string[] {
+function shapeFlags(form: FormData, boundaryPath: string | null = null): string[] {
   const args = numericFlags(form, {
     wallWidth: "--wall-width",
     wallHeight: "--wall-height",
@@ -118,7 +169,36 @@ function shapeFlags(form: FormData): string[] {
     regionStep: "--region-step",
     sagitta: "--sagitta",
     scale: "--scale",
+    profileScale: "--profile-scale",
+    effectSteps: "--effect-steps",
+    effectInset: "--effect-inset",
   });
+
+  // A boundary polygon crops every drawing: what falls outside it is cut off.
+  // Its own placement fields only mean anything while one is loaded.
+  if (boundaryPath) {
+    args.push("--boundary", boundaryPath);
+    args.push(...numericFlags(form, {
+      boundaryScale: "--boundary-scale",
+      boundaryX: "--boundary-x",
+      boundaryY: "--boundary-y",
+    }));
+    // Centring and fitting is the default; only leaving it turns the flag off.
+    if (form.get("boundaryFit") === "0") args.push("--no-boundary-fit");
+    // The boundary is walled by default, so only turning that off travels.
+    if (form.get("boundaryWall") === "0") args.push("--no-boundary-wall");
+  }
+
+  // Confining the walls keeps the model inside its outermost line instead of
+  // letting the frame stand half its width outside the drawing.
+  if (form.get("confineWalls") === "1") args.push("--confine-walls");
+
+  // One effect shapes every face of every drawing, so it is not a per-layer
+  // field. Only names the converter knows are passed on.
+  const effect = form.get("effect");
+  if (typeof effect === "string" && EFFECTS.includes(effect)) {
+    args.push("--effect", effect);
+  }
 
   // --seed is an int; a fractional value would only earn an argparse dump.
   const seed = form.get("seed");
@@ -137,12 +217,14 @@ function shapeFlags(form: FormData): string[] {
  */
 function handleRegions(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, path: input } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     return Response.json(await runScript([
-      input,
+      paths[0],
       "--regions",
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
+      ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "holes", "--holes", dir),
+      ...await layerSpecs(form, dir, paths),
     ]));
   });
 }
@@ -170,19 +252,58 @@ async function mapFlag(
   return [flag, path];
 }
 
+/**
+ * Build the --also spec for every extra drawing layer. Layer N (N = 2, 3, …)
+ * takes its per-layer fields with the N suffix: scaleN, layersN, stacksN,
+ * heightsN, holesN — everything else is shared with the base layer.
+ */
+async function layerSpecs(
+  form: FormData,
+  dir: string,
+  paths: string[],
+): Promise<string[]> {
+  const args: string[] = [];
+  for (let i = 1; i < paths.length; i++) {
+    const n = i + 1;
+    const spec: Record<string, unknown> = { file: paths[i] };
+    const scale = form.get(`scale${n}`);
+    if (typeof scale === "string" && scale !== "" && !Number.isNaN(Number(scale))) {
+      spec.scale = Number(scale);
+    }
+    const sublayers = form.get(`layers${n}`);
+    if (typeof sublayers === "string" && sublayers !== "") spec.layers = sublayers;
+    for (const field of ["stacks", "heights", "holes"]) {
+      const raw = form.get(`${field}${n}`);
+      if (typeof raw !== "string" || raw === "") continue;
+      if (raw.length > MAX_ASSIGNMENTS) throw new HttpError(413, `too many ${field}`);
+      try {
+        spec[field] = JSON.parse(raw);
+      } catch {
+        throw new HttpError(400, `the ${field} are not valid JSON`);
+      }
+    }
+    const path = `${dir}/layer${n}.json`;
+    await Deno.writeTextFile(path, JSON.stringify(spec));
+    args.push("--also", path);
+  }
+  return args;
+}
+
 /** POST /api/convert — the DXF plus settings in, an STL out. */
 function handleConvert(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, path: input } = await takeUpload(req, dir);
+    const { form, file, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     const output = `${dir}/output.stl`;
     const args = [
-      input,
+      paths[0],
       output,
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
+      ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "stacks", "--stacks", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
+      ...await layerSpecs(form, dir, paths),
     ];
 
     const stats = await runScript(args);
@@ -205,7 +326,7 @@ function handleConvert(req: Request): Promise<Response> {
  */
 function handleExport(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, path: input } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     // Colours travel either per layer (stacks) or per face (groups).
     const stacks = await mapFlag(form, "stacks", "--stacks", dir);
     const groups = await mapFlag(form, "groups", "--groups", dir);
@@ -215,15 +336,17 @@ function handleExport(req: Request): Promise<Response> {
 
     const output = `${dir}/stls`;
     const stats = await runScript([
-      input,
+      paths[0],
       output,
       "--split",
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
+      ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...stacks,
       ...groups,
+      ...await layerSpecs(form, dir, paths),
     ]);
 
     const listed = (stats.files ?? []) as Array<Record<string, unknown>>;
@@ -311,16 +434,18 @@ async function deleteProject(name: string): Promise<Response> {
  */
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, path: input } = await takeUpload(req, dir);
+    const { form, file, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     const output = `${dir}/project.3mf`;
     const stats = await runScript([
-      input,
+      paths[0],
       output,
-      ...shapeFlags(form),
+      ...shapeFlags(form, boundaryPath),
+      ...(profilePath ? ["--profile", profilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "stacks", "--stacks", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
+      ...await layerSpecs(form, dir, paths),
     ]);
     return new Response(await Deno.readFile(output), {
       headers: {
@@ -375,6 +500,18 @@ Deno.serve({ port: PORT }, async (req) => {
             "content-disposition": `attachment; filename="${EXAMPLE}"`,
           },
         });
+      }
+      if (url.pathname === "/api/default-profile.dxf") {
+        try {
+          return new Response(await Deno.readFile(DEFAULT_PROFILE), {
+            headers: {
+              "content-type": "application/dxf",
+              "content-disposition": `attachment; filename="${DEFAULT_PROFILE}"`,
+            },
+          });
+        } catch {
+          return Response.json({ error: "no default profile" }, { status: 404 });
+        }
       }
       const asset = await serveStatic(url.pathname);
       if (asset) return asset;
