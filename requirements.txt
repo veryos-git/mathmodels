@@ -4,3 +4,7 @@ svgelements==1.9.6    # the same for SVG: shapes, transforms, units, <use>
 shapely==2.1.2        # buffering the walls and finding the enclosed regions
 trimesh==4.12.2       # extruding polygons and writing the STL
 mapbox-earcut==2.0.0  # the triangulator trimesh uses for extrude_polygon
+# raster tracing (photo/scan -> SVG) — tools/trace.py
+opencv-python-headless==5.0.0.93  # binarize, despeckle, contour + RDP tracing
+scikit-image==0.26.0              # skimage.morphology.skeletonize (centerline)
+scipy==1.18.0                     # scikit-image dependency, pinned for reproducibility

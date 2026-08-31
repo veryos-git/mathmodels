@@ -1,0 +1,17 @@
+{
+  "id": "dc1b7c0b-9902-48ac-b175-fdb6e3e5bd08",
+  "name": "BisUnMzDMQZ2XFlEDPiH1_LQNiuQnp",
+  "createdAt": "2026-08-05T10:47:02.729Z",
+  "updatedAt": "2026-08-05T10:47:02.729Z",
+  "source": "source.png",
+  "params": {
+    "traceMode": "centerline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

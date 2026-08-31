@@ -8,8 +8,19 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #14161a; color: #ddd;
-         display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
-  aside { padding: 20px; border-right: 1px solid #2a2e35; overflow-y: auto; }
+         height: 100vh; overflow: hidden; }
+
+  /* full-screen workflow screens: start → trace → model */
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  .screen[hidden] { display: none; }
+  .screen-bar { display: flex; align-items: center; gap: 12px; padding: 9px 14px;
+         border-bottom: 1px solid #2a2e35; background: #171a1f; }
+  .screen-bar .title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+         white-space: nowrap; }
+  .screen-bar button { margin: 0; width: auto; padding: 7px 14px; font-size: 13px; }
+
+  .model-layout { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+  .model-layout aside { padding: 20px; border-right: 1px solid #2a2e35; overflow-y: auto; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: #6b7280; font-size: 12px; margin-bottom: 16px; }
   label { display: block; margin: 12px 0 4px; color: #9aa3af; font-size: 12px; }
@@ -89,11 +100,6 @@
   .seed-row button { margin-top: 0; width: auto; padding: 7px 12px; }
   .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .btn-row button { margin-top: 10px; }
-  #shelf { display: grid; gap: 4px; font-size: 12px; margin-bottom: 4px; }
-  .shelf-row { display: flex; gap: 6px; }
-  .shelf-row button { margin: 0; padding: 4px 8px; font-size: 12px; width: auto; }
-  .shelf-open { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis;
-                white-space: nowrap; }
   input[type=text] { width: 100%; padding: 6px 8px; background: #1d2127;
          border: 1px solid #2a2e35; border-radius: 6px; color: #ddd; }
   input[type=text]:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
@@ -113,7 +119,7 @@
            color: #ddd; font-size: 13px; cursor: pointer; }
   #selInfo { white-space: pre-line; }
 
-  main { position: relative; min-width: 0; }
+  .model-layout main { position: relative; min-width: 0; }
   #viewer { width: 100%; height: 100%; display: block; }
   #hint { position: absolute; inset: 0; display: grid; place-items: center; color: #4b5563;
           pointer-events: none; text-align: center; padding: 20px; }
@@ -169,33 +175,266 @@
   #editorHost textarea { width: 100%; height: 100%; border: 0; resize: none; padding: 12px;
                background: #16181d; color: #ddd; font: 13px/1.5 ui-monospace, monospace; }
 
+  /* window-position preview (2D frame + content) */
+  #previewOverlay { position: fixed; inset: 0; z-index: 20; background: rgba(8,10,13,.72);
+                    display: grid; place-items: center; padding: 24px; }
+  #previewOverlay[hidden] { display: none; }
+  #previewBox { width: min(1080px, 100%); height: min(760px, 100%); background: #14161a;
+                border: 1px solid #2a2e35; border-radius: 10px; display: grid;
+                grid-template-rows: auto 1fr auto; overflow: hidden; }
+  #previewBox header, #previewBox footer { display: flex; align-items: center; gap: 12px;
+                padding: 10px 14px; border-bottom: 1px solid #2a2e35; }
+  #previewBox footer { border-bottom: 0; border-top: 1px solid #2a2e35; }
+  #previewBox header .muted, #previewBox footer .muted { flex: 1; }
+  #previewBox button { margin: 0; width: auto; padding: 7px 14px; font-size: 13px; }
+  #previewHost { min-height: 0; position: relative; background: #101216; }
+  #previewCanvas { position: absolute; inset: 0; width: 100%; height: 100%;
+                   display: block; cursor: grab; touch-action: none; }
+  #previewCanvas.dragging { cursor: grabbing; }
+  #previewScale { flex: 0 0 240px; accent-color: #3b82f6; }
+  #previewScaleVal { flex: none; min-width: 52px; color: #9aa3af; font-size: 12px; }
+  #previewSize { flex: none; color: #6b7280; }
+  #previewDone { background: #3b82f6; }
+
+  /* trace screen (full-screen photo → SVG) */
+  .trace-layout { flex: 1; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+  .trace-layout aside { padding: 18px; border-right: 1px solid #2a2e35; overflow-y: auto; }
+  .trace-layout main { position: relative; min-width: 0; display: flex; flex-direction: column; padding: 12px; }
+  .group-title { font-size: 12px; color: #9aa3af; margin: 4px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .segmented { display: flex; gap: 4px; margin-bottom: 10px; }
+  .segmented button { margin: 0; width: auto; padding: 5px 12px; font-size: 12px;
+              background: #1d2127; color: #9aa3af; border: 1px solid #2a2e35;
+              border-radius: 6px; font-weight: 500; }
+  .segmented button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  #traceViewport { flex: 1; position: relative; background: #101216;
+              border: 1px solid #2a2e35; border-radius: 10px; overflow: hidden;
+              min-height: 0; margin-bottom: 10px; }
+  #traceViewport canvas, #traceViewport svg { position: absolute; inset: 0; }
+  #traceEdit { width: 100%; height: 100%; object-fit: contain; cursor: crosshair;
+              touch-action: none; }
+  #traceSvg { position: absolute; inset: 0; pointer-events: none; }
+  /* width/height 100% + the viewBox's xMidYMid meet letterboxes the trace,
+     so it fills the box without distorting. */
+  #traceSvg svg { width: 100%; height: 100%; }
+  #editColor { width: 100%; height: 26px; padding: 0; border: 1px solid #2a2e35;
+              border-radius: 6px; background: #1d2127; cursor: pointer; }
+  #editHint { margin-top: 8px; font-size: 11px; color: #6b7280; }
+  .slider-row { display: grid; grid-template-columns: 92px 1fr 34px; gap: 8px;
+              align-items: center; margin: 7px 0; }
+  .slider-row label { margin: 0; }
+  .slider-row.indent { margin-left: 22px; }
+  .slider-row input[type=range] { width: 100%; accent-color: #3b82f6; }
+  .val { color: #9aa3af; font-size: 12px; text-align: right; }
+  .radio-row { display: flex; gap: 14px; margin: 4px 0; }
+  .radio { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0;
+           color: #ddd; font-size: 13px; cursor: pointer; }
+  #traceModeHint { margin: 0 0 10px; font-size: 11px; color: #6b7280; }
+  #traceStats { margin-left: auto; align-self: center; font-size: 12px; }
+  #traceUse { background: #16a34a; }
+
+  /* start screen */
+  #startScreen { padding: 28px; overflow-y: auto; }
+  /* margin:auto centres when there is room, and falls back to top-aligned
+     scrollable flow once the content is taller than the window — unlike
+     justify-content:center, which clips the top and can't be scrolled back. */
+  .start-inner { width: min(980px, 100%); margin: auto; }
+  .start-inner h1 { font-size: 26px; }
+  .start-inner .sub { font-size: 14px; margin-bottom: 24px; }
+  .start-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+         gap: 12px; margin-bottom: 30px; }
+  .start-card { margin: 0; padding: 16px 14px; background: #1d2127; border: 1px solid #2a2e35;
+      border-radius: 10px; color: #ddd; font-size: 15px; font-weight: 600; cursor: pointer;
+      display: flex; flex-direction: column; gap: 5px; width: 100%; text-align: left; }
+  .start-card:hover { border-color: #3b82f6; background: #1a2130; }
+  .start-card .icon { font-size: 24px; line-height: 1; }
+  .start-card small { color: #6b7280; font-weight: 400; font-size: 12px; }
+  .start-card.primary { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  .start-card.primary small { color: #dbeafe; }
+  .start-projects-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .start-projects-head h2 { font-size: 14px; margin: 0; color: #9aa3af; font-weight: 600; }
+  .start-projects-head .ghost { margin: 0; width: auto; padding: 5px 12px; font-size: 12px; }
+  .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .project-tile { position: relative; background: #1d2127; border: 1px solid #2a2e35; border-radius: 10px;
+      overflow: hidden; cursor: pointer; text-align: left; padding: 0; margin: 0; width: 100%; }
+  .project-tile:hover { border-color: #3b82f6; }
+  .tile-thumb { aspect-ratio: 1; background: #101216; display: grid; place-items: center;
+      color: #4b5563; font-size: 40px; font-weight: 700; }
+  .tile-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tile-body { padding: 8px 10px; }
+  .tile-name { font-size: 13px; color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile-date { font-size: 11px; color: #6b7280; }
+  .tile-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+  .project-tile:hover .tile-actions { opacity: 1; }
+  .tile-actions button { margin: 0; width: auto; padding: 3px 8px; font-size: 12px; border-radius: 5px; }
+
+  /* primary action — Generate 3D (lives in the model screen's top bar) */
+  button.primary { padding: 9px 18px; font-size: 14px; font-weight: 700; }
+
+  /* the project-name box in the model screen's top bar */
+  .screen-bar .bar-name { width: clamp(140px, 18vw, 240px); }
+
+  /* collapsible "advanced" section in the model sidebar */
+  details.advanced { margin-top: 16px; }
+  details.advanced > summary { cursor: pointer; list-style: none; color: #9aa3af;
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+      padding: 6px 0; user-select: none; }
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.advanced > summary::before { content: '▸ '; }
+  details.advanced[open] > summary::before { content: '▾ '; }
+
+  /* export buttons sit tighter inside their fieldset */
+  #exportBox button { margin-top: 8px; }
+  #exportBox button:first-of-type { margin-top: 0; }
+
   @media (max-width: 720px) {
-    body { grid-template-columns: 1fr; grid-template-rows: auto 55vh; height: auto; }
-    aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
+    .model-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .model-layout aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
+    .trace-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .trace-layout aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
+    .screen-bar { flex-wrap: wrap; row-gap: 6px; }
+    .screen-bar .bar-name { flex: 1 1 140px; }
   }
 </style>
 </head>
 <body>
-<aside>
-  <h1>vector2stl</h1>
-  <div class="sub">Slot a DXF or SVG sketch into walls, then paint the height of each face.</div>
+<section id="startScreen" class="screen">
+  <div class="start-inner">
+    <h1>vector2stl</h1>
+    <div class="sub">Turn a sketch into a printable 3D relief.</div>
 
-  <div id="drop" tabindex="0" role="button" aria-label="Choose or drop a DXF, SVG or project file">
-    <strong id="dropName">Drop a .dxf or .svg here</strong>
-    <small id="dropHint">or a saved .v2sproj project — click to browse</small>
-  </div>
-  <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml">
-  <button class="ghost" id="example">Use the example sketch</button>
-
-  <fieldset id="shelfBox">
-    <legend>saved projects</legend>
-    <div id="shelf" class="muted">nothing saved on the server yet</div>
-    <label for="projectName">name</label>
-    <div class="seed-row">
-      <input type="text" id="projectName" placeholder="my window">
-      <button class="ghost" id="saveToServer" disabled>Save</button>
+    <div class="start-actions">
+      <button class="start-card primary" id="startTrace">
+        <span class="icon">📷</span>
+        Trace a photo
+        <small>Sketch on paper, photograph it, and trace it to a clean SVG here.</small>
+      </button>
+      <button class="start-card" id="startSvg">
+        <span class="icon">📐</span>
+        Open SVG / DXF
+        <small>Already have a vector drawing? Start straight from that.</small>
+      </button>
+      <button class="start-card" id="startExample">
+        <span class="icon">✨</span>
+        Example sketch
+        <small>Open the bundled gothic window to try it out.</small>
+      </button>
+      <button class="start-card" id="startProjectFile">
+        <span class="icon">📁</span>
+        Open a project file
+        <small>Reopen a downloaded .v2sproj.</small>
+      </button>
     </div>
-  </fieldset>
+
+    <div class="start-projects-head">
+      <h2>Saved projects</h2>
+    </div>
+    <div id="startProjects" class="project-grid muted">nothing saved on the server yet</div>
+  </div>
+  <input type="file" id="startTraceFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+  <input type="file" id="startSvgFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
+  <input type="file" id="startProjectFileInput" accept=".v2sproj" hidden>
+</section>
+
+<section id="traceScreen" class="screen" hidden>
+  <header class="screen-bar">
+    <button class="ghost" id="traceBack">← Back</button>
+    <span class="title">Trace <span class="muted" id="traceName"></span></span>
+    <button id="traceUse" disabled>Create 3D model →</button>
+  </header>
+  <div class="trace-layout">
+    <aside>
+      <div class="group-title">Edit image</div>
+      <div class="segmented" id="editTools">
+        <button data-tool="pen" class="active" title="Draw on the image">✏️ pen</button>
+        <button data-tool="eraser" title="Erase back to white">🧽 eraser</button>
+      </div>
+      <div class="slider-row">
+        <label for="editColor">pen colour</label>
+        <input id="editColor" type="color" value="#000000">
+        <span class="val" id="editColorVal">#000000</span>
+      </div>
+      <div class="slider-row">
+        <label for="editSize">brush</label>
+        <input id="editSize" type="range" min="1" max="60" step="1" value="10">
+        <span class="val" id="editSizeVal">10</span>
+      </div>
+      <button class="ghost" id="editReset" title="Undo all edits — back to the uploaded image">↺ reset image</button>
+      <div class="muted" id="editHint">draw on the Original/Overlay view — dark lines are traced, white is left out</div>
+
+      <div class="group-title">Trace mode</div>
+      <div class="radio-row">
+        <label class="radio"><input type="radio" name="traceMode" value="centerline" checked>
+          centerline</label>
+        <label class="radio"><input type="radio" name="traceMode" value="outline"> outline</label>
+      </div>
+      <div class="muted" id="traceModeHint">centerline → line art (walls) · outline → closed shapes (paintable faces)</div>
+
+      <div class="slider-row">
+        <label for="threshold">threshold</label>
+        <input id="threshold" type="range" min="0" max="255" step="1" value="128">
+        <span class="val" id="thresholdVal">128</span>
+      </div>
+      <div class="slider-row">
+        <label for="simplify">simplify</label>
+        <input id="simplify" type="range" min="0" max="8" step="0.1" value="1.5">
+        <span class="val" id="simplifyVal">1.5</span>
+      </div>
+      <div class="slider-row">
+        <label for="smoothing">smoothing</label>
+        <input id="smoothing" type="range" min="0" max="1" step="0.05" value="0.5">
+        <span class="val" id="smoothingVal">0.5</span>
+      </div>
+
+      <label class="check"><input id="skeletonize" type="checkbox"> skeletonize</label>
+      <label class="check"><input id="invert" type="checkbox"> invert (light on dark)</label>
+      <label class="check"><input id="despeckle" type="checkbox" checked> remove small specks</label>
+      <div class="slider-row indent">
+        <label for="minArea">min area</label>
+        <input id="minArea" type="range" min="2" max="500" step="1" value="10">
+        <span class="val" id="minAreaVal">10</span>
+      </div>
+    </aside>
+    <main>
+      <div class="segmented" id="traceViewSwitch">
+        <button data-view="svg" class="active">SVG</button>
+        <button data-view="original">Original</button>
+        <button data-view="overlay">Overlay</button>
+        <span class="muted" id="traceStats"></span>
+      </div>
+      <div id="traceViewport">
+        <canvas id="traceEdit"></canvas>
+        <div id="traceSvg"></div>
+      </div>
+      <div class="slider-row">
+        <label for="traceOverlay">overlay opacity</label>
+        <input id="traceOverlay" type="range" min="0" max="1" step="0.05" value="0.5">
+        <span class="val" id="traceOverlayVal">0.5</span>
+      </div>
+    </main>
+  </div>
+</section>
+
+<section id="modelScreen" class="screen" hidden>
+  <header class="screen-bar">
+    <button class="ghost" id="modelNew">← Start</button>
+    <button class="ghost" id="modelTrace" hidden>Edit trace</button>
+    <span class="title">3D model</span>
+    <input type="text" id="projectName" class="bar-name" placeholder="project name"
+           title="Names the project — used when you save and in download file names">
+    <button class="ghost" id="saveToServer" disabled title="Save this project on the server">Save</button>
+    <button id="go" class="primary">Generate 3D</button>
+  </header>
+  <div class="model-layout">
+<aside>
+  <h1>3D model</h1>
+  <div class="sub">Set the size, build the relief, then paint and export.</div>
+
+  <div id="drop" tabindex="0" role="button" aria-label="Choose or drop a DXF, SVG, image or project file">
+    <strong id="dropName">Drop a .dxf or .svg here</strong>
+    <small id="dropHint">or a photo to trace, or a saved .v2sproj — click to browse</small>
+  </div>
+  <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml,image/png,image/jpeg,image/gif,image/webp">
+  <button class="ghost" id="example">Use the example sketch</button>
 
   <fieldset id="layerBox" hidden>
     <legend>layers</legend>
@@ -210,7 +449,7 @@
   <input type="file" id="fileAdd" accept=".dxf,.svg,application/dxf,image/svg+xml">
 
   <fieldset id="boundaryBox">
-    <legend>boundary</legend>
+    <legend>frame · boundary</legend>
     <div class="seed-row" title="A DXF or SVG holding a closed polygon drawn over the pattern: everything outside it is cut off">
       <button class="ghost" id="boundaryPick">boundary…</button>
       <span class="muted" id="boundaryName">off — the whole drawing</span>
@@ -222,28 +461,41 @@
         <input type="checkbox" id="boundaryFit" checked> centre &amp; fit to the pattern</label>
       <label class="check" title="Wall the boundary, so the cropped pattern comes out with a rim around it — off cuts flush and leaves the faces along the cut open">
         <input type="checkbox" id="boundaryWall" checked> wall along the boundary</label>
+      <input type="number" id="boundaryScale" value="1" step="0.05" min="0.01" hidden>
       <div class="row">
-        <div><label for="boundaryScale" title="Resizes the boundary about its own centre, so the same polygon can crop a bigger or smaller piece">boundary size (×)</label>
-          <input type="number" id="boundaryScale" value="1" step="0.05" min="0.01"></div>
         <div><label for="boundaryX" title="Slide the boundary across the drawing, in finished millimetres">nudge x (mm)</label>
           <input type="number" id="boundaryX" value="0" step="1"></div>
-      </div>
-      <div class="row">
         <div><label for="boundaryY" title="Slide the boundary up or down the drawing, in finished millimetres">nudge y (mm)</label>
           <input type="number" id="boundaryY" value="0" step="1"></div>
       </div>
-      <div class="seed-row" style="margin-top:8px">
-        <button class="ghost" id="boundary1to1" title="Set the model to the boundary's exact drawn size — scale ×1 means the boundary file's own units">use boundary size (1:1)</button>
+      <div id="contentOpts">
+        <div class="group-title" style="margin-top:10px">window content</div>
+        <div class="muted" style="margin-bottom:6px">Resize and slide the pattern inside the frame. The frame keeps its size; the pattern moves behind it.</div>
+        <div class="row">
+          <div><label for="patternScale" title="Resize the pattern about its own centre, while the boundary (the frame) stays put">content size (×)</label>
+            <input type="number" id="patternScale" value="1" step="0.05" min="0.01"></div>
+          <div><label for="patternX" title="Slide the pattern across the frame, in finished millimetres">content x (mm)</label>
+            <input type="number" id="patternX" value="0" step="1"></div>
+        </div>
+        <div class="row">
+          <div><label for="patternY" title="Slide the pattern up or down the frame, in finished millimetres">content y (mm)</label>
+            <input type="number" id="patternY" value="0" step="1"></div>
+        </div>
+        <div class="seed-row" style="margin-top:8px">
+          <button class="ghost" id="contentPosition" title="Open the 2D window preview — drag to move, scroll to resize, without waiting for the 3D render">position window content…</button>
+        </div>
       </div>
     </div>
   </fieldset>
 
-  <div class="row">
-    <div><label for="wallWidth">wall width (mm)</label>
-      <input type="number" id="wallWidth" value="1.0" step="0.1" min="0.1"></div>
-    <div><label for="wallHeight">wall height (mm)</label>
-      <input type="number" id="wallHeight" value="1.0" step="0.1" min="0.1"></div>
-  </div>
+  <fieldset id="sizeBox">
+    <legend>size &amp; walls</legend>
+    <div class="row">
+      <div><label for="wallWidth">wall width (mm)</label>
+        <input type="number" id="wallWidth" value="1.0" step="0.1" min="0.1"></div>
+      <div><label for="wallHeight">wall height (mm)</label>
+        <input type="number" id="wallHeight" value="1.0" step="0.1" min="0.1"></div>
+    </div>
   <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the drawing — instead of the frame standing half a wall width outside it">
     <input type="checkbox" id="confineWalls"> keep walls inside the outline</label>
   <div class="seed-row" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
@@ -282,8 +534,11 @@
     <div><label for="scale" title="What the y size works out to — set it yourself to scale by hand">scale (×)</label>
       <input type="number" id="scale" value="1" step="any" min="0.000001"></div>
   </div>
+  </fieldset>
 
-  <fieldset id="effectBox">
+  <details class="advanced">
+    <summary>advanced</summary>
+    <fieldset id="effectBox">
     <legend>effects</legend>
     <label for="effect" title="Reshapes every face without changing what you painted on it">face effect</label>
     <select id="effect">
@@ -303,8 +558,7 @@
     <input type="number" id="seed" placeholder="random" step="1">
     <button class="ghost" id="reroll" title="New random heights">↻</button>
   </div>
-
-  <button id="go">Generate 3D</button>
+  </details>
 
   <fieldset id="paintBox" hidden>
     <legend>palette</legend>
@@ -341,10 +595,14 @@
     <div id="holeList" class="muted">no holes yet</div>
   </fieldset>
 
-  <button class="ghost" id="saveProject" hidden title="Save the drawing, settings, colours and holes as one file">Save project</button>
-  <button id="download" hidden>Download STL</button>
-  <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
-  <button id="export3mf" hidden title="One 3MF project with an extruder per colour">Export 3MF (Snapmaker)</button>
+  <fieldset id="exportBox" hidden>
+    <legend>export</legend>
+    <button class="ghost" id="saveProject" hidden title="Save the drawing, settings, colours and holes as one file">Save project</button>
+    <button id="download" hidden>Download STL</button>
+    <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
+    <button id="export3mf" hidden title="One 3MF with every colour combination, each merged into a single object">Export 3MF (Snapmaker)</button>
+  </fieldset>
+
   <div id="status"></div>
   <div id="stats"></div>
 </aside>
@@ -365,6 +623,27 @@
   </div>
 </div>
 
+<div id="previewOverlay" hidden>
+  <div id="previewBox" role="dialog" aria-modal="true" aria-label="Window position">
+    <header>
+      <strong>Window position</strong>
+      <span class="muted">drag to move the pattern · scroll to resize it · the frame stays put</span>
+      <button class="ghost" id="previewClose" title="Close (Esc)">✕</button>
+    </header>
+    <div id="previewHost">
+      <canvas id="previewCanvas"></canvas>
+    </div>
+    <footer>
+      <span class="muted">content size</span>
+      <input type="range" id="previewScale" min="0.05" max="5" step="0.01" value="1">
+      <span class="val" id="previewScaleVal">×1</span>
+      <span class="muted" id="previewSize"></span>
+      <button class="ghost" id="previewReset" title="Content back to ×1, centred">reset</button>
+      <button id="previewDone">Done</button>
+    </footer>
+  </div>
+</div>
+
 <main>
   <canvas id="viewer"></canvas>
   <div id="hint">generate a model to preview it here</div>
@@ -376,6 +655,8 @@
   <div id="readout" hidden></div>
   <div id="faceCard" hidden></div>
 </main>
+  </div>
+</section>
 
 <script type="importmap">
 { "imports": {
@@ -684,7 +965,7 @@ function mixPaint([under, over], half, lo, hi) {
 /* ---------------------------------------------------------------- viewer */
 
 const canvas = $('viewer');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14161a);
@@ -712,6 +993,7 @@ let layers = [];         // [{ file, drawing, scale, model, regionMeshes, region
                          //    holeMarkers, zBase, offset, sublayers, picks }]
 let grid = null;
 let home = null;
+let modelThumb = null;   // data URL of the last generated 3D preview
 let selected = null;     // { li, id } of the face last clicked
 let hovered = null;
 let wireframe = false;
@@ -821,6 +1103,7 @@ function resetLayers() {
   layers.push(newLayer());
   picked = null;
   drawing = null;
+  modelThumb = null;         // a new drawing has no generated model yet
   setHoleMode(false);
   holeList();
   renderDrawings();
@@ -1043,7 +1326,7 @@ function buildModel(data, lo, hi, rng, keep = null) {
   if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
   $('hint').hidden = true;
   for (const id of ['reset', 'wire', 'top', 'readout', 'paintBox', 'holeBox',
-                    'saveProject', 'download', 'exportZip', 'export3mf']) {
+                    'exportBox', 'saveProject', 'download', 'exportZip', 'export3mf']) {
     $(id).hidden = false;
   }
   $('saveToServer').disabled = false;
@@ -1386,6 +1669,27 @@ function resetView() {
   controls.update();
 }
 
+/**
+ * A square PNG of the generated 3D model, taken straight off the viewer and
+ * shrunk to a thumbnail-sized tile. Returns a data URL, or null if the canvas
+ * cannot be read (WebGL context lost and such).
+ */
+function captureModelThumbnail() {
+  try {
+    renderer.render(scene, camera);   // a fresh frame, camera already framed
+    const size = 320;
+    const out = document.createElement('canvas');
+    out.width = out.height = size;
+    const ctx = out.getContext('2d');
+    const s = Math.min(size / canvas.width, size / canvas.height);
+    const w = canvas.width * s, h = canvas.height * s;
+    ctx.drawImage(canvas, (size - w) / 2, (size - h) / 2, w, h);
+    return out.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
 /** Straight-down view with orbiting disabled, so painting can't spin the model. */
 function setTopView(on) {
   topLocked = on;
@@ -1501,7 +1805,8 @@ canvas.addEventListener('pointerup', (e) => {
 });
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!$('editorOverlay').hidden) closeEditor();
+  if (!$('previewOverlay').hidden) closePreview();
+  else if (!$('editorOverlay').hidden) closeEditor();
   else if (holeMode) setHoleMode(false);
   else select(null);
 });
@@ -1642,15 +1947,19 @@ function setStatus(text, isError = false) {
  * saved with — reopening one must not resize the work.
  */
 async function pickFile(file, fit = true) {
+  // A trace only stays attached while its SVG is the drawing; a new drawing
+  // dropped in from elsewhere drops the re-tunable source with it.
+  if (file !== traceState.svgFile) clearTrace();
   // A new base drawing is a fresh start: anything stacked on the old one, and
   // every hole placed in it, belonged to a model that no longer exists.
   resetLayers();
+  invalidatePreview();
   picked = file;
   layers[0].file = file;
   $('dropName').textContent = file.name;
   $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
   stats.textContent = '';
-  $('download').hidden = $('exportZip').hidden = $('holeBox').hidden = true;
+  $('exportBox').hidden = $('download').hidden = $('exportZip').hidden = $('holeBox').hidden = true;
   $('export3mf').hidden = true;
   $('saveProject').hidden = true;
   $('saveToServer').disabled = true;
@@ -1823,12 +2132,20 @@ function boundaryUI() {
   $('boundaryName').textContent = boundaryPicked ? boundaryPicked.name : 'off — the whole drawing';
   $('boundaryClear').hidden = !on;
   $('boundaryOpts').hidden = !on;
+  // The frame is fixed at 1:1 while a boundary is loaded — only the content
+  // (the pattern) moves and scales. The two boxes that would resize the frame
+  // step aside and the scale is pinned to the boundary file's own units.
+  $('boundaryScale').value = 1;
+  if (on) $('scale').value = 1;
+  $('ySize').disabled = on;
+  $('scale').disabled = on;
 }
 
 /** Set (or clear, with null) the boundary polygon. */
 async function setBoundary(file) {
   boundaryPicked = file;
   boundaryDims = file ? await inspectSize(file) : null;
+  invalidatePreview();
   boundaryUI();
 }
 
@@ -1845,8 +2162,8 @@ $('boundaryFile').onchange = async (e) => {
     // A boundary is a finished part, so it comes in at its own drawn size:
     // scale ×1 now means the boundary file's units, not the pattern's.
     useBoundarySize();
-    refit(`cropped to ${file.name} — ${boundaryDims.x.toFixed(1)} × `
-      + `${boundaryDims.y.toFixed(1)} mm at ×1`);
+    refit(`cropped to ${file.name} — frame fixed at 1:1 (${boundaryDims.x.toFixed(1)} × `
+      + `${boundaryDims.y.toFixed(1)} mm)`);
   } catch (err) {
     setStatus(String(err.message ?? err), true);
   }
@@ -1857,22 +2174,15 @@ $('boundaryClear').onclick = async () => {
   refit('back to the whole drawing');
 };
 
-// The boundary's own controls move the crop, so a change means a rebuild.
-// Growing the boundary also changes the finished size, so the scale re-fits
-// to the y size; nudging only slides it and leaves the size alone.
-for (const id of ['boundaryScale', 'boundaryX', 'boundaryY']) {
+// Nudging the boundary slides the crop. The frame stays at 1:1, so only the
+// outline is redrawn — the finished size never moves with it.
+for (const id of ['boundaryX', 'boundaryY']) {
   $(id).onchange = () => {
     const v = Number($(id).value);
     if (!Number.isFinite(v)) return setStatus(`${id} needs a number`, true);
-    if (id === 'boundaryScale' && !(v > 0)) {
-      return setStatus('boundary size must be greater than 0', true);
-    }
-    if (id === 'boundaryScale' && drawing) fitToYSize();
-    refit(id === 'boundaryScale'
-      ? `boundary is now ×${v} across — ${finishedSize()}`
-      : id === 'boundaryX'
-        ? `boundary nudged ${v} mm across — ${finishedSize()}`
-        : `boundary nudged ${v} mm up — ${finishedSize()}`);
+    refit(id === 'boundaryX'
+      ? `boundary nudged ${v} mm across — ${finishedSize()}`
+      : `boundary nudged ${v} mm up — ${finishedSize()}`);
   };
 }
 
@@ -1892,13 +2202,301 @@ $('boundaryFit').onchange = () => {
     : `boundary kept as drawn — ${finishedSize()}`);
 };
 
-// Back to the boundary's own units whenever the user wants it.
-$('boundary1to1').onclick = () => {
-  useBoundarySize();
-  refit(`boundary at its drawn size — ${finishedSize()}`);
+boundaryUI();      // a browser that restored the state on reload starts right
+
+/* ------------------------------------------------------- window content */
+
+// The pattern — the window's content — can be resized and slid under the
+// boundary, which is the frame. These boxes are only shown while a boundary is
+// loaded, and they move the *pattern*, not the frame: the finished outline (the
+// boundary's box) keeps its size while the crop finds its composition.
+
+const patternScaleNum = () => Number($('patternScale').value) || 1;
+const patternXNum = () => Number($('patternX').value) || 0;
+const patternYNum = () => Number($('patternY').value) || 0;
+
+// The 2D preview is drawn from geometry fetched once from the server; every
+// drag and scroll after that is a pure client-side transform, so positioning
+// is trial-and-error without a 3D rebuild.
+let previewData = null;          // { pattern: {curves}, boundary: {rings} }
+let previewPath = null;          // the pattern as one Path2D, in raw millimetres
+let previewPatternBox = null;    // raw bbox of the pattern
+let previewBoundaryRings = [];   // raw boundary rings
+let previewBoundaryBox = null;   // raw bbox of the boundary
+let previewKpx = 1;              // device px per model mm, from the last draw
+let previewDpr = 1;              // devicePixelRatio at the last draw
+let previewDrag = null;          // { x, y } in CSS px while dragging
+let contentTimer = null;         // debounces the 3D rebuild while dragging
+
+/** Drop the cached outlines — the drawing, boundary or layer filter changed. */
+function invalidatePreview() {
+  previewData = null;
+  previewPath = null;
+}
+
+function bboxOf(polylines) {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const c of polylines) for (const [x, y] of c) {
+    if (x < minx) minx = x;
+    if (x > maxx) maxx = x;
+    if (y < miny) miny = y;
+    if (y > maxy) maxy = y;
+  }
+  return { minx, miny, maxx, maxy, w: maxx - minx, h: maxy - miny };
+}
+
+/** Fetch the pattern and boundary outlines once, in raw millimetres. */
+async function loadPreview() {
+  if (previewData) return;
+  const form = new FormData();
+  form.append('file', layers[0].file);
+  form.append('sagitta', $('sagitta').value);
+  const sel = selectedLayers();
+  if (sel) form.append('layers', sel);
+  if (boundaryPicked) form.append('boundary', boundaryPicked);
+  setStatus('reading the pattern outlines…');
+  const res = await fetch('/api/preview', { method: 'POST', body: form });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? res.statusText);
+
+  previewData = data;
+  previewPatternBox = bboxOf(data.pattern.curves);
+  previewBoundaryRings = data.boundary?.rings ?? [];
+  previewBoundaryBox = bboxOf(previewBoundaryRings);
+  const path = new Path2D();
+  for (const c of data.pattern.curves) {
+    if (c.length < 2) continue;
+    path.moveTo(c[0][0], c[0][1]);
+    for (let i = 1; i < c.length; i++) path.lineTo(c[i][0], c[i][1]);
+  }
+  previewPath = path;
+}
+
+/**
+ * The pattern and boundary transforms the server will apply, as model-mm
+ * coordinates — the preview must agree with `place_boundary` and
+ * `transform_curves` in dxf2stl.py, or the crop would not match.
+ */
+function computePreviewGeom() {
+  const S = patternScale() || 1;
+  const ps = patternScaleNum();
+  const ptx = patternXNum();
+  const pty = patternYNum();
+  const pb = previewPatternBox, bb = previewBoundaryBox;
+
+  const patCx = (pb.minx + pb.maxx) / 2, patCy = (pb.miny + pb.maxy) / 2;
+  const pcx = patCx * S, pcy = patCy * S;         // pattern centre, model mm
+
+  // Boundary placement — the same sequence as place_boundary() on the server.
+  const bndCx = (bb.minx + bb.maxx) / 2, bndCy = (bb.miny + bb.maxy) / 2;
+  let scale = S, bcx = bndCx * S, bcy = bndCy * S;
+  if ($('boundaryFit').checked) {
+    const k = Math.min(pb.w / (bb.w || 1), pb.h / (bb.h || 1));
+    scale *= k;
+    bcx = pcx;
+    bcy = pcy;
+  }
+  scale *= (Number($('boundaryScale').value) || 1);
+  const bx = Number($('boundaryX').value) || 0;
+  const by = Number($('boundaryY').value) || 0;
+
+  const bndModel = previewBoundaryRings.map((ring) =>
+    ring.map(([x, y]) => [(x - bndCx) * scale + bcx + bx,
+                          (y - bndCy) * scale + bcy + by]));
+  return { S, ps, ptx, pty, pcx, pcy, view: bboxOf(bndModel), bndModel };
+}
+
+/** Draw the frame and the content, fit to the frame with a margin. */
+function drawPreview() {
+  const canvas = $('previewCanvas');
+  const host = $('previewHost');
+  const dpr = window.devicePixelRatio || 1;
+  const W = host.clientWidth, H = host.clientHeight;
+  if (!W || !H) return;
+  if (!previewData) return;   // nothing loaded yet — e.g. the fetch failed
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#101216';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const g = computePreviewGeom();
+  const pad = 44 * dpr;
+  const kpx = Math.min((canvas.width - 2 * pad) / (g.view.w || 1),
+                       (canvas.height - 2 * pad) / (g.view.h || 1));
+  // Degenerate geometry (an empty boundary, a zero-size frame) would feed
+  // non-finite numbers into setTransform and throw — draw nothing instead.
+  if (!Number.isFinite(kpx) || kpx <= 0) return;
+  previewKpx = kpx;
+  previewDpr = dpr;
+
+  // The pattern, as one stroke through its own raw→canvas transform.
+  if (previewPath) {
+    const M = g.S * g.ps * kpx;
+    if (M !== 0 && Number.isFinite(M)) {
+      const Ex = (-g.pcx * g.ps + g.pcx + g.ptx - g.view.minx) * kpx + pad;
+      const Fy = (g.view.maxy + g.pcy * g.ps - g.pcy - g.pty) * kpx + pad;
+      ctx.setTransform(M, 0, 0, -M, Ex, Fy);
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = dpr / Math.abs(M);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke(previewPath);
+    }
+  }
+
+  // The boundary in canvas pixels: shade the outside, then outline the frame.
+  // The rings are traced straight into the current path (no Path2D.addPath),
+  // so it works in every browser and cannot throw on an odd ring.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const toPx = ([mx, my]) =>
+    [(mx - g.view.minx) * kpx + pad, (g.view.maxy - my) * kpx + pad];
+  const traceRings = () => {
+    for (const ring of g.bndModel) {
+      if (ring.length < 2) continue;
+      const [sx, sy] = toPx(ring[0]);
+      ctx.moveTo(sx, sy);
+      for (let i = 1; i < ring.length; i++) {
+        const [x, y] = toPx(ring[i]);
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    }
+  };
+
+  ctx.beginPath();
+  ctx.rect(0, 0, canvas.width, canvas.height);
+  traceRings();
+  ctx.fillStyle = 'rgba(8,10,13,0.55)';
+  ctx.fill('evenodd');
+
+  ctx.beginPath();
+  traceRings();
+  ctx.strokeStyle = '#3b82f6';
+  ctx.lineWidth = 2.5 * dpr;
+  ctx.stroke();
+}
+
+/** Sync the overlay's slider and labels with the sidebar boxes, then redraw. */
+function updatePreview() {
+  if ($('previewOverlay').hidden || !previewData) return;
+  const s = patternScaleNum();
+  $('previewScale').value = clamp(s, 0.05, 5);
+  $('previewScaleVal').textContent = `×${round3(s)}`;
+  $('previewSize').style.color = '';
+  $('previewSize').textContent = `content ${patternXNum().toFixed(1)}, `
+    + `${patternYNum().toFixed(1)} mm off-centre`;
+  drawPreview();
+}
+
+async function openPreview() {
+  if (!picked || !boundaryPicked) return;
+  $('previewOverlay').hidden = false;
+  try {
+    await loadPreview();
+    updatePreview();
+  } catch (e) {
+    // Show the failure inside the overlay instead of flashing it shut once the
+    // fetch settles — the message is the useful part, and ✕ / Esc still close.
+    console.error('window preview failed:', e);
+    $('previewSize').style.color = '#f87171';
+    $('previewSize').textContent = 'preview failed — ' + (e.message ?? e);
+  }
+}
+
+function closePreview() {
+  $('previewOverlay').hidden = true;
+}
+
+/** Push the current content boxes into a 3D rebuild, now or after a pause. */
+function applyContent(note) {
+  clearTimeout(contentTimer);
+  contentTimer = null;
+  if (!picked) return;
+  if (baseModel()) refit(note);
+  else setStatus(note);
+}
+
+function contentChanged(note) {
+  updatePreview();
+  if (!picked) return;
+  clearTimeout(contentTimer);
+  contentTimer = setTimeout(() => applyContent(note), 400);
+}
+
+for (const id of ['patternScale', 'patternX', 'patternY']) {
+  $(id).onchange = () => {
+    const v = Number($(id).value);
+    if (!Number.isFinite(v)) return setStatus(`${id} needs a number`, true);
+    if (id === 'patternScale' && !(v > 0)) {
+      return setStatus('content size must be greater than 0', true);
+    }
+    contentChanged(id === 'patternScale'
+      ? `content is now ×${v} across`
+      : id === 'patternX'
+        ? `content slid ${v} mm across`
+        : `content slid ${v} mm up`);
+  };
+}
+
+$('contentPosition').onclick = () => openPreview();
+$('previewClose').onclick = () => closePreview();
+$('previewDone').onclick = () => {
+  closePreview();
+  applyContent('content positioned');
+};
+$('previewReset').onclick = () => {
+  $('patternScale').value = 1;
+  $('patternX').value = 0;
+  $('patternY').value = 0;
+  contentChanged('content back to ×1, centred');
 };
 
-boundaryUI();      // a browser that restored the state on reload starts right
+$('previewScale').oninput = () => {
+  $('patternScale').value = round3(Number($('previewScale').value));
+  contentChanged(`content is now ×${round3(patternScaleNum())} across`);
+};
+
+// Drag slides the content; the wheel rescales it about its centre. Both only
+// redraw the canvas, and the 3D rebuild is debounced until they settle.
+$('previewCanvas').addEventListener('pointerdown', (e) => {
+  previewDrag = { x: e.clientX, y: e.clientY };
+  $('previewCanvas').classList.add('dragging');
+  $('previewCanvas').setPointerCapture(e.pointerId);
+});
+$('previewCanvas').addEventListener('pointermove', (e) => {
+  if (!previewDrag) return;
+  const mmPerCssPx = previewDpr / previewKpx;
+  const dx = (e.clientX - previewDrag.x) * mmPerCssPx;
+  const dy = (e.clientY - previewDrag.y) * mmPerCssPx;
+  previewDrag = { x: e.clientX, y: e.clientY };
+  $('patternX').value = round3(patternXNum() + dx);
+  $('patternY').value = round3(patternYNum() - dy);   // canvas y down, model y up
+  contentChanged('content moved');
+});
+const endPreviewDrag = () => {
+  if (!previewDrag) return;
+  previewDrag = null;
+  $('previewCanvas').classList.remove('dragging');
+  applyContent('content moved');
+};
+$('previewCanvas').addEventListener('pointerup', endPreviewDrag);
+$('previewCanvas').addEventListener('pointercancel', endPreviewDrag);
+$('previewCanvas').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  $('patternScale').value = round3(clamp(patternScaleNum() * factor, 0.02, 50));
+  contentChanged(`content is now ×${round3(patternScaleNum())} across`);
+}, { passive: false });
+
+// The preview only ever shows while a boundary is loaded, and its outlines
+// come from the current drawing and layer filter, so any of those changing
+// invalidates the cache.
+invalidatePreview();
+
+window.addEventListener('resize', () => {
+  if (!$('previewOverlay').hidden) drawPreview();
+});
 
 /* ------------------------------------------------------------------- size */
 
@@ -1981,6 +2579,9 @@ function fitLayer(l) {
 
 /** Set the scale so the finished model stands *y size* mm tall. */
 function fitToYSize() {
+  // With a boundary the frame is fixed at 1:1, so there is nothing to re-fit:
+  // the scale stays put and only the content moves and scales.
+  if (boundaryPicked) return true;
   const target = Number($('ySize').value);
   const wall = frameWidth();
   const d = outline();
@@ -2141,11 +2742,14 @@ drop.onclick = () => $('file').click();
 drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
 $('file').onchange = (e) => { if (e.target.files[0]) accept(e.target.files[0]); };
 
-/** A dropped file is either a drawing to start from or a project to reopen. */
+/** A dropped file is a drawing, a photo to trace, or a project to reopen. */
 function accept(file) {
   if (PROJECT.test(file.name)) return loadProject(file);
+  if (IMAGE.test(file.name)) {
+    return startTrace(file, 'model').catch((e) => setStatus(String(e.message ?? e), true));
+  }
   if (!DRAWING.test(file.name)) {
-    return setStatus('that is not a .dxf, .svg or .v2sproj file', true);
+    return setStatus('that is not a .dxf, .svg, image or .v2sproj file', true);
   }
   // A drawing dropped onto work already in progress is ambiguous: it can
   // replace the model, or be stacked on top of it as another layer.
@@ -2179,9 +2783,399 @@ $('example').onclick = async () => {
   }
 };
 
+/* ------------------------------------------------------- tracing (photo) */
+
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+const DEFAULT_TRACE_PARAMS = {
+  traceMode: 'centerline',
+  threshold: 128,
+  strokeWidth: 2,   // preview only — the relief reads outlines, not stroke width
+  simplify: 1.5,
+  smoothing: 0.5,
+  skeletonize: false,
+  invert: false,
+  minArea: 10,
+};
+
+const traceState = {
+  source: null,        // File — the raster being traced (null when nothing is)
+  id: null,            // server id of the uploaded raster
+  name: '',            // source filename, for the legend and the SVG name
+  svg: '',             // the current traced SVG
+  svgFile: null,       // the File built from svg when "Create 3D model" was pressed
+  committedParams: null, // the params that produced the committed SVG
+  params: { ...DEFAULT_TRACE_PARAMS },
+  view: 'svg',
+  seq: 0,
+  edited: false,       // the canvas has pen/eraser marks on it
+};
+
+const TRACE_PARAM_CONTROLS = ['threshold', 'simplify', 'smoothing'];
+
+function gatherTraceParams() {
+  return {
+    traceMode: document.querySelector('input[name="traceMode"]:checked').value,
+    threshold: +$('threshold').value,
+    strokeWidth: DEFAULT_TRACE_PARAMS.strokeWidth,
+    simplify: +$('simplify').value,
+    smoothing: +$('smoothing').value,
+    skeletonize: $('skeletonize').checked,
+    invert: $('invert').checked,
+    minArea: $('despeckle').checked ? +$('minArea').value : 0,
+  };
+}
+
+function applyTraceParams(p) {
+  document.querySelector(`input[name="traceMode"][value="${p.traceMode}"]`).checked = true;
+  for (const key of TRACE_PARAM_CONTROLS) $(key).value = p[key];
+  $('skeletonize').checked = !!p.skeletonize;
+  $('invert').checked = !!p.invert;
+  $('despeckle').checked = p.minArea > 0;
+  $('minArea').disabled = !$('despeckle').checked;
+  if (p.minArea > 0) $('minArea').value = p.minArea;
+  traceUpdateLabels();
+}
+
+function traceUpdateLabels() {
+  for (const key of TRACE_PARAM_CONTROLS) $(key + 'Val').textContent = $(key).value;
+  $('minAreaVal').textContent = $('minArea').value;
+  $('traceOverlayVal').textContent = Number($('traceOverlay').value).toFixed(2);
+}
+
+function traceApplyView() {
+  const v = traceState.view;
+  $('traceEdit').style.display = v === 'svg' ? 'none' : 'block';
+  $('traceSvg').style.display = v === 'original' ? 'none' : 'block';
+  $('traceSvg').style.opacity = v === 'overlay' ? Number($('traceOverlay').value) : 1;
+}
+
+const traceShowStats = (s) => {
+  $('traceStats').textContent =
+    `${s.paths} paths · ${s.nodes} nodes · ${(s.bytes / 1024).toFixed(1)} KB`;
+};
+const traceError = (msg) => { $('traceStats').textContent = msg; };
+
+/* ------------------------------------------------------------ screen nav */
+
+let currentScreen = 'start';
+function showScreen(name) {
+  currentScreen = name;
+  $('startScreen').hidden = name !== 'start';
+  $('traceScreen').hidden = name !== 'trace';
+  $('modelScreen').hidden = name !== 'model';
+}
+
+let traceReturn = 'start';   // where "Back" from the trace screen returns
+
+/** Fill the trace screen from traceState (the screen itself is shown via showScreen). */
+function populateTrace() {
+  $('traceName').textContent = traceState.name ? `· ${traceState.name}` : '';
+  loadEditCanvas();
+  $('traceSvg').innerHTML = traceState.svg;
+  applyTraceParams(traceState.params);
+  traceApplyView();
+}
+
+/* --------------------------------------------------------- image editing */
+
+let editTool = 'pen';
+let stroking = false;
+let lastPoint = null;
+let editObjectUrl = null;    // the object URL the editor image was loaded from
+
+/** Draw the current source image onto the editor canvas at natural size. */
+function loadEditCanvas() {
+  const canvas = $('traceEdit');
+  if (!traceState.source) { canvas.width = canvas.height = 0; return; }
+  const url = URL.createObjectURL(traceState.source);
+  if (editObjectUrl) URL.revokeObjectURL(editObjectUrl);
+  editObjectUrl = url;
+  const img = new Image();
+  img.onload = () => {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';                // paper behind the source image
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+  };
+  img.src = url;
+}
+
+/** The raster to trace: the edited canvas, or the untouched source file. */
+function currentTraceFile() {
+  if (traceState.edited) {
+    return new Promise((resolve, reject) => {
+      $('traceEdit').toBlob(
+        (blob) => blob
+          ? resolve(new File([blob], 'edited.png', { type: 'image/png' }))
+          : reject(new Error('could not read the edited image')),
+        'image/png',
+      );
+    });
+  }
+  return Promise.resolve(traceState.source);
+}
+
+/** Map a pointer event to canvas pixel coordinates (object-fit contain). */
+function toCanvasPoint(e) {
+  const canvas = $('traceEdit');
+  const r = canvas.getBoundingClientRect();
+  const s = Math.min(r.width / canvas.width, r.height / canvas.height);
+  const dw = canvas.width * s, dh = canvas.height * s;
+  const ox = (r.width - dw) / 2, oy = (r.height - dh) / 2;
+  const x = clamp((e.clientX - r.left - ox) / s, 0, canvas.width);
+  const y = clamp((e.clientY - r.top - oy) / s, 0, canvas.height);
+  return [x, y];
+}
+
+function drawStrokeTo(p) {
+  const ctx = $('traceEdit').getContext('2d');
+  ctx.lineWidth = Number($('editSize').value);
+  ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = editTool === 'eraser' ? '#ffffff' : $('editColor').value;
+  ctx.beginPath();
+  ctx.moveTo(lastPoint[0], lastPoint[1]);
+  ctx.lineTo(p[0], p[1]);
+  ctx.stroke();
+  lastPoint = p;
+}
+
+function finishStroke() {
+  if (!stroking) return;
+  stroking = false;
+  lastPoint = null;
+  traceState.edited = true;
+  traceState.id = null;            // the image changed — re-upload next trace
+  scheduleTrace();
+}
+
+const editCanvas = $('traceEdit');
+editCanvas.addEventListener('pointerdown', (e) => {
+  if (!traceState.source || e.button !== 0) return;
+  if (eyedropping) { pickColorAt(e); return; }
+  stroking = true;
+  lastPoint = toCanvasPoint(e);
+  editCanvas.setPointerCapture(e.pointerId);
+  drawStrokeTo(lastPoint);   // a tap leaves a dot
+});
+editCanvas.addEventListener('pointermove', (e) => {
+  if (stroking) drawStrokeTo(toCanvasPoint(e));
+});
+editCanvas.addEventListener('pointerup', (e) => {
+  if (!stroking) return;
+  editCanvas.releasePointerCapture(e.pointerId);
+  finishStroke();
+});
+editCanvas.addEventListener('pointercancel', finishStroke);
+
+function resetEdit() {
+  traceState.edited = false;
+  loadEditCanvas();
+  traceState.id = null;
+  scheduleTrace();
+}
+
+function setEditTool(tool) {
+  editTool = tool;
+  $('editTools').querySelectorAll('button')
+    .forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
+}
+
+$('editTools').querySelectorAll('button').forEach((btn) => {
+  btn.onclick = () => setEditTool(btn.dataset.tool);
+});
+$('editColor').oninput = () => { $('editColorVal').textContent = $('editColor').value; };
+$('editSize').oninput = () => { $('editSizeVal').textContent = $('editSize').value; };
+$('editReset').onclick = resetEdit;
+
+/* Eyedropper: hold Ctrl to turn the cursor into a picker, click to sample the
+   colour under it into the pen. */
+let eyedropping = false;
+const PICKER_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">`
+  + `<path fill="#111" stroke="#fff" stroke-width="0.8" d="M20.71 5.63l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.39.4-1.02.01-1.42zM6.92 19L5 17.08l8.06-8.06 1.92 1.92L6.92 19z"/></svg>`
+)}") 4 20, crosshair`;
+
+function setEyedropping(on) {
+  eyedropping = on;
+  $('traceEdit').style.cursor = on ? PICKER_CURSOR : 'crosshair';
+}
+
+function pickColorAt(e) {
+  const [x, y] = toCanvasPoint(e);
+  const d = $('traceEdit').getContext('2d')
+    .getImageData(Math.round(x), Math.round(y), 1, 1).data;
+  const hex = `#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  $('editColor').value = hex;
+  $('editColorVal').textContent = hex;
+}
+
+window.addEventListener('keydown', (e) => { if (e.key === 'Control') setEyedropping(true); });
+window.addEventListener('keyup', (e) => { if (e.key === 'Control') setEyedropping(false); });
+window.addEventListener('blur', () => setEyedropping(false));
+
+function clearTrace() {
+  traceState.source = traceState.svgFile = null;
+  traceState.id = null;
+  traceState.name = '';
+  traceState.svg = '';
+  traceState.edited = false;
+  if (editObjectUrl) { URL.revokeObjectURL(editObjectUrl); editObjectUrl = null; }
+  $('traceEdit').width = $('traceEdit').height = 0;   // blank until a source loads
+  $('modelTrace').hidden = true;
+}
+
+async function uploadTraceSource() {
+  const form = new FormData();
+  form.append('image', await currentTraceFile());
+  const res = await fetch('/api/trace/upload', { method: 'POST', body: form });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? res.statusText);
+  return data.id;
+}
+
+let traceTimer = null;
+function scheduleTrace() {
+  clearTimeout(traceTimer);
+  traceTimer = setTimeout(runTrace, 400);
+}
+
+async function runTrace() {
+  if (!traceState.source) return;
+  const seq = ++traceState.seq;
+  try {
+    // An edited image changes between strokes, so it is re-uploaded each time;
+    // an untouched image is stable and its server id is reused.
+    let id = traceState.edited ? null : traceState.id;
+    if (!id) {
+      id = await uploadTraceSource();
+      if (!traceState.edited) traceState.id = id;
+    }
+    const params = gatherTraceParams();
+    const res = await fetch('/api/trace', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    if (seq !== traceState.seq) return;   // a newer trace superseded this one
+    traceState.params = params;
+    traceState.svg = data.svg;
+    $('traceSvg').innerHTML = data.svg;
+    traceApplyView();
+    traceShowStats(data.stats);
+    $('traceUse').disabled = false;
+  } catch (err) {
+    traceError('trace failed: ' + (err.message ?? err));
+  }
+}
+
+async function startTrace(file, ret = 'start') {
+  clearTrace();
+  traceReturn = ret;
+  setEditTool('pen');                 // the pen is the default editing tool
+  traceState.source = file;
+  traceState.name = file.name.replace(/\.[^.]+$/, '');
+  traceState.params = { ...DEFAULT_TRACE_PARAMS };
+  traceState.view = 'svg';
+  $('traceUse').disabled = true;
+  $('traceSvg').innerHTML = '';
+  populateTrace();
+  showScreen('trace');
+  await runTrace();   // upload + first trace
+}
+
+/** Hand the traced SVG over to the relief builder as the current drawing. */
+function useTrace() {
+  if (!traceState.svg) return;
+  const name = (traceState.name || 'trace').replace(/\.[^.]+$/, '') + '.svg';
+  traceState.committedParams = { ...traceState.params };
+  traceState.svgFile = new File([traceState.svg], name, { type: 'image/svg+xml' });
+  $('modelTrace').hidden = false;
+  showScreen('model');
+  pickFile(traceState.svgFile);
+}
+
+$('traceBack').onclick = () => {
+  if (traceReturn === 'start') clearTrace();
+  showScreen(traceReturn);
+};
+
+$('traceViewSwitch').querySelectorAll('button').forEach((btn) => {
+  btn.onclick = () => {
+    traceState.view = btn.dataset.view;
+    $('traceViewSwitch').querySelectorAll('button')
+      .forEach((b) => b.classList.toggle('active', b === btn));
+    traceApplyView();
+  };
+});
+$('traceOverlay').oninput = () => { traceUpdateLabels(); traceApplyView(); };
+
+function onTraceParamChange() {
+  traceUpdateLabels();
+  scheduleTrace();
+}
+for (const key of TRACE_PARAM_CONTROLS) $(key).addEventListener('input', onTraceParamChange);
+$('minArea').addEventListener('input', onTraceParamChange);
+$('despeckle').addEventListener('change', () => {
+  $('minArea').disabled = !$('despeckle').checked;
+  onTraceParamChange();
+});
+for (const el of [$('skeletonize'), $('invert')]) el.addEventListener('change', onTraceParamChange);
+document.querySelectorAll('input[name="traceMode"]').forEach((r) =>
+  r.addEventListener('change', onTraceParamChange));
+
+$('traceUse').onclick = useTrace;
+
+/* -------------------------------------------------- start screen + nav */
+
+$('modelNew').onclick = () => showScreen('start');
+$('modelTrace').onclick = () => { traceReturn = 'model'; showScreen('trace'); };
+
+/** Begin a drawing (drop a trace's SVG in place) and show the model screen. */
+function openDrawing(file) {
+  showScreen('model');
+  return pickFile(file);
+}
+
+$('startTrace').onclick = () => $('startTraceFile').click();
+$('startTraceFile').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) startTrace(file, 'start').catch((err) => traceError(err.message ?? err));
+};
+
+$('startSvg').onclick = () => $('startSvgFile').click();
+$('startSvgFile').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) openDrawing(file);
+};
+
+$('startProjectFile').onclick = () => $('startProjectFileInput').click();
+$('startProjectFileInput').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) loadProject(file);
+};
+
+$('startExample').onclick = async () => {
+  setStatus('loading example…');
+  try {
+    const res = await fetch('/api/example.dxf');
+    if (!res.ok) throw new Error('could not load the example');
+    await openDrawing(new File([await res.blob()], 'sketch.dxf'));
+  } catch (err) {
+    setStatus(String(err.message ?? err), true);
+  }
+};
+
 $('reroll').onclick = () => {
   $('seed').value = Math.floor(Math.random() * 100000);
-  if (picked && !$('go').disabled) $('go').click();
+  if (picked && !$('go').disabled) generate(null);   // fresh heights, as before
 };
 
 /* -------------------------------------------------------------- generate */
@@ -2225,6 +3219,9 @@ function shapeForm() {
     form.append('boundaryScale', $('boundaryScale').value);
     form.append('boundaryX', $('boundaryX').value);
     form.append('boundaryY', $('boundaryY').value);
+    form.append('patternScale', $('patternScale').value);
+    form.append('patternX', $('patternX').value);
+    form.append('patternY', $('patternY').value);
     if (!$('boundaryFit').checked) form.append('boundaryFit', '0');
     if (!$('boundaryWall').checked) form.append('boundaryWall', '0');
   }
@@ -2288,6 +3285,7 @@ async function generate(keep = null) {
       ? seed : (Math.random() * 1e9) | 0), keep);
     buildPalette(lo, hi);
     select(null);
+    modelThumb = captureModelThumbnail();   // the 3D object just generated
     const faces = drawings.reduce((n, d) => n + d.regions.length, 0);
     const cut = data.cropped ? `${data.cropped} curves cut off by the boundary` : '';
     if (!keep && !mismatch) {
@@ -2303,7 +3301,15 @@ async function generate(keep = null) {
   }
 }
 
-$('go').onclick = () => generate();
+$('go').onclick = async () => {
+  // Re-generating keeps the painting: the faces you coloured stay coloured.
+  // Only a change that merges or splits faces can force a fresh start, and
+  // that says so rather than doing it silently. ↻ is how you re-roll heights.
+  const keep = baseModel() ? keepStacks() : null;
+  if (await generate(keep) === 'restored' && !status.classList.contains('error')) {
+    setStatus('re-built — your painting is kept');
+  }
+};
 
 /* ------------------------------------------------------------- re-fitting */
 
@@ -2350,6 +3356,7 @@ for (const [id, note] of Object.entries(REFIT_FIELDS)) {
   $(id).onchange = () => {
     const v = Number($(id).value);
     if (!Number.isFinite(v) || v < 0) return setStatus(`${id} needs a number`, true);
+    if (id === 'sagitta') invalidatePreview();
     refit(note($(id).value));
   };
 }
@@ -2434,6 +3441,7 @@ effectUI();      // a browser that restored the chooser on reload starts right
 
 // Ticking a layer changes what is drawn at all, so it rebuilds the same way.
 function layerChanged() {
+  invalidatePreview();
   const names = selectedLayers();
   refit(names ? `reading ${count(names.split(',').length, 'layer')}` : 'reading every layer');
 }
@@ -2490,6 +3498,14 @@ async function buildProject() {
     version: stacked ? 2 : 1,
     saved: new Date().toISOString(),
     drawing: { name: picked.name, data: await fileBase64(picked) },
+    // A drawing that came from a trace keeps the raster and its settings, so
+    // the trace can be re-tuned after reopening the project.
+    trace: picked === traceState.svgFile && traceState.source
+      ? {
+        source: { name: traceState.source.name, data: await fileBase64(await currentTraceFile()) },
+        params: traceState.committedParams ?? traceState.params,
+      }
+      : null,
     profile: profilePicked
       ? { name: profilePicked.name, data: await fileBase64(profilePicked) }
       : null,
@@ -2501,7 +3517,8 @@ async function buildProject() {
     // travel with the rest of the settings.
     settings: Object.fromEntries(
       [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize',
-        'profileScale', 'boundaryScale', 'boundaryX', 'boundaryY']
+        'profileScale', 'boundaryScale', 'boundaryX', 'boundaryY',
+        'patternScale', 'patternX', 'patternY']
         .map((id) => [id, $(id).value]),
     ),
     layers: selectedLayers(),
@@ -2585,6 +3602,35 @@ function readFaces(faces) {
   return null;
 }
 
+/**
+ * Bring the re-tunable trace back when a project saved with one is reopened.
+ * The drawing (the traced SVG) is already loaded by pickFile above; this
+ * restores the source raster and its settings so the trace can be adjusted
+ * again. The saved SVG is shown straight away — re-tracing happens lazily, on
+ * the first parameter change.
+ */
+function restoreTrace(project) {
+  const t = project.trace;
+  if (!t?.source?.data) { $('modelTrace').hidden = true; return; }
+  const srcFile = new File([fromBase64(t.source.data)], t.source.name || 'source.png');
+  traceState.source = srcFile;
+  traceState.edited = false;            // the saved image is the starting point
+  traceState.id = null;                 // re-uploaded on the next re-trace
+  traceState.name = t.source.name || '';
+  traceState.params = { ...DEFAULT_TRACE_PARAMS, ...(t.params ?? {}) };
+  traceState.committedParams = { ...traceState.params };
+  traceState.svgFile = picked;          // the drawing just set by pickFile
+  traceState.view = 'svg';
+  try {
+    traceState.svg = new TextDecoder().decode(fromBase64(project.drawing.data));
+  } catch {
+    traceState.svg = '';
+  }
+  $('traceUse').disabled = false;
+  $('modelTrace').hidden = false;
+  populateTrace();
+}
+
 async function applyProject(project) {
   if (project?.format !== PROJECT_FORMAT) {
     return setStatus('that does not look like a vector2stl project', true);
@@ -2593,6 +3639,7 @@ async function applyProject(project) {
     return setStatus('that project has no drawing in it', true);
   }
 
+  showScreen('model');
   setStatus('opening project…');
   for (const [id, value] of Object.entries(project.settings ?? {})) {
     if ($(id)) $(id).value = value;
@@ -2655,6 +3702,7 @@ async function applyProject(project) {
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
   await pickFile(new File([bytes], project.drawing.name || 'drawing.dxf'), false);
+  restoreTrace(project);
   restoreLayers(project.layers ?? '');
   layers[0].holes = Array.isArray(project.holes) ? project.holes : [];
 
@@ -3000,7 +4048,7 @@ $('editorOverlay').addEventListener('pointerdown', (e) => {
 
 /* --------------------------------------------- projects kept on the server */
 
-let shelf = [];      // [{name, size, saved}]
+let shelf = [];      // [{name, size, saved, thumb}]
 
 const ago = (iso) => {
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -3020,32 +4068,73 @@ async function refreshShelf() {
   } catch {
     shelf = [];               // the shelf is a convenience; never block on it
   }
-  const box = $('shelf');
-  box.textContent = '';
+  renderStartProjects();
+}
+
+/** The start screen's project tiles — thumbnail, open, clone, delete. */
+function renderStartProjects() {
+  const grid = $('startProjects');
+  grid.textContent = '';
   if (!shelf.length) {
-    box.textContent = 'nothing saved on the server yet';
-    box.className = 'muted';
+    grid.className = 'project-grid muted';
+    grid.textContent = 'nothing saved on the server yet';
     return;
   }
-  box.className = '';
+  grid.className = 'project-grid';
   for (const item of shelf) {
-    const row = document.createElement('div');
-    row.className = 'shelf-row';
+    const tile = document.createElement('button');
+    tile.className = 'project-tile';
+    tile.onclick = () => openFromServer(item.name);
 
-    const open = document.createElement('button');
-    open.className = 'ghost shelf-open';
-    open.textContent = item.name;
-    open.title = `Saved ${ago(item.saved)} · ${(item.size / 1024).toFixed(0)} KB`;
-    open.onclick = () => openFromServer(item.name);
+    const thumb = document.createElement('div');
+    thumb.className = 'tile-thumb';
+    if (item.thumb) {
+      const img = document.createElement('img');
+      img.src = `/api/projects/${encodeURIComponent(item.name)}/thumbnail?t=${Date.now()}`;
+      img.alt = '';
+      thumb.append(img);
+    } else {
+      thumb.textContent = item.name.slice(0, 1).toUpperCase() || '·';
+    }
 
+    const body = document.createElement('div');
+    body.className = 'tile-body';
+    const nm = document.createElement('div');
+    nm.className = 'tile-name';
+    nm.textContent = item.name;
+    const dt = document.createElement('div');
+    dt.className = 'tile-date';
+    dt.textContent = ago(item.saved);
+    body.append(nm, dt);
+
+    const actions = document.createElement('div');
+    actions.className = 'tile-actions';
+    const clone = document.createElement('button');
+    clone.className = 'ghost';
+    clone.textContent = '⧉';
+    clone.title = 'Duplicate';
+    clone.onclick = (e) => { e.stopPropagation(); cloneOnServer(item.name); };
     const del = document.createElement('button');
     del.className = 'ghost';
     del.textContent = '✕';
-    del.title = `Delete "${item.name}"`;
-    del.onclick = () => removeFromServer(item.name);
+    del.title = 'Delete';
+    del.onclick = (e) => { e.stopPropagation(); removeFromServer(item.name); };
+    actions.append(clone, del);
 
-    row.append(open, del);
-    box.append(row);
+    tile.append(thumb, body, actions);
+    grid.append(tile);
+  }
+}
+
+async function cloneOnServer(name) {
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}/clone`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    await refreshShelf();
+    setStatus(`cloned "${name}" as "${data.name}"`);
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
   }
 }
 
@@ -3062,6 +4151,36 @@ async function openFromServer(name) {
   }
 }
 
+/** A small PNG preview of the current drawing, for the project browser. */
+async function makeThumbnail() {
+  try {
+    const size = 320;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#101216';
+    ctx.fillRect(0, 0, size, size);
+    if (picked && /\.svg$/i.test(picked.name)) {
+      const url = URL.createObjectURL(picked);
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+      URL.revokeObjectURL(url);
+      const s = Math.min(size / img.naturalWidth, size / img.naturalHeight);
+      const w = img.naturalWidth * s, h = img.naturalHeight * s;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+    } else {
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '600 22px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('DXF', size / 2, size / 2);
+    }
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
 $('saveToServer').onclick = async () => {
   if (!baseModel() || !picked) return;
   const name = $('projectName').value.trim();
@@ -3071,10 +4190,13 @@ $('saveToServer').onclick = async () => {
 
   setStatus('saving to the server…');
   try {
+    // A live 3D capture reflects the current painting; fall back to the
+    // generate-time frame, then to a flat render of the drawing itself.
+    const thumb = (baseModel() && captureModelThumbnail()) || modelThumb || await makeThumbnail();
     const res = await fetch(`/api/projects/${encodeURIComponent(name)}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(await buildProject()),
+      body: JSON.stringify({ ...(await buildProject()), thumbnail: thumb }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
@@ -3188,17 +4310,24 @@ $('download').onclick = async () => {
 
 $('export3mf').onclick = async () => {
   if (!baseModel()) return;
+  setStatus('building colour variations…');
+  $('export3mf').disabled = true;
   try {
-    const { buf, info } = await requestBuild('/api/export3mf', buildForm(), $('export3mf'));
-    saveBlob(buf, 'model/3mf', baseName() + '.3mf');
-    const most = Math.max(...info.files.map((f) => f.extruder));
-    setStatus(`saved a 3MF using ${count(most, 'extruder')}`
-      + (most > 4 ? '\nthat is more than four — switch to the mixed frame to fit' : ''));
-    stats.textContent = info.files
-      .map((f) => `extruder ${f.extruder} — ${f.file}, ${f.triangles.toLocaleString()} triangles`)
-      .join('\n');
+    const res = await fetch('/api/export3mf', { method: 'POST', body: buildForm() });
+    const info = await res.json();
+    if (!res.ok) {
+      throw new Error([info.error ?? res.statusText, info.log].filter(Boolean).join('\n'));
+    }
+    // One 3MF holding every colour combination, each merged into one object.
+    const f = info.files[0];
+    saveBlob(fromBase64(f.data), 'model/3mf', baseName() + '.3mf');
+    setStatus(`saved ${baseName()}.3mf — ${count(f.variations, 'colour combination')}`);
+    stats.textContent = `${f.variations} combinations · ${f.parts} parts · `
+      + `${f.triangles.toLocaleString()} triangles`;
   } catch (e) {
     setStatus(String(e.message ?? e), true);
+  } finally {
+    $('export3mf').disabled = false;
   }
 };
 

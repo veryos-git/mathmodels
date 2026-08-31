@@ -1,0 +1,17 @@
+{
+  "id": "2e429215-ce93-4d6a-87b9-91b05eac64fe",
+  "name": "vh_kFGwoQTjmhUpnrwZTk_Vls9wKw8",
+  "createdAt": "2026-08-21T08:04:40.200Z",
+  "updatedAt": "2026-08-21T08:04:40.200Z",
+  "source": "source.png",
+  "params": {
+    "traceMode": "centerline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

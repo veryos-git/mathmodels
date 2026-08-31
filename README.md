@@ -1,10 +1,53 @@
 # vector2stl
 
-Turn a 2D **DXF or SVG** sketch into a 3D relief STL. Every curve becomes a
+Turn a 2D sketch into a 3D relief STL. Every curve becomes a
 raised *wall*, and every face enclosed by those walls is extruded to its own
 height — either rolled at random or painted by hand from a colour palette.
 
+The sketch can be a **DXF**, an **SVG**, or — starting from a **photo or scan
+of a hand-drawn sketch** — traced to an SVG right in the page first.
+
 ![a gothic window with its faces painted](docs/preview.png)
+
+## The workflow
+
+The app is three full-screen steps, each using the whole window:
+
+**Start** — the landing screen. Pick how you begin:
+
+- **Trace a photo** — upload a `.png` / `.jpg` / `.gif` / `.webp` photo or scan
+  of a sketch.
+- **Open SVG / DXF** — start from an existing vector drawing.
+- **Open a project file** — reopen a downloaded `.v2sproj`.
+- **Saved projects** — the grid below lists everything saved on the server,
+  with a thumbnail each. Click one to reopen it; **⧉ duplicates** it and **✕**
+  deletes it. **Example sketch** loads the bundled gothic window.
+
+**Trace** — full screen, used only when you start from a photo. The left side
+holds the trace settings (centerline vs outline, threshold, simplify,
+smoothing, skeletonize, invert, speck removal); the right side is a large live
+preview with **SVG · Original · Overlay** views. **Create 3D model** hands the
+traced SVG to the builder.
+
+**3D model** — the relief builder: walls, sizes, palette, painting, holes,
+boundary, and export. A **← Start** button returns to the landing screen. When
+the drawing came from a trace, an **Edit trace** button is always available to
+jump back and re-tune it — including for projects reopened later, which keep
+the source photo and its trace settings.
+
+From the 3D step the flow is unchanged: tune the wall sizes and *y size*,
+**Generate 3D**, paint the faces, and export STL or 3MF.
+
+Two trace modes matter for what you get downstream:
+
+- **centerline** (the default) turns line art into thin open strokes — in the
+  relief those become **walls** but enclose no faces to paint.
+- **outline** follows the edges of filled shapes — closed loops that become
+  **paintable faces**.
+
+So a drawing of enclosed shapes (flower petals, window panes) traces as
+*outline*; a loose pencil sketch traces as *centerline*. The trace's stroke
+width is cosmetic — the relief reads the outlines, not the stroke.
 
 ## Running it
 
@@ -22,9 +65,11 @@ You need Deno and Python 3 with the `venv` module — on Debian/Ubuntu that's
 `deno task dev` restarts on file changes, `deno task check` type-checks, and
 `deno task setup` prepares `.venv` without starting the server.
 
-Open the page, drop in a `.dxf`, `.svg` or saved `.v2sproj` project (or hit
-**Use the example sketch**), tune the sizes, and **Generate 3D**. The browser gets the face outlines and extrudes them
-itself, so painting is instant — nothing goes back to the server until you save.
+Open the page and pick a starting point on the **Start** screen (trace a photo,
+open a drawing or a project, or use the example). Tune the sizes in the 3D
+step and press **Generate 3D**. The browser gets the face outlines and extrudes
+them itself, so painting is instant — nothing goes back to the server until
+you save.
 
 ## Painting the faces
 
@@ -377,6 +422,14 @@ leaf, a badge, a pendant or a window shape instead of a full sheet of it.
   units — the exact size the boundary DXF or SVG was drawn at — with the
   pattern scaled to whatever fills it. It is the quick way back after the
   *y size* or *scale* boxes have moved you off it.
+- **window content** is the pattern seen through the frame: **content size (×)**
+  resizes it about its own centre and **content x / y** slide it under the
+  boundary in finished millimetres, while the boundary keeps its size. Where
+  the boundary controls move the *frame*, these move the *picture* behind it.
+- **position window content…** opens a 2D preview of the frame and the pattern
+  together. Drag to slide the content, scroll to resize it — both redraw
+  instantly, without waiting for the 3D rebuild — then **Done** re-runs the
+  model once.
 
 With a boundary loaded, *y size* and *scale* fit the **crop**, not the
 pattern — the boundary is the finished outline, and *scale* ×1 means the
@@ -417,17 +470,26 @@ lands in `projects/` next to the app and appears in the list; click a name to
 reopen it, or ✕ to delete it (both saving over an existing name and deleting
 ask first). This is the one to use day to day — no files to manage.
 
+Each server save also stores a **thumbnail of the generated 3D model** — a
+small render taken straight off the preview, painted faces included — so the
+start screen's grid shows the relief itself, not just the flat drawing. A
+project saved before its model was generated falls back to a flat render of the
+drawing.
+
 **As a file** — **Save project** downloads a `.v2sproj`. Drop it back on the
 page to reopen. Use this to move work between machines or to keep a copy
 outside the app.
 
 Either way the drawing is embedded rather than referenced, so a project stands
-alone. With several stacked drawings the project holds every layer — its
-drawing, scale, sublayers, faces and holes — and is written as format
-version 2; single-drawing projects keep version 1, and both open in either
-direction. Face ids are derived from the drawing and the wall settings; if a project
-no longer produces the same number of faces, it says so and starts fresh instead
-of pinning colours to the wrong faces.
+alone. A drawing that was made by tracing a photo keeps its **source image and
+trace settings** too, so reopening a project brings the trace step back with
+them — tweak a knob and press **Use this trace** to re-commit. With several
+stacked drawings the project holds every layer — its drawing, scale, sublayers,
+faces and holes — and is written as format version 2; single-drawing projects
+keep version 1, and both open in either direction. Face ids are derived from
+the drawing and the wall settings; if a project no longer produces the same
+number of faces, it says so and starts fresh instead of pinning colours to the
+wrong faces.
 
 Set `PROJECT_DIR` to keep the server's projects somewhere else. Project names
 allow letters, digits, spaces, `.`, `_` and `-`, and must start with a letter or
@@ -467,8 +529,12 @@ project name cannot hold become `-`.
 
 - **Download STL** — one file containing the walls and every face, exactly as
   previewed.
-- **Export 3MF (Snapmaker)** — the whole model as one 3MF project with the
-  colours already assigned. See *3MF* below.
+- **Export 3MF (Snapmaker)** — a single 3MF holding every **colour
+  combination**: the colour groups (which faces are printed together) stay put,
+  while the colours trade places across them. A two-colour model has two
+  combinations, three colours six, and so on — every permutation. Each
+  combination is written as one merged object, laid out side by side on the
+  plate. The frame keeps its own colour throughout. See *3MF* below.
 - **Export STLs by colour** — one STL per hue, named for the hue in use
   (`…-1-orange.stl`, `…-2-teal.stl`, …), for multi-material printing. Each
   *layer* goes to its own colour's file, so a stacked face is split across them
@@ -507,10 +573,23 @@ filaments you already have selected rather than overriding them. Three hues and
 a solid frame come to four extruders; turning the black frame off puts the
 frame on the palette's own colours and brings that down to three.
 
+The 3MF button writes **one file** containing every permutation of the palette
+colours actually used — two colours, two combinations; three colours, six. Each
+combination is a merged multi-colour object: the same colour groups exist in
+each, but the extruder a group gets is swapped, so `orange-green` and
+`green-orange` are the two ways a two-colour model can be loaded without
+repainting. The frame (an unnumbered group) keeps its extruder in every
+combination; only the numbered palette rows trade places.
+
 ## Input formats
 
-Both readers produce the same thing — flattened polylines in millimetres — so
-an SVG and the equivalent DXF give the same relief. There is no SVG-to-DXF
+A raster image is not read directly: it goes through the trace step first
+(*The workflow* above), which turns it into an SVG, and that SVG is then read
+like any other. The accepted rasters are `.png`, `.jpg`, `.jpeg`, `.gif` and
+`.webp`.
+
+Both vector readers produce the same thing — flattened polylines in millimetres
+— so an SVG and the equivalent DXF give the same relief. There is no SVG-to-DXF
 conversion step.
 
 **DXF** — `LINE`, `ARC`, `CIRCLE`, `ELLIPSE`, `LWPOLYLINE`, `POLYLINE` and
@@ -536,6 +615,10 @@ meant to be millimetres, use `3.7795`.
 The converter runs standalone:
 
 ```bash
+# raster -> SVG (the trace step), then SVG -> STL (the relief)
+.venv/bin/python tools/trace.py --params trace.json photo.png > sketch.svg
+.venv/bin/python tools/dxf2stl.py sketch.svg out.stl --scale 3.7795
+
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --wall-width 1.0 --seed 7
 .venv/bin/python tools/dxf2stl.py drawing.svg out.stl --scale 3.7795
 .venv/bin/python tools/dxf2stl.py sketch.dxf --inspect     # layers + geometry counts
@@ -565,6 +648,11 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --also layer2.json
 ```
 
+`trace.json` holds the trace settings — `traceMode` (`centerline` or
+`outline`), `threshold`, `strokeWidth`, `simplify`, `smoothing`, `skeletonize`,
+`invert` and `minArea`. The SVG comes out on stdout; a stats line (`paths`,
+`nodes`) on stderr.
+
 A face is a stack of layers, bottom first, each with a thickness `t` and a
 colour group `g`; `--heights` is the shorthand for a stack one layer deep.
 `--split` writes one STL per group into the output directory instead of a
@@ -591,6 +679,8 @@ go to stderr.
 
 | Route | |
 | --- | --- |
+| `POST /api/trace/upload` | multipart `image` (.png/.jpg/.gif/.webp) → `{id, name}`; held in memory for re-tracing |
+| `POST /api/trace` | JSON `{id, params}` → `{svg, stats}`; runs `tools/trace.py` |
 | `POST /api/inspect` | multipart `file` (.dxf or .svg) → `{layers, skipped, curves, size}` |
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/convert` | `file` + settings + `stacks` → STL body, stats in the `x-stats` header |
@@ -598,8 +688,10 @@ go to stderr.
 | `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders |
 | `GET /api/example.dxf` | the bundled `sketch.dxf` |
 | `GET /api/default-profile.dxf` | the bundled sweep profile (404 if absent) |
-| `GET /api/projects` | the saved projects, newest first |
+| `GET /api/projects` | the saved projects, newest first, each with a `thumb` flag |
 | `GET/PUT/DELETE /api/projects/:name` | read, write or remove one |
+| `POST /api/projects/:name/clone` | duplicate one to `"name copy"` (thumbnail included) |
+| `GET /api/projects/:name/thumbnail` | the PNG preview saved beside a project |
 
 `stacks`, `heights` and `groups` are JSON objects keyed by face id; `holes` is a
 JSON array. All are sent as form fields, and `holes` applies to every route. A
@@ -623,6 +715,7 @@ so `/api/export` still returns one file per colour plus the walls.
 
 - `server.ts` — Deno HTTP server; validates uploads, shells out to the converter
 - `tools/dxf2stl.py` — DXF/SVG → shapely → trimesh → STL
+- `tools/trace.py` — raster (photo/scan) → clean line SVG; the trace step
 - `tools/setup.ts` — builds `.venv` from `requirements.txt`; runs before `start`
 - `static/index.html` — the whole frontend, three.js loaded from a CDN
 - `tools/recover-project.js` — console rescue for pre-project sessions

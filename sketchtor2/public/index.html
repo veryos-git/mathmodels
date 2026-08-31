@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Line Tracer — Image to SVG</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <button id="btnNew" class="primary">+ New Project</button>
+    <ul id="projectList"></ul>
+  </aside>
+
+  <main id="canvasArea">
+    <div id="viewSwitch" class="segmented">
+      <button data-view="original">Original</button>
+      <button data-view="svg" class="active">SVG Result</button>
+      <button data-view="split">Split</button>
+      <button data-view="overlay">Overlay</button>
+    </div>
+    <div id="viewport">
+      <div id="stage">
+        <img id="origImg" alt="original" draggable="false">
+        <div id="svgLayer"></div>
+        <div id="splitDivider" hidden></div>
+      </div>
+      <div id="emptyState">Upload an image with “+ New Project” to start tracing.</div>
+      <div id="spinner" hidden><div class="ring"></div></div>
+    </div>
+    <div id="canvasBar">
+      <button id="btnFit" title="Fit to screen">⤢ Fit</button>
+      <span id="zoomLabel">100%</span>
+      <span id="stats" class="muted"></span>
+    </div>
+  </main>
+
+  <aside id="controls">
+    <div class="group">
+      <label class="field-label" for="projectName">Project <span id="dirtyDot" class="dot" hidden>●</span></label>
+      <input id="projectName" type="text" placeholder="Untitled">
+    </div>
+
+    <div class="group">
+      <div class="group-title">Trace Mode</div>
+      <label class="radio"><input type="radio" name="traceMode" value="centerline" checked>
+        Centerline <span class="hint">(coloring books)</span></label>
+      <label class="radio"><input type="radio" name="traceMode" value="outline"> Outline</label>
+    </div>
+
+    <div class="group">
+      <div class="group-title">Parameters</div>
+      <div class="slider-row">
+        <label for="threshold">Threshold</label>
+        <input id="threshold" type="range" min="0" max="255" step="1" value="128">
+        <span class="val" id="thresholdVal">128</span>
+      </div>
+      <div class="slider-row">
+        <label for="strokeWidth">Stroke Width</label>
+        <input id="strokeWidth" type="range" min="0.5" max="10" step="0.5" value="2">
+        <span class="val" id="strokeWidthVal">2</span>
+      </div>
+      <div class="slider-row">
+        <label for="simplify">Simplify</label>
+        <input id="simplify" type="range" min="0" max="8" step="0.1" value="1.5">
+        <span class="val" id="simplifyVal">1.5</span>
+      </div>
+      <div class="slider-row">
+        <label for="smoothing">Smoothing</label>
+        <input id="smoothing" type="range" min="0" max="1" step="0.05" value="0.5">
+        <span class="val" id="smoothingVal">0.5</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">Toggles</div>
+      <label class="check"><input id="skeletonize" type="checkbox"> Skeletonize</label>
+      <label class="check"><input id="invert" type="checkbox"> Invert</label>
+      <label class="check"><input id="despeckle" type="checkbox" checked> Remove small specks</label>
+      <div class="slider-row indent">
+        <label for="minArea">Min area</label>
+        <input id="minArea" type="range" min="2" max="500" step="1" value="10">
+        <span class="val" id="minAreaVal">10</span>
+      </div>
+    </div>
+
+    <div class="group actions">
+      <button id="btnTrace" class="primary">Re-trace</button>
+      <button id="btnDownload">Download SVG</button>
+      <button id="btnSave">Save Project</button>
+    </div>
+
+    <div id="statsDetail" class="group muted small"></div>
+  </aside>
+
+  <input id="fileInput" type="file" accept="image/*" hidden>
+  <div id="menu" class="menu" hidden>
+    <button data-action="rename">Rename</button>
+    <button data-action="duplicate">Duplicate</button>
+    <button data-action="delete" class="danger">Delete</button>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -43,6 +43,7 @@ below; colour groups are shared, so split and 3MF exports merge the layers.
 
 import argparse
 import base64
+import itertools
 import json
 import math
 import os
@@ -716,6 +717,27 @@ def place_boundary(boundary, scale, boundary_scale, dx, dy, fit_to=None):
     return placed
 
 
+def transform_curves(curves, scale, dx, dy):
+    """Resize and slide the pattern — the window's content — under the boundary.
+
+    The boundary is the frame and stays put; this moves what is shown through
+    it. Scaling is about the pattern's own centre, and the shift is in model
+    millimetres, so both mean the same thing whatever the drawing was drawn in.
+    """
+    if scale == 1.0 and not dx and not dy:
+        return curves
+    xs = [p[0] for c in curves for p in c]
+    ys = [p[1] for c in curves for p in c]
+    cx = (min(xs) + max(xs)) / 2.0
+    cy = (min(ys) + max(ys)) / 2.0
+    out = []
+    for c in curves:
+        out.append([(round((x - cx) * scale + cx + dx, 6),
+                     round((y - cy) * scale + cy + dy, 6))
+                    for x, y in c])
+    return out
+
+
 def clip_curves(curves, region):
     """Every curve trimmed to the part of it that lies inside `region`.
 
@@ -753,6 +775,32 @@ def polys_centre(polys):
     maxx = max(p.bounds[2] for p in polys)
     maxy = max(p.bounds[3] for p in polys)
     return ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+
+
+def preview(args):
+    """The pattern and boundary outlines, in millimetres, for the 2D window.
+
+    This is only the geometry the browser needs to draw the position preview:
+    the pattern's flattened curves and the boundary's own rings, both at their
+    drawn size. The browser scales and slides them exactly as `place_boundary`
+    and `transform_curves` will, so the preview matches the crop.
+    """
+    curves, _, _ = read_curves(args.input, args.sagitta, args.layers, scale=1.0)
+    out = {
+        "pattern": {
+            "curves": [[[round(x, 3), round(y, 3)] for x, y in c] for c in curves],
+        },
+        "boundary": None,
+    }
+    if args.boundary:
+        boundary = load_boundary(args.boundary, args.sagitta)
+        rings = []
+        for poly in polygons_of(boundary):
+            rings.append([[round(x, 3), round(y, 3)] for x, y in poly.exterior.coords])
+            for interior in poly.interiors:
+                rings.append([[round(x, 3), round(y, 3)] for x, y in interior.coords])
+        out["boundary"] = {"rings": rings}
+    return out
 
 
 def plan_drawing(path, scale, layers_csv, args, boundary=None):
@@ -800,6 +848,16 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
             fit_to = (min(xs), min(ys), max(xs), max(ys))
         crop = place_boundary(boundary, scale, args.boundary_scale,
                               args.boundary_x, args.boundary_y, fit_to)
+
+    # The window content — the pattern itself — is resized and slid under the
+    # boundary after the boundary is placed, so the frame stays put while the
+    # crop finds its composition. Without a boundary this would only shift the
+    # model and break the finished-size maths, so it is applied to the crop.
+    if boundary is not None:
+        curves = transform_curves(curves, args.pattern_scale,
+                                  args.pattern_x, args.pattern_y)
+
+    if boundary is not None:
         inside = clip_curves(curves, crop)
         if not inside:
             raise ConvertError("the boundary does not overlap the drawing — "
@@ -1159,6 +1217,47 @@ def write_project_3mf(path, layers, wall_stack=None):
     return write_3mf(path, members), n_walls, n_regions
 
 
+def write_project_3mf_variations(outdir, layers, wall_stack=None):
+    """One 3MF holding every permutation of the palette's colour groups.
+
+    The frame — an unnumbered group such as "walls" — keeps its colour in every
+    combination; the numbered palette groups trade places, so a two-colour model
+    has two combinations and a three-colour model six. Each combination is
+    written as one merged assembly object, laid out side by side on the plate.
+    """
+    merged, n_walls, n_regions = colour_buckets(layers, wall_stack)
+    palette = sorted((m for m in merged if m[0].split("-", 1)[0].isdigit()),
+                     key=lambda m: int(m[0].split("-", 1)[0]))
+    fixed = sorted((m for m in merged if not m[0].split("-", 1)[0].isdigit()),
+                   key=lambda m: m[0])
+    n = len(palette)
+    os.makedirs(outdir, exist_ok=True)
+
+    combinations = []
+    # permutations(range(0)) is one empty tuple, so a frame-only model still
+    # exports exactly one combination.
+    for perm in itertools.permutations(range(n)):
+        members = [(label, mesh, perm[i] + 1)
+                   for i, (label, mesh, _) in enumerate(palette)]
+        members += [(label, mesh, n + 1 + i)
+                    for i, (label, mesh, _) in enumerate(fixed)]
+        by_extruder = [None] * n
+        for i, slot in enumerate(perm):
+            by_extruder[slot] = palette[i][0]
+        order = "-".join(label.split("-", 1)[1] for label in by_extruder)
+        combinations.append((order or "frame", members))
+
+    path = os.path.join(outdir, "variations.3mf")
+    n_combos, n_parts, n_tris = write_3mf_assemblies(path, combinations)
+
+    return [{
+        "file": "variations.3mf",
+        "variations": n_combos,
+        "parts": n_parts,
+        "triangles": n_tris,
+    }], n_walls, n_regions
+
+
 """3MF, in the flavour Snapmaker's slicer (a Bambu Studio fork) writes.
 
 A 3MF is a zip. The geometry is plain 3MF core — one `.model` per part under
@@ -1186,7 +1285,7 @@ def _num(value):
     return "0" if text in ("", "-0", "-") else text
 
 
-def _mesh_model(object_id, mesh):
+def _mesh_xml(mesh):
     verts = "".join(
         f'<vertex x="{_num(x)}" y="{_num(y)}" z="{_num(z)}"/>'
         for x, y, z in mesh.vertices
@@ -1194,13 +1293,17 @@ def _mesh_model(object_id, mesh):
     tris = "".join(
         f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in mesh.faces
     )
+    return f'<vertices>{verts}</vertices><triangles>{tris}</triangles>'
+
+
+def _mesh_model(object_id, mesh):
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
         ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
         ' <resources>\n'
         f'  <object id="{object_id}" p:UUID="{uuid.uuid4()}" type="model">\n'
-        f'   <mesh><vertices>{verts}</vertices><triangles>{tris}</triangles></mesh>\n'
+        f'   <mesh>{_mesh_xml(mesh)}</mesh>\n'
         '  </object>\n'
         ' </resources>\n'
         ' <build/>\n'
@@ -1342,6 +1445,202 @@ def write_3mf(path, members):
     ]
 
 
+def write_3mf_assemblies(path, combinations):
+    """One 3MF whose build holds one *assembly* per colour combination.
+
+    `combinations` is a list of `(name, members)`; each member is
+    `(label, mesh, extruder)` — that combination's colour parts. Every
+    combination's parts are written into one shared object file and referenced
+    by a single assembly object, so each combination behaves as one merged
+    multi-colour object on the plate. The combinations are laid out in a grid
+    so they never overlap.
+    """
+    # Drop empty parts and empty combinations.
+    combos = []
+    for name, members in combinations:
+        solids = [(label, mesh, extruder) for (label, mesh, extruder) in members
+                  if len(mesh.faces)]
+        if solids:
+            combos.append((name, solids))
+    if not combos:
+        raise ConvertError("there is nothing to export")
+
+    # Every combination shares the same geometry, so one box centres them all.
+    meshes = [m for _, members in combos for _, m, _ in members]
+    lo = [min(m.bounds[0][i] for m in meshes) for i in range(3)]
+    hi = [max(m.bounds[1][i] for m in meshes) for i in range(3)]
+    centre = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    size = [hi[i] - lo[i] for i in range(3)]
+
+    cols = min(len(combos), 3)
+    rows = (len(combos) + cols - 1) // cols
+    gap = 5.0
+    step_x = size[0] + gap
+    step_y = size[1] + gap
+    grid_w = (cols - 1) * step_x
+    grid_h = (rows - 1) * step_y
+    base_x = PLATE_CENTRE[0] - centre[0] - grid_w / 2
+    base_y = PLATE_CENTRE[1] - centre[1] + grid_h / 2
+    base_z = -lo[2]
+
+    # ids: parts take 1..N, assemblies take 1000+ so the two never collide.
+    parts = []          # per part: ci, label, mesh, extruder, mesh_id
+    mesh_id = 1
+    for ci, (_, members) in enumerate(combos):
+        for label, mesh, extruder in members:
+            parts.append({"ci": ci, "label": label, "mesh": mesh,
+                          "extruder": extruder, "mesh_id": mesh_id})
+            mesh_id += 1
+
+    def assembly_id(ci):
+        return 1000 + ci
+
+    def offsets(ci):
+        col, row = ci % cols, ci // cols
+        return base_x + col * step_x, base_y - row * step_y
+
+    # The main model: one assembly object per combination.
+    resources = ""
+    for ci, (_, members) in enumerate(combos):
+        obj_id = assembly_id(ci)
+        comps = "".join(
+            f'   <component p:path="/3D/Objects/object_{obj_id}.model" '
+            f'objectid="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" '
+            f'transform="{IDENTITY} 0 0 0"/>\n'
+            for p in parts if p["ci"] == ci
+        )
+        resources += (
+            f'  <object id="{obj_id}" p:UUID="{uuid.uuid4()}" type="model">\n'
+            f'   <components>\n{comps}   </components>\n'
+            f'  </object>\n'
+        )
+
+    build_items = "".join(
+        f'  <item objectid="{assembly_id(ci)}" p:UUID="{uuid.uuid4()}" '
+        f'transform="{IDENTITY} {_num(offsets(ci)[0])} {_num(offsets(ci)[1])} '
+        f'{_num(base_z)}" printable="1"/>\n'
+        for ci in range(len(combos))
+    )
+
+    model = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
+        ' <metadata name="Application">vector2stl</metadata>\n'
+        ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
+        ' <resources>\n' + resources + ' </resources>\n'
+        f' <build p:UUID="{uuid.uuid4()}">\n' + build_items + ' </build>\n'
+        '</model>\n'
+    )
+
+    # One relationship per combination's object file.
+    rels = "".join(
+        f'<Relationship Target="/3D/Objects/object_{assembly_id(ci)}.model" '
+        f'Id="rel-{ci + 1}"'
+        ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+        for ci in range(len(combos))
+    )
+
+    # Colour assignments: one object per combination, one part per colour.
+    objects = ""
+    for ci, (name, _) in enumerate(combos):
+        obj_id = assembly_id(ci)
+        ps = "".join(
+            f'    <part id="{p["mesh_id"]}" subtype="normal_part">\n'
+            f'      <metadata key="name" value="{p["label"]}"/>\n'
+            '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
+            f'      <metadata key="extruder" value="{p["extruder"]}"/>\n'
+            '    </part>\n'
+            for p in parts if p["ci"] == ci
+        )
+        top = next(p["extruder"] for p in parts if p["ci"] == ci)
+        objects += (
+            f'  <object id="{obj_id}">\n'
+            f'    <metadata key="name" value="{name}"/>\n'
+            f'    <metadata key="extruder" value="{top}"/>\n' + ps
+            + '  </object>\n'
+        )
+
+    instances = "".join(
+        f'    <model_instance>\n'
+        f'      <metadata key="object_id" value="{assembly_id(ci)}"/>\n'
+        '      <metadata key="instance_id" value="0"/>\n'
+        '    </model_instance>\n'
+        for ci in range(len(combos))
+    )
+
+    assembled = "".join(
+        f'   <assemble_item object_id="{assembly_id(ci)}" instance_id="0"'
+        f' transform="{IDENTITY} {_num(offsets(ci)[0])} {_num(offsets(ci)[1])} '
+        f'{_num(base_z)}" offset="0 0 0"/>\n'
+        for ci in range(len(combos))
+    )
+
+    settings = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n' + objects
+        + '  <plate>\n    <metadata key="plater_id" value="1"/>\n'
+        '    <metadata key="plater_name" value=""/>\n'
+        '    <metadata key="locked" value="false"/>\n' + instances
+        + '  </plate>\n  <assemble>\n' + assembled + '  </assemble>\n</config>\n'
+    )
+
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+        ' <Default Extension="rels"'
+        ' ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
+        ' <Default Extension="model"'
+        ' ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
+        ' <Default Extension="png" ContentType="image/png"/>\n'
+        '</Types>\n'
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+        ' <Relationship Target="/3D/3dmodel.model" Id="rel-1"'
+        ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
+        '</Relationships>\n'
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", root_rels)
+        archive.writestr("3D/3dmodel.model", model)
+        archive.writestr(
+            "3D/_rels/3dmodel.model.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + rels + '</Relationships>\n',
+        )
+        for ci, (_, _) in enumerate(combos):
+            combo_parts = [p for p in parts if p["ci"] == ci]
+            objects_xml = "".join(
+                f'  <object id="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" type="model">\n'
+                f'   <mesh>{_mesh_xml(p["mesh"])}</mesh>\n'
+                '  </object>\n'
+                for p in combo_parts
+            )
+            archive.writestr(
+                f"3D/Objects/object_{assembly_id(ci)}.model",
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
+                ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
+                ' <resources>\n' + objects_xml + ' </resources>\n'
+                ' <build/>\n'
+                '</model>\n',
+            )
+        archive.writestr("Metadata/model_settings.config", settings)
+        archive.writestr(
+            "Metadata/slice_info.config",
+            '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <header>\n'
+            '    <header_item key="X-BBL-Client-Type" value="slicer"/>\n'
+            '    <header_item key="X-BBL-Client-Version" value=""/>\n'
+            '  </header>\n</config>\n',
+        )
+
+    return len(combos), sum(len(m) for _, m in combos), \
+        sum(len(m.faces) for _, members in combos for _, m, _ in members)
+
+
 def ring_json(coords):
     return [[round(x, 4), round(y, 4)] for x, y in coords]
 
@@ -1423,6 +1722,9 @@ def main():
                     help="report layers and geometry counts as JSON, then exit")
     ap.add_argument("--regions", action="store_true",
                     help="report the wall and region outlines as JSON, then exit")
+    ap.add_argument("--preview", action="store_true",
+                    help="report the pattern and boundary outlines as JSON for "
+                         "the 2D window-position preview, then exit")
     ap.add_argument("--heights", default=None, metavar="FILE",
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
     ap.add_argument("--stacks", default=None, metavar="FILE",
@@ -1433,6 +1735,9 @@ def main():
                          "without it the frame is one solid of --wall-height")
     ap.add_argument("--split", action="store_true",
                     help="write one STL per colour group into the output directory")
+    ap.add_argument("--variations", action="store_true",
+                    help="write one 3MF per permutation of the palette colour "
+                         "groups into the output directory")
     ap.add_argument("--groups", default=None, metavar="FILE",
                     help="JSON file mapping region id to a colour group; makes "
                          "the output a directory holding one STL per group")
@@ -1485,6 +1790,15 @@ def main():
                     help="nudge the boundary sideways, in finished millimetres")
     ap.add_argument("--boundary-y", type=float, default=0.0, metavar="MM",
                     help="nudge the boundary up or down, in finished millimetres")
+    ap.add_argument("--pattern-scale", type=float, default=1.0,
+                    help="resize the pattern (the window content) about its own "
+                         "centre, while the boundary stays put")
+    ap.add_argument("--pattern-x", type=float, default=0.0, metavar="MM",
+                    help="slide the pattern sideways under the boundary, in "
+                         "finished millimetres")
+    ap.add_argument("--pattern-y", type=float, default=0.0, metavar="MM",
+                    help="slide the pattern up or down under the boundary, in "
+                         "finished millimetres")
     ap.add_argument("--effect", choices=EFFECTS, default="none",
                     help="reshape every face: maya-pyramid steps each one in "
                          "from its own outline, bottom to top")
@@ -1505,6 +1819,10 @@ def main():
 
     if args.inspect:
         json.dump(inspect(args.input, args.sagitta, args.scale), sys.stdout)
+        return
+
+    if args.preview:
+        json.dump(preview(args), sys.stdout)
         return
 
     if not args.output and not args.regions:
@@ -1556,6 +1874,7 @@ def main():
     boundary = None
     if args.boundary:
         positive("boundary size", args.boundary_scale)
+        positive("pattern size", args.pattern_scale)
         boundary = load_boundary(args.boundary, args.sagitta)
 
     # Every drawing is planned on its own first; stacking shifts them after.
@@ -1676,6 +1995,15 @@ def main():
         )
 
     n_holes = sum(len(drawing["holes"]) for drawing in layers)
+
+    if args.variations:
+        files, n_walls, n_regions = write_project_3mf_variations(
+            args.output, layers, wall_stack)
+        json.dump({**layers[0]["summary"], "files": files,
+                   "variations": len(files), "holes": n_holes,
+                   "walls": n_walls, "regions": n_regions,
+                   "drawings": len(layers), "effect": args.effect}, sys.stdout)
+        return
 
     if args.output and args.output.lower().endswith(".3mf"):
         files, n_walls, n_regions = write_project_3mf(args.output, layers,

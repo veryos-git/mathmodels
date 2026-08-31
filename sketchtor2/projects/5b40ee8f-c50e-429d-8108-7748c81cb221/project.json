@@ -1,0 +1,17 @@
+{
+  "id": "5b40ee8f-c50e-429d-8108-7748c81cb221",
+  "name": "0cP41sMtUmi0D9L9hP-YC_ODB2SdZg",
+  "createdAt": "2026-08-05T10:46:27.920Z",
+  "updatedAt": "2026-08-05T10:46:27.920Z",
+  "source": "source.png",
+  "params": {
+    "traceMode": "centerline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

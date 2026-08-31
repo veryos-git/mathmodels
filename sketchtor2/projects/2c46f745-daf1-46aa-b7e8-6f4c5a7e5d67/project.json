@@ -1,0 +1,17 @@
+{
+  "id": "2c46f745-daf1-46aa-b7e8-6f4c5a7e5d67",
+  "name": "NMCLxxo10dsNXTEbnBw-7_NJJCcuSc",
+  "createdAt": "2026-08-20T22:29:58.118Z",
+  "updatedAt": "2026-08-20T22:29:58.118Z",
+  "source": "source.png",
+  "params": {
+    "traceMode": "centerline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

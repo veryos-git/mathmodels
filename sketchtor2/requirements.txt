@@ -1,0 +1,95 @@
+Image-to-SVG Line Tracer — Requirements & UI Spec
+Architecture
+
+Server: Deno
+
+Serves the web UI (static assets + API routes).
+Orchestrates processing by shelling out to executables via Deno.command().
+Heavy lifting done by Python scripts (OpenCV, scikit-image, potrace, svgpathtools) invoked as subprocesses.
+Handles project persistence (save/load).
+
+Processing (Python, called by Deno)
+
+preprocess.py — grayscale, threshold, denoise, optional skeletonize.
+trace.py — centerline or outline tracing → SVG paths.
+simplify.py — RDP point reduction + optional Bézier smoothing.
+Deno passes parameters as CLI args or JSON via stdin; Python returns the SVG (or a preview PNG) via stdout/temp file.
+Project Persistence
+
+A project bundles everything needed to reproduce a result:
+
+projects/<project-id>/
+  project.json        # name, created/updated, source ref, all parameters
+  source.png          # original uploaded image
+  preview.svg         # last generated output
+  thumbnail.png       # small preview for the gallery
+
+project.json holds: project name, timestamps, source image path, and the full parameter set (threshold, stroke width, tolerance, trace mode, smoothing, etc.). Loading a project restores the image and every slider/toggle to its saved state.
+
+API routes (Deno)
+
+POST /api/upload — store image, return id.
+POST /api/trace — run pipeline with given params, return SVG + preview.
+POST /api/projects — save/update project.
+GET /api/projects — list all (for the gallery).
+GET /api/projects/:id — load one.
+DELETE /api/projects/:id.
+UI Layout
+
+A three-zone workspace: a left project sidebar, a central canvas, and a right controls panel.
+
+┌────────────┬──────────────────────────────────┬─────────────────┐
+│  PROJECTS  │            CANVAS                 │    CONTROLS     │
+│            │                                   │                 │
+│ + New      │   ┌───────────────────────────┐   │ Trace Mode      │
+│            │   │                           │   │ ◉ Centerline    │
+│ ▸ Mushroom │   │   [ Original | SVG | Split]│   │ ○ Outline       │
+│   Garden   │   │                           │   │                 │
+│ ▸ Ladybug  │   │      live preview         │   │ Threshold  ▓▓░ │
+│ ▸ Untitled │   │                           │   │ Stroke W.  ▓░░ │
+│            │   │                           │   │ Simplify   ▓▓▓ │
+│            │   └───────────────────────────┘   │ Smoothing  ▓░░ │
+│            │                                   │                 │
+│            │   [Original]  [Result]  ⟳ zoom    │ ☐ Skeletonize   │
+│            │                                   │ ☐ Invert        │
+│            │                                   │                 │
+│            │                                   │ [ Re-trace ]    │
+│            │                                   │ [ Download SVG] │
+│            │                                   │ [ Save Project ]│
+└────────────┴──────────────────────────────────┴─────────────────┘
+Left — Project Sidebar
+"+ New Project" button at top.
+Scrollable list of saved projects, each with thumbnail, name, and last-modified date.
+Click to load; right-click / ⋯ menu for rename, duplicate, delete.
+Active project highlighted.
+Center — Canvas
+View switcher at top: Original · SVG Result · Split (side-by-side or overlay slider).
+Pan + zoom (scroll to zoom, drag to pan), plus a "fit to screen" button.
+Overlay mode: SVG lines drawn semi-transparent over the original so you can judge tracing accuracy.
+Subtle loading indicator while a trace runs.
+Right — Controls Panel
+
+Grouped, top to bottom:
+
+Trace Mode — radio: Centerline (recommended for coloring books) / Outline.
+
+Parameters — sliders with live numeric values:
+
+Threshold — black/white cutoff.
+Stroke Width — output line thickness.
+Simplify — RDP tolerance (node reduction).
+Smoothing — straight polylines ↔ smooth Béziers.
+
+Toggles — Skeletonize, Invert, Remove small specks (min area).
+
+Actions — Re-trace (or live auto-trace on change, debounced), Download SVG, Save Project.
+
+Interaction Notes
+Debounce parameter changes and auto-re-trace (~400ms) so the preview stays live without hammering the subprocess; a manual "Re-trace" button remains for expensive settings.
+Show output stats somewhere small: path count, node count, file size — useful for tuning simplification.
+Unsaved changes indicator on the project name (e.g. a dot) so users know to save.
+Keep the original untouched; all edits are non-destructive parameter changes.
+Output Guarantees
+SVG contains only <path>/<polyline> with fill="none", stroke="#000", uniform width.
+Connected linework stays connected as continuous paths.
+No color, no background rect — transparent, clean coloring-book style.

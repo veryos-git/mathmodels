@@ -1,0 +1,17 @@
+{
+  "id": "c0e5bcfb-fe03-450c-b096-2fab3339581d",
+  "name": "WhatsApp Image 2026-08-05 at 10.19.24",
+  "createdAt": "2026-08-05T10:43:51.762Z",
+  "updatedAt": "2026-08-05T10:43:51.762Z",
+  "source": "source.jpeg",
+  "params": {
+    "traceMode": "centerline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

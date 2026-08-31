@@ -1,0 +1,17 @@
+{
+  "id": "bc469dfb-81a8-415a-9da0-4383df35726f",
+  "name": "gevAC4sQx0w1L2WSMf526_F5IkT77U",
+  "createdAt": "2026-08-21T08:04:05.346Z",
+  "updatedAt": "2026-08-21T08:04:05.346Z",
+  "source": "source.png",
+  "params": {
+    "traceMode": "centerline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}
