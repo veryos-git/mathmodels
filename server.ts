@@ -619,6 +619,10 @@ function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
     const output = `${dir}/variations`;
+    // Comma-separated surface patterns chosen in the export panel; each colour
+    // combination is repeated once per pattern. Absent = colour permutations
+    // only, as before.
+    const patterns = form.get("patterns");
     const stats = await runScript([
       paths[0],
       output,
@@ -630,6 +634,9 @@ function handleExport3mf(req: Request): Promise<Response> {
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await layerSpecs(form, dir, paths),
+      ...(typeof patterns === "string" && patterns.trim() !== ""
+        ? ["--patterns", patterns.trim()]
+        : []),
     ]);
 
     const listed = (stats.files ?? []) as Array<Record<string, unknown>>;

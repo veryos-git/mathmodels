@@ -117,6 +117,9 @@
   .muted { color: #6b7280; font-size: 12px; }
   .check { display: flex; align-items: center; gap: 7px; margin: 0; padding: 7px 0;
            color: #ddd; font-size: 13px; cursor: pointer; }
+  #patternList { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px;
+                 margin-top: 2px; }
+  #patternList .check { padding: 3px 0; }
   #selInfo { white-space: pre-line; }
 
   .model-layout main { position: relative; min-width: 0; }
@@ -600,7 +603,21 @@
     <button class="ghost" id="saveProject" hidden title="Save the drawing, settings, colours and holes as one file">Save project</button>
     <button id="download" hidden>Download STL</button>
     <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
-    <button id="export3mf" hidden title="One 3MF with every colour combination, each merged into a single object">Export 3MF (Snapmaker)</button>
+    <button id="export3mf" hidden title="One 3MF with every colour combination and every ticked surface pattern, each merged into a single object">Export 3MF (Snapmaker)</button>
+    <div id="patternBox">
+      <div class="group-title" style="margin-top:10px">3MF surface patterns</div>
+      <div class="muted">How the nozzle fills a region. Every colour combination is repeated once per ticked pattern.</div>
+      <div id="patternList">
+        <label class="check" title="Fill top/bottom layers with a monotonic line"><input type="checkbox" class="pattern" value="monotonicline"> monotonic line</label>
+        <label class="check" title="Fill top/bottom layers monotonically"><input type="checkbox" class="pattern" value="monotonic" checked> monotonic</label>
+        <label class="check" title="Fill top/bottom layers with straight parallel lines"><input type="checkbox" class="pattern" value="rectilinear"> rectilinear</label>
+        <label class="check" title="Fill top/bottom layers with aligned rectilinear lines"><input type="checkbox" class="pattern" value="alignedrectilinear"> aligned rectilinear</label>
+        <label class="check" title="Fill top/bottom layers with concentric rings"><input type="checkbox" class="pattern" value="concentric" checked> concentric</label>
+        <label class="check" title="Fill top/bottom layers with a Hilbert curve"><input type="checkbox" class="pattern" value="hilbertcurve" checked> hilbert curve</label>
+        <label class="check" title="Fill top/bottom layers with an Archimedean spiral (chords)"><input type="checkbox" class="pattern" value="archimedeanchords" checked> archimedean chords</label>
+        <label class="check" title="Fill top/bottom layers with an octagram spiral"><input type="checkbox" class="pattern" value="octagramspiral"> octagram spiral</label>
+      </div>
+    </div>
   </fieldset>
 
   <div id="status"></div>
@@ -678,19 +695,25 @@ const round6 = (v) => Math.round(v * 1e6) / 1e6;
 /* --------------------------------------------------------------- palette */
 
 // Three base hues, spread as far apart as three can be: everything else on the
-// palette is built by stacking two of them. Three plus a solid frame is four
-// filaments, which is what a Snapmaker holds.
-const DEFAULT_HUES = [35, 186, 288];
+// palette is built by stacking two of them. Black is a fourth paint — a real
+// filament, but no hue — so it sits outside the mixes below.
+const DEFAULT_HUES = [35, 186, 288, null];   // null = black filament, no hue
 let HUES = [...DEFAULT_HUES];     // one row each, editable via the row's swatch
 
 // Every pair of base hues, each one bottom of its own mix and top of another.
+// Black is left out: a mix is two coloured layers reading as a blend.
 const MIXES = [[0, 1], [1, 2], [2, 0]];
 
 // Only the hue is taken from the picker: brightness has to stay free to mean
 // height, which is the whole point of the palette.
 const HUE_WORDS = ['red', 'orange', 'amber', 'yellow', 'lime', 'green',
                    'teal', 'cyan', 'azure', 'blue', 'violet', 'magenta'];
-const hueName = (deg) => HUE_WORDS[Math.round(((deg % 360) + 360) % 360 / 30) % 12];
+const hueName = (deg) => deg === null ? 'black'
+  : HUE_WORDS[Math.round(((deg % 360) + 360) % 360 / 30) % 12];
+
+// Black is paint, not a spectrum colour: "Random all" keeps to the colourful
+// rows rather than peppering a relief with black faces.
+const spectrumHues = () => HUES.flatMap((deg, hue) => (deg === null ? [] : [hue]));
 
 // A shade per printed layer would be dozens of swatches on a tall model, so a
 // row stops here and steps by several layers at a time instead.
@@ -765,8 +788,10 @@ function mixLevels(lo, hi) {
  */
 function shadeFor(hue, height, lo, hi) {
   const t = hi > lo ? clamp((height - lo) / (hi - lo), 0, 1) : 0;
-  const deg = HUES[hue] ?? HUES[0];
-  return new THREE.Color().setHSL(deg / 360, SAT_LO + (SAT_HI - SAT_LO) * t,
+  const deg = HUES[hue];
+  if (deg === null) return new THREE.Color(0x000000);   // black at any height
+  return new THREE.Color().setHSL((deg ?? HUES[0]) / 360,
+    SAT_LO + (SAT_HI - SAT_LO) * t,
     LIGHT_HI - (LIGHT_HI - LIGHT_LO) * t, THREE.SRGBColorSpace);
 }
 
@@ -801,14 +826,17 @@ function brushName() {
 function setHue(row, hex, lo, hi) {
   const hsl = { h: 0, s: 0, l: 0 };
   new THREE.Color(hex).getHSL(hsl, THREE.SRGBColorSpace);   // as shadeFor writes it
-  // A grey pick carries no hue; keep the row's current one rather than
+  // Pure black is the one grey that paints: black filament is a colour even
+  // though it carries no hue.
+  const black = hsl.l < 0.05;
+  // Any other grey carries no hue; keep the row's current one rather than
   // silently snapping every face on it to red.
-  if (hsl.s < 0.05) {
+  if (!black && hsl.s < 0.05) {
     setStatus('pick a colour with some saturation — grey has no hue', true);
     buildPalette(lo, hi);
     return;
   }
-  HUES[row] = hsl.h * 360;
+  HUES[row] = black ? null : hsl.h * 360;
   buildPalette(lo, hi);
   layers.forEach((l, li) => {
     for (let i = 0; i < l.stacks.length; i++) {
@@ -1865,8 +1893,10 @@ const randomHeight = () => {
 $('randomise').onclick = () => {
   if (!baseModel()) return;
   const faces = allFaces();
+  const pool = spectrumHues();   // black stays out of the random palette
   for (const f of faces) {
-    paint(f.li, f.id, Math.floor(Math.random() * HUES.length), randomHeight());
+    paint(f.li, f.id, pool.length ? pool[Math.floor(Math.random() * pool.length)] : 0,
+      randomHeight());
   }
   setStatus(`randomised colour and height on ${faces.length} faces`);
 };
@@ -3660,10 +3690,17 @@ async function applyProject(project) {
   // A project saved with fewer rows keeps every hue it has, at the same index,
   // so its face stacks still point at the colours they were painted with. Any
   // row it never had is filled with a default that is not already in use.
+  // Black is a hue-less row, so it survives as null rather than via Number().
   const saved = Array.isArray(project.palette) ? project.palette : [];
-  const spare = DEFAULT_HUES.filter((deg) => !saved.some((h) => Number(h) === deg));
-  HUES = DEFAULT_HUES.map((fallback, i) =>
-    Number.isFinite(Number(saved[i])) ? Number(saved[i]) : (spare.shift() ?? fallback));
+  const used = saved.filter((h) => h === null || Number.isFinite(Number(h)))
+    .map((h) => (h === null ? null : Number(h)));
+  const spare = DEFAULT_HUES.filter((deg) => !used.includes(deg));
+  HUES = DEFAULT_HUES.map((fallback, i) => {
+    const raw = saved[i];
+    if (raw === null) return null;                 // black survives as black
+    if (Number.isFinite(Number(raw))) return Number(raw);
+    return spare.shift() ?? fallback;
+  });
   const bin = atob(project.drawing.data);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -3757,7 +3794,7 @@ const DEFAULT_CALLBACK = `// Runs once, with every face. The loop is yours, so y
 //   levels  every height the palette offers, lowest first — one per layer
 //           height, so how many there are depends on the settings:
 //           [${'${levels}'}]
-//   hues    the palette's hue angles, in degrees
+//   hues    the palette's hue angles, in degrees (null = black)
 //
 // Assign to face.stack to repaint. Nothing is applied if this throws. A mix is
 // nothing special here: two layers of the same thickness, different hues.
@@ -4241,7 +4278,7 @@ function buildForm() {
   const form = shapeForm();
   // Every layer, so the STL is exactly what the preview shows. The group names
   // are the palette's, shared by every drawing — that is what keeps a stack of
-  // them coming back as the same three hue files plus the frame.
+  // them coming back as the same palette hue files plus the frame.
   const painted = (stacks) => JSON.stringify(Object.fromEntries(stacks.map((stack, i) => [
     i, stack.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` })),
   ])));
@@ -4310,19 +4347,27 @@ $('download').onclick = async () => {
 
 $('export3mf').onclick = async () => {
   if (!baseModel()) return;
-  setStatus('building colour variations…');
+  setStatus('building colour & pattern variations…');
   $('export3mf').disabled = true;
   try {
-    const res = await fetch('/api/export3mf', { method: 'POST', body: buildForm() });
+    // The checked surface patterns travel as one comma-separated list; every
+    // colour combination is repeated once per pattern.
+    const form = buildForm();
+    const patterns = [...document.querySelectorAll('.pattern:checked')]
+      .map((cb) => cb.value).join(',');
+    if (patterns) form.append('patterns', patterns);
+    const res = await fetch('/api/export3mf', { method: 'POST', body: form });
     const info = await res.json();
     if (!res.ok) {
       throw new Error([info.error ?? res.statusText, info.log].filter(Boolean).join('\n'));
     }
-    // One 3MF holding every colour combination, each merged into one object.
+    // One 3MF holding every colour combination, each repeated per pattern.
     const f = info.files[0];
     saveBlob(fromBase64(f.data), 'model/3mf', baseName() + '.3mf');
-    setStatus(`saved ${baseName()}.3mf — ${count(f.variations, 'colour combination')}`);
-    stats.textContent = `${f.variations} combinations · ${f.parts} parts · `
+    setStatus(`saved ${baseName()}.3mf — ${count(f.variations, 'variation')}`);
+    const patPart = f.patterns ? ` × ${f.patterns} patterns` : '';
+    stats.textContent = `${f.combinations} colour combinations${patPart}`
+      + ` = ${f.variations} objects · ${f.parts} parts · `
       + `${f.triangles.toLocaleString()} triangles`;
   } catch (e) {
     setStatus(String(e.message ?? e), true);

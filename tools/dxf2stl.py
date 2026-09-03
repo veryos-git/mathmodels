@@ -1217,13 +1217,27 @@ def write_project_3mf(path, layers, wall_stack=None):
     return write_3mf(path, members), n_walls, n_regions
 
 
-def write_project_3mf_variations(outdir, layers, wall_stack=None):
+# The surface patterns a Bambu Studio / Snapmaker slicer knows. These are the
+# values of the `top_surface_pattern` / `bottom_surface_pattern` metadata the
+# 3MF carries per object; each controls how the nozzle fills a solid layer.
+SURFACE_PATTERNS = (
+    "monotonicline", "monotonic", "rectilinear", "alignedrectilinear",
+    "concentric", "hilbertcurve", "archimedeanchords", "octagramspiral",
+)
+
+
+def write_project_3mf_variations(outdir, layers, wall_stack=None, patterns=None):
     """One 3MF holding every permutation of the palette's colour groups.
 
     The frame — an unnumbered group such as "walls" — keeps its colour in every
     combination; the numbered palette groups trade places, so a two-colour model
     has two combinations and a three-colour model six. Each combination is
     written as one merged assembly object, laid out side by side on the plate.
+
+    `patterns` is an optional list of the slicer's top/bottom surface patterns
+    ("concentric", "hilbertcurve", …). When given, every colour combination is
+    repeated once per pattern, so the export compares every colour arrangement
+    against every fill pattern.
     """
     merged, n_walls, n_regions = colour_buckets(layers, wall_stack)
     palette = sorted((m for m in merged if m[0].split("-", 1)[0].isdigit()),
@@ -1232,6 +1246,7 @@ def write_project_3mf_variations(outdir, layers, wall_stack=None):
                    key=lambda m: m[0])
     n = len(palette)
     os.makedirs(outdir, exist_ok=True)
+    patterns = [p for p in (patterns or []) if p]
 
     combinations = []
     # permutations(range(0)) is one empty tuple, so a frame-only model still
@@ -1245,7 +1260,12 @@ def write_project_3mf_variations(outdir, layers, wall_stack=None):
         for i, slot in enumerate(perm):
             by_extruder[slot] = palette[i][0]
         order = "-".join(label.split("-", 1)[1] for label in by_extruder)
-        combinations.append((order or "frame", members))
+        base = order or "frame"
+        if patterns:
+            combinations.extend((f"{base} {pattern}", members, pattern)
+                                for pattern in patterns)
+        else:
+            combinations.append((base, members, None))
 
     path = os.path.join(outdir, "variations.3mf")
     n_combos, n_parts, n_tris = write_3mf_assemblies(path, combinations)
@@ -1253,6 +1273,8 @@ def write_project_3mf_variations(outdir, layers, wall_stack=None):
     return [{
         "file": "variations.3mf",
         "variations": n_combos,
+        "patterns": len(patterns),
+        "combinations": math.factorial(n),
         "parts": n_parts,
         "triangles": n_tris,
     }], n_walls, n_regions
@@ -1448,25 +1470,26 @@ def write_3mf(path, members):
 def write_3mf_assemblies(path, combinations):
     """One 3MF whose build holds one *assembly* per colour combination.
 
-    `combinations` is a list of `(name, members)`; each member is
-    `(label, mesh, extruder)` — that combination's colour parts. Every
-    combination's parts are written into one shared object file and referenced
-    by a single assembly object, so each combination behaves as one merged
-    multi-colour object on the plate. The combinations are laid out in a grid
-    so they never overlap.
+    `combinations` is a list of `(name, members, pattern)`; each member is
+    `(label, mesh, extruder)` — that combination's colour parts. `pattern` is
+    the slicer's top/bottom surface pattern for the object, or None for the
+    slicer's default. Every combination's parts are written into one shared
+    object file and referenced by a single assembly object, so each combination
+    behaves as one merged multi-colour object on the plate. The combinations
+    are laid out in a grid so they never overlap.
     """
     # Drop empty parts and empty combinations.
     combos = []
-    for name, members in combinations:
+    for name, members, pattern in combinations:
         solids = [(label, mesh, extruder) for (label, mesh, extruder) in members
                   if len(mesh.faces)]
         if solids:
-            combos.append((name, solids))
+            combos.append((name, solids, pattern))
     if not combos:
         raise ConvertError("there is nothing to export")
 
     # Every combination shares the same geometry, so one box centres them all.
-    meshes = [m for _, members in combos for _, m, _ in members]
+    meshes = [m for _, members, _ in combos for _, m, _ in members]
     lo = [min(m.bounds[0][i] for m in meshes) for i in range(3)]
     hi = [max(m.bounds[1][i] for m in meshes) for i in range(3)]
     centre = [(lo[i] + hi[i]) / 2 for i in range(3)]
@@ -1486,7 +1509,7 @@ def write_3mf_assemblies(path, combinations):
     # ids: parts take 1..N, assemblies take 1000+ so the two never collide.
     parts = []          # per part: ci, label, mesh, extruder, mesh_id
     mesh_id = 1
-    for ci, (_, members) in enumerate(combos):
+    for ci, (_, members, _) in enumerate(combos):
         for label, mesh, extruder in members:
             parts.append({"ci": ci, "label": label, "mesh": mesh,
                           "extruder": extruder, "mesh_id": mesh_id})
@@ -1501,7 +1524,7 @@ def write_3mf_assemblies(path, combinations):
 
     # The main model: one assembly object per combination.
     resources = ""
-    for ci, (_, members) in enumerate(combos):
+    for ci, (_, members, _) in enumerate(combos):
         obj_id = assembly_id(ci)
         comps = "".join(
             f'   <component p:path="/3D/Objects/object_{obj_id}.model" '
@@ -1540,9 +1563,12 @@ def write_3mf_assemblies(path, combinations):
         for ci in range(len(combos))
     )
 
-    # Colour assignments: one object per combination, one part per colour.
+    # Colour assignments: one object per combination, one part per colour. The
+    # surface pattern is an object-level override of the slicer's global
+    # top/bottom surface pattern, so each combination gets the pattern it was
+    # built for (the meshes are identical; only the slicing differs).
     objects = ""
-    for ci, (name, _) in enumerate(combos):
+    for ci, (name, _, pattern) in enumerate(combos):
         obj_id = assembly_id(ci)
         ps = "".join(
             f'    <part id="{p["mesh_id"]}" subtype="normal_part">\n'
@@ -1552,11 +1578,18 @@ def write_3mf_assemblies(path, combinations):
             '    </part>\n'
             for p in parts if p["ci"] == ci
         )
+        pattern_meta = ""
+        if pattern:
+            pattern_meta = (
+                f'    <metadata key="top_surface_pattern" value="{pattern}"/>\n'
+                f'    <metadata key="bottom_surface_pattern" value="{pattern}"/>\n'
+            )
         top = next(p["extruder"] for p in parts if p["ci"] == ci)
         objects += (
             f'  <object id="{obj_id}">\n'
             f'    <metadata key="name" value="{name}"/>\n'
-            f'    <metadata key="extruder" value="{top}"/>\n' + ps
+            + pattern_meta
+            + f'    <metadata key="extruder" value="{top}"/>\n' + ps
             + '  </object>\n'
         )
 
@@ -1611,7 +1644,7 @@ def write_3mf_assemblies(path, combinations):
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             + rels + '</Relationships>\n',
         )
-        for ci, (_, _) in enumerate(combos):
+        for ci, (_, _, _) in enumerate(combos):
             combo_parts = [p for p in parts if p["ci"] == ci]
             objects_xml = "".join(
                 f'  <object id="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" type="model">\n'
@@ -1637,8 +1670,8 @@ def write_3mf_assemblies(path, combinations):
             '  </header>\n</config>\n',
         )
 
-    return len(combos), sum(len(m) for _, m in combos), \
-        sum(len(m.faces) for _, members in combos for _, m, _ in members)
+    return len(combos), sum(len(m) for _, m, _ in combos), \
+        sum(len(m.faces) for _, members, _ in combos for _, m, _ in members)
 
 
 def ring_json(coords):
@@ -1738,6 +1771,11 @@ def main():
     ap.add_argument("--variations", action="store_true",
                     help="write one 3MF per permutation of the palette colour "
                          "groups into the output directory")
+    ap.add_argument("--patterns", default=None, metavar="LIST",
+                    help="comma-separated top/bottom surface patterns for the "
+                         "--variations export, e.g. concentric,hilbertcurve; "
+                         "every colour combination is repeated once per pattern "
+                         "(choose from " + ", ".join(SURFACE_PATTERNS) + ")")
     ap.add_argument("--groups", default=None, metavar="FILE",
                     help="JSON file mapping region id to a colour group; makes "
                          "the output a directory holding one STL per group")
@@ -1997,8 +2035,17 @@ def main():
     n_holes = sum(len(drawing["holes"]) for drawing in layers)
 
     if args.variations:
+        patterns = None
+        if args.patterns:
+            patterns = [p.strip().lower() for p in args.patterns.split(",")
+                        if p.strip()]
+            unknown = [p for p in patterns if p not in SURFACE_PATTERNS]
+            if unknown:
+                raise ConvertError("unknown surface pattern(s): "
+                                   + ", ".join(unknown) + " — choose from "
+                                   + ", ".join(SURFACE_PATTERNS))
         files, n_walls, n_regions = write_project_3mf_variations(
-            args.output, layers, wall_stack)
+            args.output, layers, wall_stack, patterns)
         json.dump({**layers[0]["summary"], "files": files,
                    "variations": len(files), "holes": n_holes,
                    "walls": n_walls, "regions": n_regions,

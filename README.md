@@ -534,7 +534,11 @@ project name cannot hold become `-`.
   while the colours trade places across them. A two-colour model has two
   combinations, three colours six, and so on — every permutation. Each
   combination is written as one merged object, laid out side by side on the
-  plate. The frame keeps its own colour throughout. See *3MF* below.
+  plate. The frame keeps its own colour throughout. Under the button, the
+  **3MF surface patterns** checkboxes repeat every combination once per ticked
+  pattern — hilbert curve, concentric, monotonic and friends — so one file
+  compares every colour arrangement against every fill pattern. See *3MF*
+  below.
 - **Export STLs by colour** — one STL per hue, named for the hue in use
   (`…-1-orange.stl`, `…-2-teal.stl`, …), for multi-material printing. Each
   *layer* goes to its own colour's file, so a stacked face is split across them
@@ -580,6 +584,32 @@ each, but the extruder a group gets is swapped, so `orange-green` and
 `green-orange` are the two ways a two-colour model can be loaded without
 repainting. The frame (an unnumbered group) keeps its extruder in every
 combination; only the numbered palette rows trade places.
+
+### Surface patterns
+
+The **3MF surface patterns** checkboxes add a second axis to that grid: every
+colour combination is repeated once per ticked pattern, so a three-colour model
+with four patterns comes back as 24 objects laid out side by side. A pattern is
+how the slicer's nozzle travels to fill a solid layer — the top and bottom
+surfaces of the relief. The checkboxes are the eight the slicer knows:
+
+| Checkbox | 3MF value | What the nozzle draws |
+| --- | --- | --- |
+| monotonic line | `monotonicline` | long straight passes, each one line |
+| monotonic | `monotonic` | straight passes that fill each region without turning mid-pass |
+| rectilinear | `rectilinear` | straight parallel lines |
+| aligned rectilinear | `alignedrectilinear` | straight lines aligned across neighbouring regions |
+| concentric | `concentric` | rings shrinking into the middle |
+| hilbert curve | `hilbertcurve` | a single space-filling curve |
+| archimedean chords | `archimedeanchords` | an Archimedean spiral drawn as chords |
+| octagram spiral | `octagramspiral` | an eight-pointed star spiral |
+
+Four are ticked by default (monotonic, concentric, hilbert curve, archimedean
+chords); untick some to keep the plate small or tick all eight for the full
+comparison. The pattern travels as object-level `top_surface_pattern` and
+`bottom_surface_pattern` metadata in `Metadata/model_settings.config` — the
+meshes are identical, only the slicing differs. With no pattern ticked the
+export falls back to the colour combinations alone.
 
 ## Input formats
 
@@ -631,6 +661,9 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --stacks stacks.json
 .venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --split
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.3mf  --stacks stacks.json
+# one 3MF with every colour permutation, each repeated per surface pattern
+.venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --variations \
+    --patterns concentric,hilbertcurve,archimedeanchords,monotonic
 # keep the model inside its outermost line instead of straddling it
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --wall-width 10 --confine-walls
 # advanced: sweep a closed cross-section along every curve for the frame
@@ -685,7 +718,7 @@ go to stderr.
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/convert` | `file` + settings + `stacks` → STL body, stats in the `x-stats` header |
 | `POST /api/export` | as above plus `groups` → JSON listing one base64 STL per group |
-| `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders |
+| `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders; a `patterns` field (comma-separated) repeats every colour combination per pattern |
 | `GET /api/example.dxf` | the bundled `sketch.dxf` |
 | `GET /api/default-profile.dxf` | the bundled sweep profile (404 if absent) |
 | `GET /api/projects` | the saved projects, newest first, each with a `thumb` flag |
