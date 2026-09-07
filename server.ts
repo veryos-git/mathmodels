@@ -609,11 +609,15 @@ async function serveThumbnail(name: string): Promise<Response> {
 }
 
 /**
- * POST /api/export3mf — one 3MF per colour variation.
+ * POST /api/export3mf — one 3MF holding every colour variation.
  * Each permutation of the palette's colour groups is written out, so a
  * two-colour model comes back as two files (blue on orange, orange on blue)
  * and three colours as six. The meshes are identical; only the extruder a
  * group is assigned to changes, the way Snapmaker's slicer reads colour.
+ * Every file starts with the plain printable versions on their own build
+ * plates — the whole model in one colour, then the frame alone — and the
+ * colour/pattern combinations fill the remaining plates, spilling onto fresh
+ * ones as a plate fills.
  */
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {

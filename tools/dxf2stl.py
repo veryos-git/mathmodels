@@ -1232,7 +1232,10 @@ def write_project_3mf_variations(outdir, layers, wall_stack=None, patterns=None)
     The frame — an unnumbered group such as "walls" — keeps its colour in every
     combination; the numbered palette groups trade places, so a two-colour model
     has two combinations and a three-colour model six. Each combination is
-    written as one merged assembly object, laid out side by side on the plate.
+    written as one merged assembly object. The file also always carries the two
+    plain printable versions on their own build plates — the whole model in one
+    colour, and the frame alone — and the combinations fill the remaining
+    plates, spilling onto fresh ones as a plate fills.
 
     `patterns` is an optional list of the slicer's top/bottom surface patterns
     ("concentric", "hilbertcurve", …). When given, every colour combination is
@@ -1268,7 +1271,8 @@ def write_project_3mf_variations(outdir, layers, wall_stack=None, patterns=None)
             combinations.append((base, members, None))
 
     path = os.path.join(outdir, "variations.3mf")
-    n_combos, n_parts, n_tris = write_3mf_assemblies(path, combinations)
+    n_combos, n_parts, n_tris, n_plates, n_versions = write_3mf_assemblies(
+        path, combinations)
 
     return [{
         "file": "variations.3mf",
@@ -1277,6 +1281,8 @@ def write_project_3mf_variations(outdir, layers, wall_stack=None, patterns=None)
         "combinations": math.factorial(n),
         "parts": n_parts,
         "triangles": n_tris,
+        "plates": n_plates,
+        "versions": n_versions,
     }], n_walls, n_regions
 
 
@@ -1287,11 +1293,24 @@ A 3MF is a zip. The geometry is plain 3MF core — one `.model` per part under
 entirely in Metadata/model_settings.config, as an `extruder` number per object.
 Nothing about the mesh carries colour.
 
-Every part is placed with the same transform, so the pieces stay registered on
-top of each other instead of being scattered as separate imports.
+The build is grouped into *build plates*: Metadata/model_settings.config holds
+one `<plate>` per plate, each listing the `model_instance`s it carries, and an
+`<assemble>` block that places every object on its plate. A reference project
+(example_3dobject_versions.3mf) shows three kinds of plate in one file —
+single_color_version, frame_only_version and multi_color_versions — so this
+writer always adds the two plain printable versions on their own plates and
+spreads the many colour/pattern combinations over plates instead of overflowing
+one bed.
+
+Every part that belongs together is placed with the same transform, so the
+pieces stay registered on top of each other instead of being scattered as
+separate imports.
 """
 
 PLATE_CENTRE = (135.5, 136.0)      # middle of the 270 x 270 bed
+BED = 270.0                        # one build plate is 270 x 270 mm
+PLATE_EDGE = 8.0                   # margin kept clear around a plate's grid
+GAP = 5.0                          # gap between two neighbours on a plate
 IDENTITY = "1 0 0 0 1 0 0 0 1"
 MODEL_NS = (
     'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
@@ -1333,8 +1352,131 @@ def _mesh_model(object_id, mesh):
     )
 
 
+def is_palette_label(label):
+    """A group label's head is its palette row ("2-lime") when it is numbered."""
+    return label.split("-", 1)[0].isdigit()
+
+
+def _plate_capacity(step_x, step_y):
+    """How many whole grid cells (columns, rows) one plate can hold."""
+
+    def fit(step):
+        return max(1, int((BED - 2 * PLATE_EDGE) / step)) if step > 0 else 1
+
+    return fit(step_x), fit(step_y)
+
+
+def _grid_positions(count, cols, step_x, step_y, cx, cy):
+    """(x, y) for `count` objects laid out in `cols` columns centred on (cx, cy)."""
+    cols = max(1, min(count, cols))
+    rows = (count + cols - 1) // cols
+    grid_w = (cols - 1) * step_x
+    grid_h = (rows - 1) * step_y
+    base_x = cx - grid_w / 2
+    base_y = cy + grid_h / 2
+    return [(base_x + (i % cols) * step_x, base_y - (i // cols) * step_y)
+            for i in range(count)]
+
+
+def _version_members(members):
+    """The always-on version objects: the model in one colour, and the frame alone.
+
+    `members` is one combination's [(label, mesh, extruder)] — every volume a
+    printed model can need. Returns [(name, [(label, mesh, extruder)])] for the
+    versions that add something the model itself does not already hold: a
+    one-colour version whenever more than one volume must print together, and
+    the frame alone only when the model has unnumbered (frame) volumes that a
+    drawing of faces can do without.
+    """
+    palette = [m for m in members if is_palette_label(m[0])]
+    fixed = [m for m in members if not is_palette_label(m[0])]
+    versions = []
+    if len(members) > 1:
+        # The whole relief — faces and frame — as one colour on one extruder,
+        # for a single-spool test print of the same model.
+        versions.append(("single color",
+                         [(label, mesh, 1) for label, mesh, _ in members]))
+    if palette and fixed:
+        # Just the frame: the unnumbered groups, in their own colours.
+        versions.append(("frame only", fixed))
+    return versions
+
+
+def _settings_part_xml(label, mesh_id, extruder):
+    return (
+        f'    <part id="{mesh_id}" subtype="normal_part">\n'
+        f'      <metadata key="name" value="{label}"/>\n'
+        '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
+        f'      <metadata key="extruder" value="{extruder}"/>\n'
+        '    </part>\n'
+    )
+
+
+def _settings_object_xml(object_id, name, parts, pattern):
+    """One <object> of Metadata/model_settings.config: its name, an optional
+    top/bottom surface pattern, and one <part> per colour group."""
+    inner = "".join(_settings_part_xml(label, mesh_id, extruder)
+                    for label, mesh_id, extruder in parts)
+    pattern_meta = ""
+    if pattern:
+        pattern_meta = (
+            f'    <metadata key="top_surface_pattern" value="{pattern}"/>\n'
+            f'    <metadata key="bottom_surface_pattern" value="{pattern}"/>\n'
+        )
+    top = parts[0][2] if parts else 1
+    return (
+        f'  <object id="{object_id}">\n'
+        f'    <metadata key="name" value="{name}"/>\n'
+        + pattern_meta
+        + f'    <metadata key="extruder" value="{top}"/>\n'
+        + inner
+        + '  </object>\n'
+    )
+
+
+def _plates_xml(plates, placed):
+    """The <plate> blocks and the <assemble> block of model_settings.config.
+
+    plates: [(plater_name, [object ids])] in plate order; placed maps each
+    object id to its "1 0 0 0 1 0 0 0 1 x y z" position. Every object belongs
+    to exactly one plate.
+    """
+    blocks = []
+    order = []
+    for i, (name, ids) in enumerate(plates):
+        members = "".join(
+            '    <model_instance>\n'
+            f'      <metadata key="object_id" value="{oid}"/>\n'
+            '      <metadata key="instance_id" value="0"/>\n'
+            '    </model_instance>\n'
+            for oid in ids
+        )
+        blocks.append(
+            '  <plate>\n'
+            f'    <metadata key="plater_id" value="{i + 1}"/>\n'
+            f'    <metadata key="plater_name" value="{name}"/>\n'
+            '    <metadata key="locked" value="false"/>\n'
+            + members
+            + '  </plate>\n'
+        )
+        order.extend((oid, placed[oid]) for oid in ids)
+    assembled = "".join(
+        f'   <assemble_item object_id="{oid}" instance_id="0" transform="{tf}"'
+        ' offset="0 0 0"/>\n'
+        for oid, tf in order
+    )
+    return "".join(blocks) + '  <assemble>\n' + assembled + '  </assemble>\n'
+
+
 def write_3mf(path, members):
-    """members: [(name, mesh, extruder)] — one entry per colour."""
+    """members: [(name, mesh, extruder)] — one entry per colour group.
+
+    The colour groups stay registered on top of each other on the first plate,
+    as one multi-extruder model. When the model has faces to print, the same
+    relief also appears once more in one colour on its own plate
+    ("single_color_version") and the frame by itself on another
+    ("frame_only_version").
+    """
     solids = [m for m in members if len(m[1].faces)]
     if not solids:
         raise ConvertError("there is nothing to export")
@@ -1342,209 +1484,69 @@ def write_3mf(path, members):
     lo = [min(m.bounds[0][i] for _, m, _ in solids) for i in range(3)]
     hi = [max(m.bounds[1][i] for _, m, _ in solids) for i in range(3)]
     # One shared offset keeps the parts registered; z sits the model on the bed.
-    place = (
-        PLATE_CENTRE[0] - (lo[0] + hi[0]) / 2,
-        PLATE_CENTRE[1] - (lo[1] + hi[1]) / 2,
-        -lo[2],
-    )
-    move = f"{IDENTITY} {_num(place[0])} {_num(place[1])} {_num(place[2])}"
+    move = (f"{IDENTITY} {_num(PLATE_CENTRE[0] - (lo[0] + hi[0]) / 2)} "
+            f"{_num(PLATE_CENTRE[1] - (lo[1] + hi[1]) / 2)} {_num(-lo[2])}")
 
-    parts = []
-    for i, (name, mesh, extruder) in enumerate(solids):
-        parts.append({
-            "mesh_id": 2 * i + 1,
-            "object_id": 2 * i + 2,
-            "path": f"/3D/Objects/{safe_name(name)}_{2 * i + 1}.model",
-            "name": name,
-            "mesh": mesh,
-            "extruder": extruder,
-        })
+    # Assembly objects: each colour group keeps its own object (registered on
+    # the first plate), and each plain version gets one of its own. Every
+    # object owns the meshes it prints — its own file and part ids — so the
+    # slicer never has to guess which volume a settings part means.
+    objects = []              # {"object_id", "name", "members", "pattern"}
+    for label, mesh, extruder in solids:
+        objects.append({"object_id": 2 * len(objects) + 2, "name": label,
+                        "members": [(label, mesh, extruder)], "pattern": None})
+    versions = _version_members(solids)
+    for vi, (name, version_members) in enumerate(versions):
+        objects.append({"object_id": 1000 + vi, "name": name,
+                        "members": version_members, "pattern": None})
 
-    components = "".join(
-        f'  <object id="{p["object_id"]}" p:UUID="{uuid.uuid4()}" type="model">\n'
-        f'   <components><component p:path="{p["path"]}" objectid="{p["mesh_id"]}"'
-        f' p:UUID="{uuid.uuid4()}" transform="{IDENTITY} 0 0 0"/></components>\n'
-        '  </object>\n'
-        for p in parts
-    )
-    items = "".join(
-        f'  <item objectid="{p["object_id"]}" p:UUID="{uuid.uuid4()}"'
-        f' transform="{move}" printable="1"/>\n'
-        for p in parts
-    )
-    model = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
-        ' <metadata name="Application">vector2stl</metadata>\n'
-        ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
-        ' <resources>\n' + components + ' </resources>\n'
-        f' <build p:UUID="{uuid.uuid4()}">\n' + items + ' </build>\n'
-        '</model>\n'
-    )
+    def own_place(meshes):
+        mlo = [min(m.bounds[0][i] for m in meshes) for i in range(3)]
+        mhi = [max(m.bounds[1][i] for m in meshes) for i in range(3)]
+        return (f"{IDENTITY} {_num(PLATE_CENTRE[0] - (mlo[0] + mhi[0]) / 2)} "
+                f"{_num(PLATE_CENTRE[1] - (mlo[1] + mhi[1]) / 2)} "
+                f"{_num(-mlo[2])}")
 
-    rels = "".join(
-        f'<Relationship Target="{p["path"]}" Id="rel-{i + 1}"'
-        ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
-        for i, p in enumerate(parts)
-    )
+    colour_count = len(solids)
+    placed = {objects[i]["object_id"]: move for i in range(colour_count)}
+    for obj in objects[colour_count:]:
+        placed[obj["object_id"]] = own_place([m for _, m, _ in obj["members"]])
 
-    # The colours: one extruder per object.
-    objects = "".join(
-        f'  <object id="{p["object_id"]}">\n'
-        f'    <metadata key="name" value="{p["name"]}"/>\n'
-        f'    <metadata key="extruder" value="{p["extruder"]}"/>\n'
-        f'    <part id="{p["mesh_id"]}" subtype="normal_part">\n'
-        f'      <metadata key="name" value="{p["name"]}"/>\n'
-        '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
-        f'      <metadata key="extruder" value="{p["extruder"]}"/>\n'
-        '    </part>\n'
-        '  </object>\n'
-        for p in parts
-    )
-    instances = "".join(
-        f'    <model_instance>\n'
-        f'      <metadata key="object_id" value="{p["object_id"]}"/>\n'
-        '      <metadata key="instance_id" value="0"/>\n'
-        '    </model_instance>\n'
-        for p in parts
-    )
-    assembled = "".join(
-        f'   <assemble_item object_id="{p["object_id"]}" instance_id="0"'
-        f' transform="{move}" offset="0 0 0"/>\n'
-        for p in parts
-    )
-    settings = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n' + objects
-        + '  <plate>\n    <metadata key="plater_id" value="1"/>\n'
-        '    <metadata key="plater_name" value=""/>\n'
-        '    <metadata key="locked" value="false"/>\n' + instances
-        + '  </plate>\n  <assemble>\n' + assembled + '  </assemble>\n</config>\n'
-    )
+    version_plate = {"single color": "single_color_version",
+                     "frame only": "frame_only_version"}
+    plates = [("", [objects[i]["object_id"] for i in range(colour_count)])]
+    for obj in objects[colour_count:]:
+        plates.append((version_plate[obj["name"]], [obj["object_id"]]))
 
-    content_types = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
-        ' <Default Extension="rels"'
-        ' ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
-        ' <Default Extension="model"'
-        ' ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
-        ' <Default Extension="png" ContentType="image/png"/>\n'
-        '</Types>\n'
-    )
-    root_rels = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
-        ' <Relationship Target="/3D/3dmodel.model" Id="rel-1"'
-        ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
-        '</Relationships>\n'
-    )
+    # One globally-unique part id per volume, across every object and plate.
+    part_ids = {}             # (object_id, label) -> part id
+    next_id = 1
+    for obj in objects:
+        for label, mesh, extruder in obj["members"]:
+            part_ids[(obj["object_id"], label)] = next_id
+            next_id += 1
 
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", content_types)
-        archive.writestr("_rels/.rels", root_rels)
-        archive.writestr("3D/3dmodel.model", model)
-        archive.writestr(
-            "3D/_rels/3dmodel.model.rels",
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            + rels + '</Relationships>\n',
-        )
-        for p in parts:
-            archive.writestr(p["path"].lstrip("/"), _mesh_model(p["mesh_id"], p["mesh"]))
-        archive.writestr("Metadata/model_settings.config", settings)
-        archive.writestr(
-            "Metadata/slice_info.config",
-            '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <header>\n'
-            '    <header_item key="X-BBL-Client-Type" value="slicer"/>\n'
-            '    <header_item key="X-BBL-Client-Version" value=""/>\n'
-            '  </header>\n</config>\n',
-        )
-
-    return [
-        {"file": p["name"], "extruder": p["extruder"],
-         "triangles": int(len(p["mesh"].faces))}
-        for p in parts
-    ]
-
-
-def write_3mf_assemblies(path, combinations):
-    """One 3MF whose build holds one *assembly* per colour combination.
-
-    `combinations` is a list of `(name, members, pattern)`; each member is
-    `(label, mesh, extruder)` — that combination's colour parts. `pattern` is
-    the slicer's top/bottom surface pattern for the object, or None for the
-    slicer's default. Every combination's parts are written into one shared
-    object file and referenced by a single assembly object, so each combination
-    behaves as one merged multi-colour object on the plate. The combinations
-    are laid out in a grid so they never overlap.
-    """
-    # Drop empty parts and empty combinations.
-    combos = []
-    for name, members, pattern in combinations:
-        solids = [(label, mesh, extruder) for (label, mesh, extruder) in members
-                  if len(mesh.faces)]
-        if solids:
-            combos.append((name, solids, pattern))
-    if not combos:
-        raise ConvertError("there is nothing to export")
-
-    # Every combination shares the same geometry, so one box centres them all.
-    meshes = [m for _, members, _ in combos for _, m, _ in members]
-    lo = [min(m.bounds[0][i] for m in meshes) for i in range(3)]
-    hi = [max(m.bounds[1][i] for m in meshes) for i in range(3)]
-    centre = [(lo[i] + hi[i]) / 2 for i in range(3)]
-    size = [hi[i] - lo[i] for i in range(3)]
-
-    cols = min(len(combos), 3)
-    rows = (len(combos) + cols - 1) // cols
-    gap = 5.0
-    step_x = size[0] + gap
-    step_y = size[1] + gap
-    grid_w = (cols - 1) * step_x
-    grid_h = (rows - 1) * step_y
-    base_x = PLATE_CENTRE[0] - centre[0] - grid_w / 2
-    base_y = PLATE_CENTRE[1] - centre[1] + grid_h / 2
-    base_z = -lo[2]
-
-    # ids: parts take 1..N, assemblies take 1000+ so the two never collide.
-    parts = []          # per part: ci, label, mesh, extruder, mesh_id
-    mesh_id = 1
-    for ci, (_, members, _) in enumerate(combos):
-        for label, mesh, extruder in members:
-            parts.append({"ci": ci, "label": label, "mesh": mesh,
-                          "extruder": extruder, "mesh_id": mesh_id})
-            mesh_id += 1
-
-    def assembly_id(ci):
-        return 1000 + ci
-
-    def offsets(ci):
-        col, row = ci % cols, ci // cols
-        return base_x + col * step_x, base_y - row * step_y
-
-    # The main model: one assembly object per combination.
+    # The main model: one assembly object per object, each referencing the mesh
+    # objects of its own file under 3D/Objects.
     resources = ""
-    for ci, (_, members, _) in enumerate(combos):
-        obj_id = assembly_id(ci)
+    for obj in objects:
         comps = "".join(
-            f'   <component p:path="/3D/Objects/object_{obj_id}.model" '
-            f'objectid="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" '
-            f'transform="{IDENTITY} 0 0 0"/>\n'
-            for p in parts if p["ci"] == ci
+            f'   <component p:path="/3D/Objects/object_{obj["object_id"]}.model" '
+            f'objectid="{part_ids[(obj["object_id"], label)]}" '
+            f'p:UUID="{uuid.uuid4()}" transform="{IDENTITY} 0 0 0"/>\n'
+            for label, mesh, extruder in obj["members"]
         )
         resources += (
-            f'  <object id="{obj_id}" p:UUID="{uuid.uuid4()}" type="model">\n'
+            f'  <object id="{obj["object_id"]}" p:UUID="{uuid.uuid4()}" type="model">\n'
             f'   <components>\n{comps}   </components>\n'
-            f'  </object>\n'
+            '  </object>\n'
         )
 
     build_items = "".join(
-        f'  <item objectid="{assembly_id(ci)}" p:UUID="{uuid.uuid4()}" '
-        f'transform="{IDENTITY} {_num(offsets(ci)[0])} {_num(offsets(ci)[1])} '
-        f'{_num(base_z)}" printable="1"/>\n'
-        for ci in range(len(combos))
+        f'  <item objectid="{oid}" p:UUID="{uuid.uuid4()}" '
+        f'transform="{placed[oid]}" printable="1"/>\n'
+        for oid in placed
     )
-
     model = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
@@ -1555,65 +1557,27 @@ def write_3mf_assemblies(path, combinations):
         '</model>\n'
     )
 
-    # One relationship per combination's object file.
     rels = "".join(
-        f'<Relationship Target="/3D/Objects/object_{assembly_id(ci)}.model" '
-        f'Id="rel-{ci + 1}"'
+        f'<Relationship Target="/3D/Objects/object_{obj["object_id"]}.model" '
+        f'Id="rel-{i + 1}"'
         ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
-        for ci in range(len(combos))
+        for i, obj in enumerate(objects)
     )
 
-    # Colour assignments: one object per combination, one part per colour. The
-    # surface pattern is an object-level override of the slicer's global
-    # top/bottom surface pattern, so each combination gets the pattern it was
-    # built for (the meshes are identical; only the slicing differs).
-    objects = ""
-    for ci, (name, _, pattern) in enumerate(combos):
-        obj_id = assembly_id(ci)
-        ps = "".join(
-            f'    <part id="{p["mesh_id"]}" subtype="normal_part">\n'
-            f'      <metadata key="name" value="{p["label"]}"/>\n'
-            '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
-            f'      <metadata key="extruder" value="{p["extruder"]}"/>\n'
-            '    </part>\n'
-            for p in parts if p["ci"] == ci
-        )
-        pattern_meta = ""
-        if pattern:
-            pattern_meta = (
-                f'    <metadata key="top_surface_pattern" value="{pattern}"/>\n'
-                f'    <metadata key="bottom_surface_pattern" value="{pattern}"/>\n'
-            )
-        top = next(p["extruder"] for p in parts if p["ci"] == ci)
-        objects += (
-            f'  <object id="{obj_id}">\n'
-            f'    <metadata key="name" value="{name}"/>\n'
-            + pattern_meta
-            + f'    <metadata key="extruder" value="{top}"/>\n' + ps
-            + '  </object>\n'
-        )
-
-    instances = "".join(
-        f'    <model_instance>\n'
-        f'      <metadata key="object_id" value="{assembly_id(ci)}"/>\n'
-        '      <metadata key="instance_id" value="0"/>\n'
-        '    </model_instance>\n'
-        for ci in range(len(combos))
+    # The settings config: one object per assembly, one part per colour group.
+    settings_objects = "".join(
+        _settings_object_xml(
+            obj["object_id"], obj["name"],
+            [(label, part_ids[(obj["object_id"], label)], extruder)
+             for label, mesh, extruder in obj["members"]],
+            obj["pattern"])
+        for obj in objects
     )
-
-    assembled = "".join(
-        f'   <assemble_item object_id="{assembly_id(ci)}" instance_id="0"'
-        f' transform="{IDENTITY} {_num(offsets(ci)[0])} {_num(offsets(ci)[1])} '
-        f'{_num(base_z)}" offset="0 0 0"/>\n'
-        for ci in range(len(combos))
-    )
-
     settings = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n' + objects
-        + '  <plate>\n    <metadata key="plater_id" value="1"/>\n'
-        '    <metadata key="plater_name" value=""/>\n'
-        '    <metadata key="locked" value="false"/>\n' + instances
-        + '  </plate>\n  <assemble>\n' + assembled + '  </assemble>\n</config>\n'
+        '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n'
+        + settings_objects
+        + _plates_xml(plates, placed)
+        + '</config>\n'
     )
 
     content_types = (
@@ -1644,16 +1608,16 @@ def write_3mf_assemblies(path, combinations):
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             + rels + '</Relationships>\n',
         )
-        for ci, (_, _, _) in enumerate(combos):
-            combo_parts = [p for p in parts if p["ci"] == ci]
+        for obj in objects:
             objects_xml = "".join(
-                f'  <object id="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" type="model">\n'
-                f'   <mesh>{_mesh_xml(p["mesh"])}</mesh>\n'
+                f'  <object id="{part_ids[(obj["object_id"], label)]}" '
+                f'p:UUID="{uuid.uuid4()}" type="model">\n'
+                f'   <mesh>{_mesh_xml(mesh)}</mesh>\n'
                 '  </object>\n'
-                for p in combo_parts
+                for label, mesh, extruder in obj["members"]
             )
             archive.writestr(
-                f"3D/Objects/object_{assembly_id(ci)}.model",
+                f"3D/Objects/object_{obj['object_id']}.model",
                 '<?xml version="1.0" encoding="UTF-8"?>\n'
                 f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
                 ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
@@ -1670,8 +1634,214 @@ def write_3mf_assemblies(path, combinations):
             '  </header>\n</config>\n',
         )
 
-    return len(combos), sum(len(m) for _, m, _ in combos), \
-        sum(len(m.faces) for _, members, _ in combos for _, m, _ in members)
+    return [
+        {"file": g["name"], "extruder": g["extruder"],
+         "triangles": int(len(g["mesh"].faces))}
+        for g in ({"name": label, "mesh": mesh, "extruder": extruder}
+                  for label, mesh, extruder in solids)
+    ]
+
+
+def write_3mf_assemblies(path, combinations):
+    """One 3MF whose build holds one *assembly* per colour combination, spread
+    over build plates.
+
+    `combinations` is a list of `(name, members, pattern)`; each member is
+    `(label, mesh, extruder)` — that combination's colour parts. `pattern` is
+    the slicer's top/bottom surface pattern for the object, or None for the
+    slicer's default. Every combination's parts are written into one shared
+    object file and referenced by a single assembly object, so each combination
+    behaves as one merged multi-colour object on the plate.
+
+    Two plates always come first, carrying the plain printable versions of the
+    model — the whole relief in one colour ("single_color_version") and the
+    frame alone ("frame_only_version") — then the combinations fill
+    "multi_color_versions", spilling onto further plates as each one fills, so
+    a big comparison never overflows the bed.
+    """
+    combos = []
+    for name, members, pattern in combinations:
+        solids = [(label, mesh, extruder) for (label, mesh, extruder) in members
+                  if len(mesh.faces)]
+        if solids:
+            combos.append((name, solids, pattern))
+    if not combos:
+        raise ConvertError("there is nothing to export")
+
+    # Every combination shares the same geometry, so one box centres them all
+    # and sizes the grid every plate packs into.
+    meshes = [m for _, members, _ in combos for _, m, _ in members]
+    lo = [min(m.bounds[0][i] for m in meshes) for i in range(3)]
+    hi = [max(m.bounds[1][i] for m in meshes) for i in range(3)]
+    centre = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    size = [hi[i] - lo[i] for i in range(3)]
+    base_z = -lo[2]
+
+    # One object per combination (1000+) and one per plain version (2000+);
+    # every object's parts live in its own mesh file under 3D/Objects.
+    objects = []          # (object_id, name, members, pattern)
+    for ci, (name, members, pattern) in enumerate(combos):
+        objects.append((1000 + ci, name, members, pattern))
+    versions = _version_members(combos[0][1])
+    for vi, (name, members) in enumerate(versions):
+        objects.append((2000 + vi, name, members, None))
+
+    # One mesh object per volume, numbered across every object.
+    parts = []
+    mesh_id = 1
+    for object_id, _, members, _ in objects:
+        for label, mesh, extruder in members:
+            parts.append({"object_id": object_id, "label": label, "mesh": mesh,
+                          "extruder": extruder, "mesh_id": mesh_id})
+            mesh_id += 1
+    by_object = defaultdict(list)
+    for p in parts:
+        by_object[p["object_id"]].append(p)
+
+    # Grid the combinations onto plates, a full plate at a time.
+    step_x = size[0] + GAP
+    step_y = size[1] + GAP
+    fit_cols, fit_rows = _plate_capacity(step_x, step_y)
+    per_plate = fit_cols * fit_rows
+    cx = PLATE_CENTRE[0] - centre[0]
+    cy = PLATE_CENTRE[1] - centre[1]
+
+    plates = []           # (plater_name, [object ids])
+    placed = {}           # object_id -> "1 0 0 0 1 0 0 0 1 x y z"
+
+    def push_plate(name, ids):
+        pos = _grid_positions(len(ids), fit_cols, step_x, step_y, cx, cy)
+        plates.append((name, ids))
+        for oid, (x, y) in zip(ids, pos):
+            placed[oid] = f"{IDENTITY} {_num(x)} {_num(y)} {_num(base_z)}"
+
+    version_names = {"single color": "single_color_version",
+                     "frame only": "frame_only_version"}
+    for oid, name, _, _ in objects:
+        if oid >= 2000:
+            push_plate(version_names[name], [oid])
+    combo_ids = [1000 + ci for ci in range(len(combos))]
+    first = True
+    for start in range(0, len(combo_ids), per_plate):
+        chunk = combo_ids[start:start + per_plate]
+        push_plate("multi_color_versions" if first else "", chunk)
+        first = False
+
+    # The main model: one assembly object per object, each referencing the mesh
+    # objects of its own file.
+    resources = ""
+    for object_id, _, members, _ in objects:
+        comps = "".join(
+            f'   <component p:path="/3D/Objects/object_{object_id}.model" '
+            f'objectid="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" '
+            f'transform="{IDENTITY} 0 0 0"/>\n'
+            for p in by_object[object_id]
+        )
+        resources += (
+            f'  <object id="{object_id}" p:UUID="{uuid.uuid4()}" type="model">\n'
+            f'   <components>\n{comps}   </components>\n'
+            '  </object>\n'
+        )
+
+    build_items = "".join(
+        f'  <item objectid="{oid}" p:UUID="{uuid.uuid4()}" '
+        f'transform="{placed[oid]}" printable="1"/>\n'
+        for oid in placed
+    )
+    model = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
+        ' <metadata name="Application">vector2stl</metadata>\n'
+        ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
+        ' <resources>\n' + resources + ' </resources>\n'
+        f' <build p:UUID="{uuid.uuid4()}">\n' + build_items + ' </build>\n'
+        '</model>\n'
+    )
+
+    # One relationship per object file.
+    rels = "".join(
+        f'<Relationship Target="/3D/Objects/object_{oid}.model" '
+        f'Id="rel-{i + 1}"'
+        ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+        for i, (oid, _, _, _) in enumerate(objects)
+    )
+
+    # Colour assignments: one object per combination/version, one part per
+    # colour. The surface pattern is an object-level override of the slicer's
+    # global top/bottom surface pattern, so each combination gets the pattern
+    # it was built for (the meshes are identical; only the slicing differs).
+    settings_objects = "".join(
+        _settings_object_xml(
+            object_id, name,
+            [(p["label"], p["mesh_id"], p["extruder"])
+             for p in by_object[object_id]],
+            pattern)
+        for object_id, name, _, pattern in objects
+    )
+    settings = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n'
+        + settings_objects
+        + _plates_xml(plates, placed)
+        + '</config>\n'
+    )
+
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+        ' <Default Extension="rels"'
+        ' ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
+        ' <Default Extension="model"'
+        ' ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
+        ' <Default Extension="png" ContentType="image/png"/>\n'
+        '</Types>\n'
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+        ' <Relationship Target="/3D/3dmodel.model" Id="rel-1"'
+        ' Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
+        '</Relationships>\n'
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", root_rels)
+        archive.writestr("3D/3dmodel.model", model)
+        archive.writestr(
+            "3D/_rels/3dmodel.model.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + rels + '</Relationships>\n',
+        )
+        for object_id, _, _, _ in objects:
+            object_parts = by_object[object_id]
+            objects_xml = "".join(
+                f'  <object id="{p["mesh_id"]}" p:UUID="{uuid.uuid4()}" type="model">\n'
+                f'   <mesh>{_mesh_xml(p["mesh"])}</mesh>\n'
+                '  </object>\n'
+                for p in object_parts
+            )
+            archive.writestr(
+                f"3D/Objects/object_{object_id}.model",
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                f'<model unit="millimeter" xml:lang="en-US" {MODEL_NS}>\n'
+                ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
+                ' <resources>\n' + objects_xml + ' </resources>\n'
+                ' <build/>\n'
+                '</model>\n',
+            )
+        archive.writestr("Metadata/model_settings.config", settings)
+        archive.writestr(
+            "Metadata/slice_info.config",
+            '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <header>\n'
+            '    <header_item key="X-BBL-Client-Type" value="slicer"/>\n'
+            '    <header_item key="X-BBL-Client-Version" value=""/>\n'
+            '  </header>\n</config>\n',
+        )
+
+    return (len(combos), len(parts),
+            sum(len(p["mesh"].faces) for p in parts),
+            len(plates), len(versions))
 
 
 def ring_json(coords):
@@ -1770,7 +1940,9 @@ def main():
                     help="write one STL per colour group into the output directory")
     ap.add_argument("--variations", action="store_true",
                     help="write one 3MF per permutation of the palette colour "
-                         "groups into the output directory")
+                         "groups into the output directory; the file opens with "
+                         "single-colour and frame-only build plates, and the "
+                         "combinations spill across plates as each fills")
     ap.add_argument("--patterns", default=None, metavar="LIST",
                     help="comma-separated top/bottom surface patterns for the "
                          "--variations export, e.g. concentric,hilbertcurve; "

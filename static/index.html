@@ -212,12 +212,13 @@
   #traceViewport { flex: 1; position: relative; background: #101216;
               border: 1px solid #2a2e35; border-radius: 10px; overflow: hidden;
               min-height: 0; margin-bottom: 10px; }
-  #traceViewport canvas, #traceViewport svg { position: absolute; inset: 0; }
-  #traceEdit { width: 100%; height: 100%; object-fit: contain; cursor: crosshair;
-              touch-action: none; }
+  /* The edited raster and the traced SVG share one stage. The stage is sized
+     to the image's "contain" fit, then translated/scaled by the mouse wheel,
+     so both layers zoom in lock-step about the cursor. */
+  #traceStage { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  #traceEdit { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+              cursor: crosshair; touch-action: none; }
   #traceSvg { position: absolute; inset: 0; pointer-events: none; }
-  /* width/height 100% + the viewBox's xMidYMid meet letterboxes the trace,
-     so it fills the box without distorting. */
   #traceSvg svg { width: 100%; height: 100%; }
   #editColor { width: 100%; height: 26px; padding: 0; border: 1px solid #2a2e35;
               border-radius: 6px; background: #1d2127; cursor: pointer; }
@@ -234,6 +235,24 @@
   #traceModeHint { margin: 0 0 10px; font-size: 11px; color: #6b7280; }
   #traceStats { margin-left: auto; align-self: center; font-size: 12px; }
   #traceUse { background: #16a34a; }
+
+  /* right-click menu over the trace viewport */
+  #traceContextMenu { position: absolute; z-index: 20; min-width: 208px;
+              background: #1d2127; border: 1px solid #3b82f6; border-radius: 8px;
+              padding: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  #traceContextMenu .menu-head { display: flex; justify-content: space-between;
+              align-items: baseline; font-size: 11px; color: #9aa3af;
+              text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+  #traceContextMenu .menu-size-val { color: #3b82f6; font-weight: 700; font-size: 13px; }
+  #traceContextMenu input[type=range] { width: 100%; accent-color: #3b82f6; margin: 4px 0 10px; }
+  #traceContextMenu .menu-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  #traceContextMenu .menu-presets button { margin: 0; padding: 5px 0; font-size: 12px; width: 100%;
+              background: #23282f; color: #cbd5e1; border: 1px solid #2a2e35; border-radius: 6px; }
+  #traceContextMenu .menu-presets button:hover { border-color: #3b82f6; color: #fff; }
+  #traceContextMenu .menu-presets button.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  #traceContextMenu .menu-foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2e35;
+              display: flex; }
+  #traceContextMenu .menu-foot button { margin: 0; width: auto; padding: 5px 10px; font-size: 12px; }
 
   /* start screen */
   #startScreen { padding: 28px; overflow-y: auto; }
@@ -405,8 +424,25 @@
         <span class="muted" id="traceStats"></span>
       </div>
       <div id="traceViewport">
-        <canvas id="traceEdit"></canvas>
-        <div id="traceSvg"></div>
+        <div id="traceStage">
+          <canvas id="traceEdit"></canvas>
+          <div id="traceSvg"></div>
+        </div>
+        <div id="traceContextMenu" hidden>
+          <div class="menu-head"><span>brush size</span><span class="menu-size-val" id="menuSizeVal"></span></div>
+          <input type="range" id="menuSize" min="1" max="60" step="1">
+          <div class="menu-presets">
+            <button data-size="2">2</button>
+            <button data-size="5">5</button>
+            <button data-size="10">10</button>
+            <button data-size="20">20</button>
+            <button data-size="40">40</button>
+            <button data-size="60">60</button>
+          </div>
+          <div class="menu-foot">
+            <button class="ghost" id="traceZoomReset">↺ reset zoom</button>
+          </div>
+        </div>
       </div>
       <div class="slider-row">
         <label for="traceOverlay">overlay opacity</label>
@@ -603,10 +639,10 @@
     <button class="ghost" id="saveProject" hidden title="Save the drawing, settings, colours and holes as one file">Save project</button>
     <button id="download" hidden>Download STL</button>
     <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
-    <button id="export3mf" hidden title="One 3MF with every colour combination and every ticked surface pattern, each merged into a single object">Export 3MF (Snapmaker)</button>
+    <button id="export3mf" hidden title="One 3MF with every colour combination and every ticked surface pattern, each merged into one object and laid out on its own build plates — the file always starts with a single-colour plate and a frame-only plate">Export 3MF (Snapmaker)</button>
     <div id="patternBox">
       <div class="group-title" style="margin-top:10px">3MF surface patterns</div>
-      <div class="muted">How the nozzle fills a region. Every colour combination is repeated once per ticked pattern.</div>
+      <div class="muted">How the nozzle fills a region. Every colour combination is repeated once per ticked pattern; the many versions are split across build plates, and a one-colour and a frame-only plate always come first.</div>
       <div id="patternList">
         <label class="check" title="Fill top/bottom layers with a monotonic line"><input type="checkbox" class="pattern" value="monotonicline"> monotonic line</label>
         <label class="check" title="Fill top/bottom layers monotonically"><input type="checkbox" class="pattern" value="monotonic" checked> monotonic</label>
@@ -2877,6 +2913,9 @@ function traceApplyView() {
   $('traceEdit').style.display = v === 'svg' ? 'none' : 'block';
   $('traceSvg').style.display = v === 'original' ? 'none' : 'block';
   $('traceSvg').style.opacity = v === 'overlay' ? Number($('traceOverlay').value) : 1;
+  // White "paper" behind the traced lines when the SVG is shown alone; in
+  // overlay mode the lines float over the photo, so the background stays clear.
+  $('traceSvg').style.background = v === 'svg' ? '#fff' : 'transparent';
 }
 
 const traceShowStats = (s) => {
@@ -2913,6 +2952,47 @@ let stroking = false;
 let lastPoint = null;
 let editObjectUrl = null;    // the object URL the editor image was loaded from
 
+// Zoom of the trace stage. tx/ty hold the stage translate (base letterbox plus
+// any recentring); zoom is the uniform scale. The wheel zooms about the cursor
+// so the image point under it stays put.
+const TRACE_ZOOM_MIN = 0.2, TRACE_ZOOM_MAX = 8;
+const traceView = { zoom: 1, tx: 0, ty: 0 };
+
+/** The "contain" fit of the image inside the viewport, plus its letterbox. */
+function traceFit() {
+  const c = $('traceEdit');
+  const vp = $('traceViewport');
+  if (!c.width || !c.height || !vp.clientWidth || !vp.clientHeight) {
+    return { fit: 1, bx: 0, by: 0 };
+  }
+  const fit = Math.min(vp.clientWidth / c.width, vp.clientHeight / c.height);
+  return { fit, bx: (vp.clientWidth - c.width * fit) / 2, by: (vp.clientHeight - c.height * fit) / 2 };
+}
+
+/** Size the stage to the fitted image and apply the translate/scale. */
+function applyTraceTransform() {
+  const stage = $('traceStage');
+  const c = $('traceEdit');
+  if (!traceState.source || !c.width || !c.height) {
+    stage.style.width = stage.style.height = '';
+    stage.style.transform = '';
+    return;
+  }
+  const { fit } = traceFit();
+  stage.style.width = `${c.width * fit}px`;
+  stage.style.height = `${c.height * fit}px`;
+  stage.style.transform = `translate(${traceView.tx}px, ${traceView.ty}px) scale(${traceView.zoom})`;
+}
+
+/** Reset the zoom to fit, centring the image in the viewport. */
+function traceResetView() {
+  traceView.zoom = 1;
+  const { bx, by } = traceFit();
+  traceView.tx = bx;
+  traceView.ty = by;
+  applyTraceTransform();
+}
+
 /** Draw the current source image onto the editor canvas at natural size. */
 function loadEditCanvas() {
   const canvas = $('traceEdit');
@@ -2928,6 +3008,7 @@ function loadEditCanvas() {
     ctx.fillStyle = '#ffffff';                // paper behind the source image
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0);
+    traceResetView();                          // fit and centre the fresh image
   };
   img.src = url;
 }
@@ -2947,16 +3028,15 @@ function currentTraceFile() {
   return Promise.resolve(traceState.source);
 }
 
-/** Map a pointer event to canvas pixel coordinates (object-fit contain). */
+/** Map a pointer event to canvas pixel coordinates (stage transform, zoomed). */
 function toCanvasPoint(e) {
   const canvas = $('traceEdit');
-  const r = canvas.getBoundingClientRect();
-  const s = Math.min(r.width / canvas.width, r.height / canvas.height);
-  const dw = canvas.width * s, dh = canvas.height * s;
-  const ox = (r.width - dw) / 2, oy = (r.height - dh) / 2;
-  const x = clamp((e.clientX - r.left - ox) / s, 0, canvas.width);
-  const y = clamp((e.clientY - r.top - oy) / s, 0, canvas.height);
-  return [x, y];
+  const r = $('traceViewport').getBoundingClientRect();
+  const { fit } = traceFit();
+  // Undo translate+scale first, then the "contain" fit, to reach image pixels.
+  const cx = (e.clientX - r.left - traceView.tx) / traceView.zoom;
+  const cy = (e.clientY - r.top - traceView.ty) / traceView.zoom;
+  return [clamp(cx / fit, 0, canvas.width), clamp(cy / fit, 0, canvas.height)];
 }
 
 function drawStrokeTo(p) {
@@ -3020,6 +3100,83 @@ $('editColor').oninput = () => { $('editColorVal').textContent = $('editColor').
 $('editSize').oninput = () => { $('editSizeVal').textContent = $('editSize').value; };
 $('editReset').onclick = resetEdit;
 
+/* Zoom the trace viewport with the wheel, anchored at the cursor. */
+$('traceViewport').addEventListener('wheel', (e) => {
+  if (!traceState.source) return;
+  e.preventDefault();
+  const r = $('traceViewport').getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const next = clamp(traceView.zoom * Math.exp(-e.deltaY * 0.0015), TRACE_ZOOM_MIN, TRACE_ZOOM_MAX);
+  if (next === traceView.zoom) return;
+  const cx = (mx - traceView.tx) / traceView.zoom;   // image point under the cursor
+  const cy = (my - traceView.ty) / traceView.zoom;
+  traceView.zoom = next;
+  traceView.tx = mx - cx * next;                     // keep that point under the cursor
+  traceView.ty = my - cy * next;
+  applyTraceTransform();
+}, { passive: false });
+
+// Keep the stage fit in sync when the viewport is resized or first shown.
+new ResizeObserver(() => {
+  if (!traceState.source || !$('traceEdit').width) return;
+  if (traceView.zoom === 1) {
+    const { bx, by } = traceFit();
+    traceView.tx = bx;
+    traceView.ty = by;
+  }
+  applyTraceTransform();
+}).observe($('traceViewport'));
+
+/* Right-click menu: quick brush sizes plus a zoom reset. */
+const traceContextMenu = $('traceContextMenu');
+
+function syncContextMenu() {
+  const size = $('editSize').value;
+  $('menuSize').value = size;
+  $('menuSizeVal').textContent = size;
+  traceContextMenu.querySelectorAll('.menu-presets button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.size === size));
+}
+
+function openContextMenu(x, y) {
+  syncContextMenu();
+  traceContextMenu.hidden = false;
+  const vp = $('traceViewport');
+  const w = traceContextMenu.offsetWidth, h = traceContextMenu.offsetHeight;
+  traceContextMenu.style.left = `${clamp(x, 8, Math.max(8, vp.clientWidth - w - 8))}px`;
+  traceContextMenu.style.top = `${clamp(y, 8, Math.max(8, vp.clientHeight - h - 8))}px`;
+}
+const closeContextMenu = () => { traceContextMenu.hidden = true; };
+
+$('traceViewport').addEventListener('contextmenu', (e) => {
+  if (!traceState.source) return;
+  e.preventDefault();
+  const r = $('traceViewport').getBoundingClientRect();
+  openContextMenu(e.clientX - r.left, e.clientY - r.top);
+});
+
+$('menuSize').addEventListener('input', () => {
+  $('editSize').value = $('menuSize').value;
+  $('editSizeVal').textContent = $('menuSize').value;
+  syncContextMenu();
+});
+traceContextMenu.querySelectorAll('.menu-presets button').forEach((b) => {
+  b.onclick = () => {
+    $('editSize').value = b.dataset.size;
+    $('editSizeVal').textContent = b.dataset.size;
+    syncContextMenu();
+    closeContextMenu();
+  };
+});
+$('traceZoomReset').onclick = () => { traceResetView(); closeContextMenu(); };
+
+// Close the menu on a click/tap elsewhere, on Escape, or once it scrolls away.
+window.addEventListener('pointerdown', (e) => {
+  if (!traceContextMenu.hidden && !traceContextMenu.contains(e.target)) closeContextMenu();
+}, true);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeContextMenu(); });
+window.addEventListener('wheel', closeContextMenu, { passive: true });
+
 /* Eyedropper: hold Ctrl to turn the cursor into a picker, click to sample the
    colour under it into the pen. */
 let eyedropping = false;
@@ -3054,6 +3211,8 @@ function clearTrace() {
   traceState.edited = false;
   if (editObjectUrl) { URL.revokeObjectURL(editObjectUrl); editObjectUrl = null; }
   $('traceEdit').width = $('traceEdit').height = 0;   // blank until a source loads
+  traceResetView();                                   // clear the zoom/pan transform
+  $('traceContextMenu').hidden = true;
   $('modelTrace').hidden = true;
 }
 
@@ -4362,13 +4521,19 @@ $('export3mf').onclick = async () => {
       throw new Error([info.error ?? res.statusText, info.log].filter(Boolean).join('\n'));
     }
     // One 3MF holding every colour combination, each repeated per pattern.
+    // Every export also carries the whole model in one colour on its own
+    // plate and the frame alone on another, so those always come first.
     const f = info.files[0];
     saveBlob(fromBase64(f.data), 'model/3mf', baseName() + '.3mf');
-    setStatus(`saved ${baseName()}.3mf — ${count(f.variations, 'variation')}`);
     const patPart = f.patterns ? ` × ${f.patterns} patterns` : '';
+    const plainPlates = f.versions ? `, plus ${count(f.versions, 'plain-version plate')}` : '';
+    setStatus(`saved ${baseName()}.3mf — ${count(f.variations, 'variation')}`
+      + ` across ${count(f.plates, 'build plate')}${plainPlates}`);
     stats.textContent = `${f.combinations} colour combinations${patPart}`
       + ` = ${f.variations} objects · ${f.parts} parts · `
-      + `${f.triangles.toLocaleString()} triangles`;
+      + `${f.triangles.toLocaleString()} triangles\n`
+      + 'plates: single colour · frame only'
+      + (f.plates > 2 ? ' · colour/pattern versions' : '');
   } catch (e) {
     setStatus(String(e.message ?? e), true);
   } finally {

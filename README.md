@@ -533,12 +533,14 @@ project name cannot hold become `-`.
   combination**: the colour groups (which faces are printed together) stay put,
   while the colours trade places across them. A two-colour model has two
   combinations, three colours six, and so on — every permutation. Each
-  combination is written as one merged object, laid out side by side on the
-  plate. The frame keeps its own colour throughout. Under the button, the
-  **3MF surface patterns** checkboxes repeat every combination once per ticked
-  pattern — hilbert curve, concentric, monotonic and friends — so one file
-  compares every colour arrangement against every fill pattern. See *3MF*
-  below.
+  combination is written as one merged object. Every export also always
+  carries the two plain printable versions on their own **build plates** — the
+  whole model in one colour, and the frame alone — and the combinations fill
+  the remaining plates, one plate at a time (see *3MF* below). Under the
+  button, the **3MF surface patterns** checkboxes repeat every combination
+  once per ticked pattern — hilbert curve, concentric, monotonic and friends —
+  so one file compares every colour arrangement against every fill pattern.
+  See *3MF* below.
 - **Export STLs by colour** — one STL per hue, named for the hue in use
   (`…-1-orange.stl`, `…-2-teal.stl`, …), for multi-material printing. Each
   *layer* goes to its own colour's file, so a stacked face is split across them
@@ -585,13 +587,40 @@ each, but the extruder a group gets is swapped, so `orange-green` and
 repainting. The frame (an unnumbered group) keeps its extruder in every
 combination; only the numbered palette rows trade places.
 
+### Build plates
+
+The slicer's project format groups the build into **plates** — `Metadata/
+model_settings.config` holds one `<plate>` per plate with its `model_instance`
+list, and an `<assemble>` block places every object on its plate. The export
+uses that to keep every version printable without overflowing the bed:
+
+| Plate | Name | What is on it |
+| --- | --- | --- |
+| 1 | `single_color_version` | the whole relief — faces and frame — as one colour on one extruder, for a single-spool test print |
+| 2 | `frame_only_version` | just the frame (the unnumbered groups), for checking the rim alone |
+| 3+ | `multi_color_versions` (then unnamed) | the colour/pattern combinations, as many as fit, spilling onto the next plate |
+
+Plates 1 and 2 are built from the *same* meshes as the combinations — nothing
+new to model — so they add no geometry work, only their own object files the
+way every combination already has one. A drawing with no faces ships only what
+it has: a frame-only drawing gets its one combination and no version plates.
+When the frame is *mixed* (its layers filed under the palette rows) there is no
+unnumbered frame volume left to print alone, so that model skips the frame-only
+plate. The example `example_3dobject_versions.3mf` in the project root shows
+the same three plates hand-made in the slicer. A plain colour-split 3MF
+(an output path ending `.3mf` without `--variations`) keeps its colour parts
+on the first, unnamed plate and adds the two version plates after it.
+
 ### Surface patterns
 
 The **3MF surface patterns** checkboxes add a second axis to that grid: every
 colour combination is repeated once per ticked pattern, so a three-colour model
-with four patterns comes back as 24 objects laid out side by side. A pattern is
-how the slicer's nozzle travels to fill a solid layer — the top and bottom
-surfaces of the relief. The checkboxes are the eight the slicer knows:
+with four patterns comes back as 24 objects. Each plate is filled before the
+next one starts, so a big comparison simply arrives on several build plates
+(plate 1 the single-colour version, plate 2 the frame-only version, then the
+colour/pattern plates). A pattern is how the slicer's nozzle travels to fill a
+solid layer — the top and bottom surfaces of the relief. The checkboxes are the
+eight the slicer knows:
 
 | Checkbox | 3MF value | What the nozzle draws |
 | --- | --- | --- |
@@ -661,7 +690,9 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --stacks stacks.json
 .venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --split
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.3mf  --stacks stacks.json
-# one 3MF with every colour permutation, each repeated per surface pattern
+# one 3MF with every colour permutation, each repeated per surface pattern;
+# it always starts with single-colour and frame-only plates, and the many
+# combinations spill across further build plates as each one fills
 .venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --variations \
     --patterns concentric,hilbertcurve,archimedeanchords,monotonic
 # keep the model inside its outermost line instead of straddling it
@@ -689,7 +720,8 @@ The converter runs standalone:
 A face is a stack of layers, bottom first, each with a thickness `t` and a
 colour group `g`; `--heights` is the shorthand for a stack one layer deep.
 `--split` writes one STL per group into the output directory instead of a
-single file; an output named `.3mf` writes a 3MF project instead.
+single file; an output named `.3mf` writes a 3MF project instead, with the
+single-colour and frame-only version plates always included.
 
 `--also` is repeatable, in stacking order: each extra drawing is centred on
 the base drawing and sits on the frame top of the one below it. Everything
@@ -718,7 +750,7 @@ go to stderr.
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/convert` | `file` + settings + `stacks` → STL body, stats in the `x-stats` header |
 | `POST /api/export` | as above plus `groups` → JSON listing one base64 STL per group |
-| `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders; a `patterns` field (comma-separated) repeats every colour combination per pattern |
+| `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders; a `patterns` field (comma-separated) repeats every colour combination per pattern. Every export opens with a single-colour and a frame-only build plate and spreads the combinations across further plates |
 | `GET /api/example.dxf` | the bundled `sketch.dxf` |
 | `GET /api/default-profile.dxf` | the bundled sweep profile (404 if absent) |
 | `GET /api/projects` | the saved projects, newest first, each with a `thumb` flag |
