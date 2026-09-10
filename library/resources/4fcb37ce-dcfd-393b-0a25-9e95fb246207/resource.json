@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "4fcb37ce-dcfd-393b-0a25-9e95fb246207",
+  "name": "window_positive - veryos_basic_lantern_pattern",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:36.758Z",
+  "updated": "2026-09-10T10:37:36.758Z",
+  "revision": "defe4027-a993-46db-800b-4e84d2d790c8",
+  "files": {
+    "drawing": {
+      "name": "window_positive - veryos_basic_lantern_pattern.dxf",
+      "path": "revisions/defe4027-a993-46db-800b-4e84d2d790c8/drawing.dxf"
+    }
+  },
+  "trace": null
+}

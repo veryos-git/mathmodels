@@ -37,7 +37,8 @@
   #drop:hover, #drop.over { border-color: #3b82f6; background: #1a2130; color: #cbd5e1; }
   #drop strong { color: #ddd; display: block; word-break: break-all; }
   #drop small { color: #6b7280; }
-  #file, #profileFile, #fileAdd, #boundaryFile { display: none; }
+  #file, #profileFile, #fileAdd, #boundaryFile,
+  #libPickFile, #libEditFileInput { display: none; }
 
   /* min-width:0 beats the UA's min-content sizing: without it the palette's
      widest row pushes the whole sidebar out instead of scrolling inside it */
@@ -308,6 +309,55 @@
   #exportBox button { margin-top: 8px; }
   #exportBox button:first-of-type { margin-top: 0; }
 
+  /* SVG library screen — every uploaded drawing kept as a reusable resource */
+  .lib-main { flex: 1; overflow-y: auto; padding: 20px 28px; }
+  .lib-note { margin: 0 0 16px; max-width: 760px; }
+  #libraryGrid .project-tile { cursor: pointer; }
+  #libraryGrid .kind-chip { position: absolute; left: 6px; top: 6px; background: rgba(20,22,26,.85);
+      border: 1px solid #2a2e35; color: #9aa3af; font-size: 10px; font-weight: 600;
+      padding: 1px 6px; border-radius: 5px; letter-spacing: .05em; }
+  #libraryCount { flex: none; }
+
+  /* the picker and the entry editor share one overlay chrome */
+  #libraryPicker, #libEditor { position: fixed; inset: 0; z-index: 40;
+      background: rgba(8,10,13,.74); display: grid; place-items: center; padding: 24px; }
+  #libraryPicker[hidden], #libEditor[hidden] { display: none; }
+  #libraryPickerBox { width: min(860px, 100%); height: min(620px, 100%); background: #14161a;
+      border: 1px solid #2a2e35; border-radius: 10px; display: grid;
+      grid-template-rows: auto 1fr; overflow: hidden; }
+  #libraryPickerBox header, #libEditorBox header { display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-bottom: 1px solid #2a2e35; }
+  #libraryPickerBox header .muted, #libEditorBox header .muted { flex: 1; }
+  #libraryPickerBox button, #libEditorBox button { margin: 0; width: auto; padding: 7px 12px; font-size: 13px; }
+  #libPickGrid { overflow-y: auto; padding: 18px; }
+  #libPickGrid .project-tile { cursor: pointer; }
+  #libPickGrid .tile-actions { opacity: 1; }   /* hover-action tiles feel tappable on touch */
+  #libPickGrid .tile-actions button { display: none; }
+
+  #libEditorBox { width: min(920px, 100%); height: min(680px, 100%); background: #14161a;
+      border: 1px solid #2a2e35; border-radius: 10px; display: grid;
+      grid-template-rows: auto 1fr auto; overflow: hidden; }
+  #libEditorBox header .muted { flex: 1; }
+  #libEditorBox footer { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+      border-top: 1px solid #2a2e35; }
+  #libEditorBox footer .muted { flex: 1; }
+  .lib-edit-body { display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
+  .lib-edit-body aside { padding: 14px 16px; border-right: 1px solid #2a2e35; overflow-y: auto; }
+  .lib-edit-body main { min-height: 0; display: flex; }
+  #libEditSource { flex: 1; min-width: 0; border: 0; resize: none; padding: 12px;
+      background: #16181d; color: #ddd; font: 13px/1.5 ui-monospace, monospace; }
+  #libEditSource:focus-visible { outline: none; }
+  #libEditSource:disabled { color: #4b5563; }
+  #libEditKind { width: 100%; padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
+      border-radius: 6px; color: #ddd; }
+  .lib-preview { height: 150px; border: 1px dashed #3a4049; border-radius: 8px; margin-top: 6px;
+      background: #101216; display: grid; place-items: center; overflow: hidden;
+      padding: 6px; font-size: 11px; text-align: center; }
+  .lib-preview img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  #libEditFile { margin-top: 6px; word-break: break-word; }
+  #libEditStatus { margin-top: 10px; white-space: pre-wrap; }
+  #libEditStatus.error { color: #f87171; }
+
   @media (max-width: 720px) {
     .model-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     .model-layout aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
@@ -315,6 +365,9 @@
     .trace-layout aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
     .screen-bar { flex-wrap: wrap; row-gap: 6px; }
     .screen-bar .bar-name { flex: 1 1 140px; }
+    #libraryPickerBox { width: 100%; height: 100%; }
+    .lib-edit-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .lib-edit-body aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
   }
 </style>
 </head>
@@ -349,6 +402,7 @@
 
     <div class="start-projects-head">
       <h2>Saved projects</h2>
+      <button class="ghost" id="startLibrary" title="Every SVG or DXF you upload is kept here as a reusable drawing — manage them, or start a model from one">Resource library…</button>
     </div>
     <div id="startProjects" class="project-grid muted">nothing saved on the server yet</div>
   </div>
@@ -361,6 +415,7 @@
   <header class="screen-bar">
     <button class="ghost" id="traceBack">← Back</button>
     <span class="title">Trace <span class="muted" id="traceName"></span></span>
+    <button class="ghost" id="savePattern">Save pattern…</button>
     <button id="traceUse" disabled>Create 3D model →</button>
   </header>
   <div class="trace-layout">
@@ -475,6 +530,12 @@
   <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml,image/png,image/jpeg,image/gif,image/webp">
   <button class="ghost" id="example">Use the example sketch</button>
 
+  <div class="seed-row" style="margin-top:8px"
+       title="Swap the drawing for one already saved in the library — a loaded boundary (frame) and its placement stay put, so you can try subjects quickly without re-uploading">
+    <button class="ghost" id="subjectLibrary">subject from library…</button>
+    <span class="muted" style="align-self:center">saved SVG / DXF</span>
+  </div>
+
   <fieldset id="layerBox" hidden>
     <legend>layers</legend>
     <div id="layers"></div>
@@ -484,6 +545,10 @@
     <legend>drawings</legend>
     <div id="drawings"></div>
     <button class="ghost" id="addDrawing" title="Stack another DXF or SVG on top of this model">add drawing…</button>
+    <div class="seed-row" style="margin-top:6px">
+      <button class="ghost" id="addDrawingLibrary" title="Stack a drawing that is already saved in the library">from library…</button>
+      <span class="muted" style="align-self:center">saved drawing</span>
+    </div>
   </fieldset>
   <input type="file" id="fileAdd" accept=".dxf,.svg,application/dxf,image/svg+xml">
 
@@ -493,6 +558,11 @@
       <button class="ghost" id="boundaryPick">boundary…</button>
       <span class="muted" id="boundaryName">off — the whole drawing</span>
       <button class="ghost" id="boundaryClear" hidden title="Use the whole drawing again">✕</button>
+    </div>
+    <div class="seed-row" style="margin-top:6px"
+         title="Use one of the drawings saved in the library as the boundary — a closed outline becomes the frame that crops the subject">
+      <button class="ghost" id="boundaryLibrary">from library…</button>
+      <span class="muted" style="align-self:center">saved frame</span>
     </div>
     <input type="file" id="boundaryFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
     <div id="boundaryOpts" hidden>
@@ -541,6 +611,10 @@
     <button class="ghost" id="profilePick">sweep profile…</button>
     <span class="muted" id="profileName">off — flat walls</span>
     <button class="ghost" id="profileClear" hidden title="Back to flat walls">✕</button>
+  </div>
+  <div class="seed-row" style="margin-top:6px">
+    <button class="ghost" id="profileLibrary" title="Sweep the frame along a cross-section saved in the library">from library…</button>
+    <span class="muted" style="align-self:center">saved section</span>
   </div>
   <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
   <div class="row" id="profileScaleRow" hidden>
@@ -710,6 +784,94 @@
 </main>
   </div>
 </section>
+
+<section id="libraryScreen" class="screen" hidden>
+  <header class="screen-bar">
+    <button class="ghost" id="libraryBack">← Back</button>
+    <span class="title">Resource library</span>
+    <span class="muted" id="libraryCount"></span>
+
+  </header>
+  <main class="lib-main">
+    <p class="lib-note muted">Save reusable inputs here, then create and save 3D model projects with their own dimensions and face painting.
+      In the image editor, “Save pattern” keeps your original image, paint edits, trace settings and resulting SVG together.</p>
+    <fieldset>
+      <legend>Reusable resources</legend>
+      <p class="muted">Named patterns, fitting boundaries and sweep profiles. Traced patterns keep the original image, paint edits, settings and SVG. Choose a category before adding or organizing a drawing; All resources adds a pattern.</p>
+      <label for="resourceKind">Show</label>
+      <select id="resourceKind"><option value="">All resources</option><option value="pattern">Patterns</option><option value="boundary">Boundaries</option><option value="profile">Profiles</option></select>
+      <button class="ghost" id="resourceImport">Import saved project resources</button>
+      <button class="ghost" id="resourceUpload">Add SVG / DXF…</button>
+      <input id="resourceFile" type="file" accept=".svg,.dxf" hidden>
+      <div id="resourceStatus" role="status" class="muted"></div>
+      <div id="resourceGrid" class="project-grid"></div>
+    </fieldset>
+    <details><summary>Uncategorized drawings from earlier uploads</summary>
+    <p class="muted">Use “Organize” to keep a drawing as a named resource in the selected category above.</p>
+    <input type="text" id="libraryFilter" class="bar-name" placeholder="filter…"
+           title="Show only library entries whose name contains this">
+    <button class="ghost" id="libraryImport"
+            title="Unpack the drawings saved inside your projects on the server and add them to the library — subjects, stacked drawings and boundaries, deduplicated">import from projects…</button>
+    <button class="ghost" id="libraryNew" title="Add a drawing to the library — upload a file or paste SVG markup">+ New</button>
+    <div id="libraryMsg" class="lib-note muted" hidden></div>
+    <div id="libraryGrid" class="project-grid muted">loading the library…</div>
+    </details>
+  </main>
+</section>
+
+<!-- picker: choose a library drawing for the model screen's slots -->
+<div id="libraryPicker" hidden>
+  <div id="libraryPickerBox" role="dialog" aria-modal="true" aria-label="Library picker">
+    <header>
+      <strong id="libPickTitle">Pick a drawing</strong>
+      <span class="muted" id="libPickNote"></span>
+      <button class="ghost" id="libPickNew" title="Upload a file, keep it in the library, and use it right away">+ add file…</button>
+      <button class="ghost" id="libPickManage" title="Open the library page to edit or delete entries">manage…</button>
+      <button class="ghost" id="libPickClose" title="Close (Esc)">✕</button>
+    </header>
+    <div id="libPickGrid" class="project-grid muted">loading the library…</div>
+    <input type="file" id="libPickFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
+  </div>
+</div>
+
+<!-- editor: create / update a library entry (name, file or pasted SVG, preview) -->
+<div id="libEditor" hidden>
+  <div id="libEditorBox" role="dialog" aria-modal="true" aria-label="Library entry editor">
+    <header>
+      <strong id="libEditTitle">New drawing</strong>
+      <span class="muted" id="libEditMode"></span>
+      <button class="ghost" id="libEditClose" title="Close (Esc)">✕</button>
+    </header>
+    <div class="lib-edit-body">
+      <aside>
+        <label for="libEditName">name</label>
+        <input type="text" id="libEditName" placeholder="flower window.svg">
+        <label for="libEditKind">kind</label>
+        <select id="libEditKind">
+          <option value="svg">SVG</option>
+          <option value="dxf">DXF</option>
+        </select>
+        <div class="muted" id="libEditKindHint">SVG can be pasted below; DXF is loaded from a file.</div>
+        <button class="ghost" id="libEditPick" title="Fill the content from a .dxf or .svg file">load from file…</button>
+        <div class="muted" id="libEditFile">no file loaded — paste SVG markup instead</div>
+        <input type="file" id="libEditFileInput" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
+        <div class="group-title" style="margin-top:12px">preview</div>
+        <div id="libEditPreview" class="lib-preview muted">paste SVG to see it here</div>
+        <div id="libEditStatus" class="muted"></div>
+      </aside>
+      <main>
+        <textarea id="libEditSource" spellcheck="false"
+          placeholder="&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 100 100&quot;&gt;&#10;  &lt;!-- draw paths, or paste a traced / exported SVG here --&gt;&#10;&lt;/svg&gt;"></textarea>
+      </main>
+    </div>
+    <footer>
+      <span class="muted" id="libEditFoot">saved entries can be picked later as subject, boundary or profile</span>
+      <button class="ghost" id="libEditDelete" hidden>Delete</button>
+      <button class="ghost" id="libEditCancel">Cancel</button>
+      <button id="libEditSave">Save to library</button>
+    </footer>
+  </div>
+</div>
 
 <script type="importmap">
 { "imports": {
@@ -2135,9 +2297,8 @@ async function setProfile(file) {
 }
 
 $('profilePick').onclick = () => $('profileFile').click();
-$('profileFile').onchange = async (e) => {
-  const file = e.target.files[0];
-  e.target.value = '';              // picking the same file twice still fires
+/** Load a sweep-profile drawing (from the file dialog or the library). */
+async function applyProfileFile(file) {
   if (!file) return;
   if (!DRAWING.test(file.name)) {
     return setStatus('the profile must be a .dxf or .svg file', true);
@@ -2147,9 +2308,15 @@ $('profileFile').onchange = async (e) => {
     if (drawing) fitToYSize();
     refit(`frame swept from ${file.name} — a ${profileDims.x.toFixed(1)} × `
       + `${profileDims.y.toFixed(1)} mm section`);
+    libraryRemember(file);        // keep the upload for later, quietly
   } catch (err) {
     setStatus(String(err.message ?? err), true);
   }
+}
+$('profileFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';              // picking the same file twice still fires
+  await applyProfileFile(file);
 };
 $('profileClear').onclick = async () => {
   await setProfile(null);
@@ -2216,9 +2383,8 @@ async function setBoundary(file) {
 }
 
 $('boundaryPick').onclick = () => $('boundaryFile').click();
-$('boundaryFile').onchange = async (e) => {
-  const file = e.target.files[0];
-  e.target.value = '';              // picking the same file twice still fires
+/** Load a boundary drawing (from the file dialog or the library). */
+async function applyBoundaryFile(file) {
   if (!file) return;
   if (!DRAWING.test(file.name)) {
     return setStatus('the boundary must be a .dxf or .svg file', true);
@@ -2230,9 +2396,15 @@ $('boundaryFile').onchange = async (e) => {
     useBoundarySize();
     refit(`cropped to ${file.name} — frame fixed at 1:1 (${boundaryDims.x.toFixed(1)} × `
       + `${boundaryDims.y.toFixed(1)} mm)`);
+    libraryRemember(file);        // keep the upload for later, quietly
   } catch (err) {
     setStatus(String(err.message ?? err), true);
   }
+}
+$('boundaryFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';              // picking the same file twice still fires
+  await applyBoundaryFile(file);
 };
 $('boundaryClear').onclick = async () => {
   await setBoundary(null);
@@ -2795,12 +2967,13 @@ async function removeDrawing(li) {
 }
 
 $('addDrawing').onclick = () => $('fileAdd').click();
-$('fileAdd').onchange = (e) => {
+$('fileAdd').onchange = async (e) => {
   const file = e.target.files[0];
   e.target.value = '';              // picking the same file twice still fires
   if (!file) return;
   if (!DRAWING.test(file.name)) return setStatus('stack a .dxf or .svg file', true);
-  addDrawing(file);
+  await addDrawing(file);
+  libraryRemember(file);            // keep the upload for later, quietly
 };
 
 const drop = $('drop');
@@ -2819,11 +2992,12 @@ function accept(file) {
   }
   // A drawing dropped onto work already in progress is ambiguous: it can
   // replace the model, or be stacked on top of it as another layer.
-  if (baseModel() && !confirm(`Start again from ${file.name}?\n\n`
-      + 'Cancel to stack it on top of this model instead.')) {
-    return addDrawing(file);
-  }
-  return pickFile(file);
+  const add = baseModel() && !confirm(`Start again from ${file.name}?\n\n`
+    + 'Cancel to stack it on top of this model instead.');
+  const out = add ? addDrawing(file) : pickFile(file);
+  // Remember uploads (both replace and stack) so they can be reused later.
+  out.then(() => libraryRemember(file)).catch(() => {});
+  return out;
 }
 
 for (const type of ['dragenter', 'dragover']) {
@@ -2864,11 +3038,14 @@ const DEFAULT_TRACE_PARAMS = {
 };
 
 const traceState = {
+  original: null,
+  resource: null,
   source: null,        // File — the raster being traced (null when nothing is)
   id: null,            // server id of the uploaded raster
   name: '',            // source filename, for the legend and the SVG name
   svg: '',             // the current traced SVG
   svgFile: null,       // the File built from svg when "Create 3D model" was pressed
+  committedSource: null, // image that produced the model drawing
   committedParams: null, // the params that produced the committed SVG
   params: { ...DEFAULT_TRACE_PARAMS },
   view: 'svg',
@@ -2932,8 +3109,9 @@ function showScreen(name) {
   $('startScreen').hidden = name !== 'start';
   $('traceScreen').hidden = name !== 'trace';
   $('modelScreen').hidden = name !== 'model';
+  $('libraryScreen').hidden = name !== 'library';
+  if (name === 'library') showLibrary();
 }
-
 let traceReturn = 'start';   // where "Back" from the trace screen returns
 
 /** Fill the trace screen from traceState (the screen itself is shown via showScreen). */
@@ -2994,22 +3172,29 @@ function traceResetView() {
 }
 
 /** Draw the current source image onto the editor canvas at natural size. */
+let editCanvasReady = Promise.resolve();
 function loadEditCanvas() {
   const canvas = $('traceEdit');
   if (!traceState.source) { canvas.width = canvas.height = 0; return; }
+  if (traceState.edited && canvas.width) return;
   const url = URL.createObjectURL(traceState.source);
   if (editObjectUrl) URL.revokeObjectURL(editObjectUrl);
   editObjectUrl = url;
   const img = new Image();
-  img.onload = () => {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';                // paper behind the source image
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
-    traceResetView();                          // fit and centre the fresh image
-  };
+  editCanvasReady = new Promise((resolve, reject) => {
+    img.onerror = () => reject(new Error('Could not load source image'));
+    img.onload = () => {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      traceResetView();
+      resolve();
+    };
+  });
+  editCanvasReady.catch((error) => traceError(error.message));
   img.src = url;
 }
 
@@ -3081,6 +3266,7 @@ editCanvas.addEventListener('pointerup', (e) => {
 editCanvas.addEventListener('pointercancel', finishStroke);
 
 function resetEdit() {
+  traceState.source = traceState.original ?? traceState.source;
   traceState.edited = false;
   loadEditCanvas();
   traceState.id = null;
@@ -3204,6 +3390,10 @@ window.addEventListener('keyup', (e) => { if (e.key === 'Control') setEyedroppin
 window.addEventListener('blur', () => setEyedropping(false));
 
 function clearTrace() {
+  traceState.original = traceState.resource = null;
+  traceState.committedParams = traceState.committedSource = null;
+  traceState.seq++;
+  clearTimeout(traceTimer);
   traceState.source = traceState.svgFile = null;
   traceState.id = null;
   traceState.name = '';
@@ -3257,6 +3447,7 @@ async function runTrace() {
     traceApplyView();
     traceShowStats(data.stats);
     $('traceUse').disabled = false;
+    return true;
   } catch (err) {
     traceError('trace failed: ' + (err.message ?? err));
   }
@@ -3266,6 +3457,7 @@ async function startTrace(file, ret = 'start') {
   clearTrace();
   traceReturn = ret;
   setEditTool('pen');                 // the pen is the default editing tool
+  traceState.original = file;
   traceState.source = file;
   traceState.name = file.name.replace(/\.[^.]+$/, '');
   traceState.params = { ...DEFAULT_TRACE_PARAMS };
@@ -3278,14 +3470,27 @@ async function startTrace(file, ret = 'start') {
 }
 
 /** Hand the traced SVG over to the relief builder as the current drawing. */
-function useTrace() {
-  if (!traceState.svg) return;
-  const name = (traceState.name || 'trace').replace(/\.[^.]+$/, '') + '.svg';
-  traceState.committedParams = { ...traceState.params };
-  traceState.svgFile = new File([traceState.svg], name, { type: 'image/svg+xml' });
-  $('modelTrace').hidden = false;
-  showScreen('model');
-  pickFile(traceState.svgFile);
+async function useTrace() {
+  if (!traceState.source) return;
+  $('traceScreen').inert = true;
+  try {
+    await editCanvasReady;
+    clearTimeout(traceTimer);
+    if (!await runTrace()) return;
+    const name = (traceState.name || 'trace').replace(/\.[^.]+$/, '') + '.svg';
+    traceState.committedParams = { ...traceState.params };
+    traceState.committedSource = await currentTraceFile();
+    traceState.svgFile = new File([traceState.svg], name, { type: 'image/svg+xml' });
+    traceState.svgFile.resource = traceState.resource;
+    $('modelTrace').hidden = false;
+    await pickFile(traceState.svgFile);
+    showScreen('model');
+    libraryRemember(traceState.svgFile);
+  } catch (error) {
+    traceError(error.message ?? String(error));
+  } finally {
+    $('traceScreen').inert = false;
+  }
 }
 
 $('traceBack').onclick = () => {
@@ -3338,10 +3543,12 @@ $('startTraceFile').onchange = (e) => {
 };
 
 $('startSvg').onclick = () => $('startSvgFile').click();
-$('startSvgFile').onchange = (e) => {
+$('startSvgFile').onchange = async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
-  if (file) openDrawing(file);
+  if (!file) return;
+  await openDrawing(file);
+  libraryRemember(file);            // starting from an upload keeps it reusable
 };
 
 $('startProjectFile').onclick = () => $('startProjectFileInput').click();
@@ -3682,24 +3889,28 @@ async function fileBase64(file) {
  */
 async function buildProject() {
   const stacked = layers.length > 1;
+  const traceFile = picked === traceState.svgFile && traceState.source
+    ? traceState.committedSource ?? await currentTraceFile() : null;
   const project = {
     format: PROJECT_FORMAT,
     version: stacked ? 2 : 1,
     saved: new Date().toISOString(),
-    drawing: { name: picked.name, data: await fileBase64(picked) },
+    drawing: { name: picked.name, data: await fileBase64(picked), resource: picked.resource ?? null },
     // A drawing that came from a trace keeps the raster and its settings, so
     // the trace can be re-tuned after reopening the project.
     trace: picked === traceState.svgFile && traceState.source
       ? {
-        source: { name: traceState.source.name, data: await fileBase64(await currentTraceFile()) },
+        source: { name: traceFile.name, data: await fileBase64(traceFile) },
+        original: { name: (traceState.original ?? traceState.source).name, data: await fileBase64(traceState.original ?? traceState.source) },
+        resource: traceState.resource,
         params: traceState.committedParams ?? traceState.params,
       }
       : null,
     profile: profilePicked
-      ? { name: profilePicked.name, data: await fileBase64(profilePicked) }
+      ? { name: profilePicked.name, data: await fileBase64(profilePicked), resource: profilePicked.resource ?? null }
       : null,
     boundary: boundaryPicked
-      ? { name: boundaryPicked.name, data: await fileBase64(boundaryPicked) }
+      ? { name: boundaryPicked.name, data: await fileBase64(boundaryPicked), resource: boundaryPicked.resource ?? null }
       : null,
     // layerHeight and ySize never reach the server — one drives the palette,
     // the other the scale — but the work is not the same without them, so they
@@ -3728,6 +3939,7 @@ async function buildProject() {
     // stacked on it, painting and all, follow in order.
     project.drawings = await Promise.all(layers.slice(1).map(async (l) => ({
       name: l.file.name,
+      resource: l.file.resource ?? null,
       data: await fileBase64(l.file),
       scale: l.scale,
       layers: layerFilter(layers.indexOf(l)),
@@ -3802,7 +4014,9 @@ function restoreTrace(project) {
   const t = project.trace;
   if (!t?.source?.data) { $('modelTrace').hidden = true; return; }
   const srcFile = new File([fromBase64(t.source.data)], t.source.name || 'source.png');
-  traceState.source = srcFile;
+  traceState.original = t.original?.data ? new File([fromBase64(t.original.data)], t.original.name) : srcFile;
+  traceState.resource = t.resource ?? null;
+  traceState.source = traceState.committedSource = srcFile;
   traceState.edited = false;            // the saved image is the starting point
   traceState.id = null;                 // re-uploaded on the next re-trace
   traceState.name = t.source.name || '';
@@ -3897,7 +4111,9 @@ async function applyProject(project) {
 
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
-  await pickFile(new File([bytes], project.drawing.name || 'drawing.dxf'), false);
+  await pickFile(Object.assign(new File([bytes], project.drawing.name || 'drawing.dxf'), { resource: project.drawing.resource ?? null }), false);
+  if (profilePicked) profilePicked.resource = project.profile?.resource ?? null;
+  if (boundaryPicked) boundaryPicked.resource = project.boundary?.resource ?? null;
   restoreTrace(project);
   restoreLayers(project.layers ?? '');
   layers[0].holes = Array.isArray(project.holes) ? project.holes : [];
@@ -3909,7 +4125,7 @@ async function applyProject(project) {
   let lost = 0;
   for (const saved of (Array.isArray(project.drawings) ? project.drawings : [])) {
     if (!saved?.data) { lost++; continue; }
-    const l = newLayer(new File([fromBase64(saved.data)], saved.name || 'drawing.dxf'));
+    const l = newLayer(Object.assign(new File([fromBase64(saved.data)], saved.name || 'drawing.dxf'), { resource: saved.resource ?? null }));
     l.picks = saved.layers ? String(saved.layers).split(',') : null;
     layers.push(l);
     try {
@@ -4576,6 +4792,773 @@ $('exportZip').onclick = async () => {
   } finally {
     $('exportZip').disabled = false;
   }
+};
+
+/* ============================================================== library */
+
+// Drawings kept on the server as reusable resources. Every SVG/DXF uploaded
+// while working is remembered here automatically (see libraryRemember), and
+// the model screen can swap any of them in as the subject, a boundary, a
+// stacked drawing or a sweep profile — no re-uploading. The library screen
+// lists them all and can create, update or delete entries.
+
+const LIB_EXT = /\.(svg|dxf)$/i;
+let lib = [];                // [{ name, kind, size, saved }], newest first
+let libFilter = '';          // the library page's name filter
+let libReturn = 'start';     // where ← on the library screen goes back to
+let libPreviews = new Map(); // library name -> object URL of a rendered preview
+let libEditEntry = null;     // the entry the editor is editing (null = new)
+let libEditFile = null;      // a file loaded into the editor replaces content
+
+const libKB = (bytes) => bytes >= 1048576
+  ? `${(bytes / 1048576).toFixed(1)} MB`
+  : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+async function fetchLibrary() {
+  const res = await fetch('/api/library');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? res.statusText);
+  return data.entries ?? [];
+}
+
+/** The bytes of one library entry, as a fresh File the model can use. */
+async function libraryContentBlob(name) {
+  const res = await fetch(`/api/library/${encodeURIComponent(name)}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? res.statusText);
+  }
+  return res.blob();
+}
+const libraryFileFrom = async (entry) =>
+  new File([await libraryContentBlob(entry.name)], entry.name, {
+    type: entry.kind === 'svg' ? 'image/svg+xml' : 'application/dxf',
+  });
+
+/** A multipart body carrying an uploaded file (used for create and update). */
+const uploadForm = (file, name) => {
+  const form = new FormData();
+  form.append('file', file);
+  if (name) form.append('name', name);
+  return form;
+};
+
+/** Re-fetch the list and repaint whatever library surface is on screen. */
+async function refreshLibrary() {
+  try {
+    lib = await fetchLibrary();
+  } catch {
+    // The library is a convenience — never block the model on it.
+    return;
+  }
+  if (currentScreen === 'library') renderLibraryPage();
+  if (!$('libraryPicker').hidden) renderPickerGrid();
+}
+
+/** Ask the server to remember an uploaded drawing, quietly and idempotently. */
+async function libraryRemember(file) {
+  if (!file || file.resource || !LIB_EXT.test(file.name)) return;
+  try {
+    const entries = await fetchLibrary();
+    const base = file.name.replace(LIB_EXT, '')
+      .replace(/[^A-Za-z0-9 ._()-]+/g, '-').replace(/^[\s.]+/, '').trim();
+    const ext = file.name.toLowerCase().endsWith('.svg') ? '.svg' : '.dxf';
+    let name = `${base || 'drawing'}${ext}`;
+    const same = entries.find((e) => e.name === name);
+    if (same && same.size === file.size) {
+      const existing = new Uint8Array(await (await libraryContentBlob(name)).arrayBuffer());
+      const incoming = new Uint8Array(await file.arrayBuffer());
+      if (existing.every((byte, i) => byte === incoming[i])) return;
+    }
+    const taken = new Set(entries.map((e) => e.name));
+    // A same-named but different upload is kept too, under "name (2).ext" —
+    // the library is a history of what was worked on, never a silent loss.
+    if (same) for (let n = 2; taken.has(name); n++) name = `${base} (${n})${ext}`;
+    if (taken.has(name)) return;
+    const res = await fetch('/api/library', { method: 'POST', body: uploadForm(file, name) });
+    if (!res.ok) return;
+    await refreshLibrary();
+  } catch {
+    // An unreadable upload must never interrupt the model.
+  }
+}
+
+/* ------------------------------------------------------------ the tiles */
+
+function libraryTile(entry, opts = {}) {
+  const tile = document.createElement('div');
+  tile.className = 'project-tile';
+  if (opts.onOpen) {
+    tile.tabIndex = 0; tile.setAttribute('role', 'button');
+    tile.onclick = () => opts.onOpen(entry);
+    tile.onkeydown = (event) => {
+      if (event.target === tile && ['Enter', ' '].includes(event.key)) { event.preventDefault(); opts.onOpen(entry); }
+    };
+  }
+
+  const thumb = document.createElement('div');
+  thumb.className = 'tile-thumb';
+  if (entry.resourceRecord) {
+    appendResourceThumbnail(thumb, entry.resourceRecord);
+  } else if (entry.kind === 'svg') {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.onerror = () => { img.remove(); thumb.textContent = 'SVG'; };
+    thumb.append(img);
+    libraryPreviewFor(entry, img);   // async — the letter stands in meanwhile
+  } else {
+    // DXF cannot be shown by the browser, so the server flattens it to an
+    // outline SVG on first request (cached beside the entry).
+    const img = document.createElement('img');
+    img.alt = '';
+    img.onerror = () => { img.remove(); thumb.textContent = 'DXF'; };
+    thumb.append(img);
+    img.src = `/api/library/${encodeURIComponent(entry.name)}/preview`;
+  }
+
+  const chip = document.createElement('span');
+  chip.className = 'kind-chip';
+  chip.textContent = entry.kind.toUpperCase();
+  chip.style.pointerEvents = 'none';
+
+  const body = document.createElement('div');
+  body.className = 'tile-body';
+  const nm = document.createElement('div');
+  nm.className = 'tile-name';
+  nm.textContent = entry.name;
+  const dt = document.createElement('div');
+  dt.className = 'tile-date';
+  dt.textContent = `${libKB(entry.size)} · ${ago(entry.saved)}`;
+  body.append(nm, dt);
+
+  tile.append(thumb, chip, body);
+
+  for (const action of opts.actions ?? []) {
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.title = action.title;
+    b.onclick = (e) => { e.stopPropagation(); action.run(entry); };
+    const row = tile.querySelector('.tile-actions') ??
+      tile.appendChild(Object.assign(document.createElement('div'),
+        { className: 'tile-actions' }));
+    row.append(b);
+  }
+  return tile;
+}
+
+/** Fill an <img> with the entry's SVG, via a blob URL (no scripts run). */
+async function libraryPreviewFor(entry, img) {
+  try {
+    let url = libPreviews.get(entry.name);
+    if (!url) {
+      url = URL.createObjectURL(await libraryContentBlob(entry.name));
+      libPreviews.set(entry.name, url);
+    }
+    img.src = url;
+  } catch {
+    /* the tile's letter placeholder stays */
+  }
+}
+
+/** Draw `entries` into `container` as project tiles. */
+function renderGrid(container, entries, opts = {}) {
+  container.textContent = '';
+  if (!entries.length) {
+    container.className = 'project-grid muted';
+    container.textContent = opts.empty ?? 'nothing here yet';
+    return;
+  }
+  container.className = 'project-grid';
+  for (const entry of entries) container.append(libraryTile(entry, opts));
+}
+
+/* ------------------------------------------------- the library page ---- */
+
+async function showLibrary() {
+  $('libraryBack').textContent = libReturn === 'model' ? '← Model' : '← Back';
+  $('libraryFilter').value = libFilter;
+  libSay('');                       // fresh visit: no stale status from before
+  // Paint straight away, then re-paint once the server list is back.
+  renderLibraryPage();
+  await refreshLibrary();
+  await refreshResources();
+}
+
+function renderLibraryPage() {
+  $('libraryCount').textContent = lib.length
+    ? `${lib.length} file${lib.length === 1 ? '' : 's'}`
+    : '';
+  const needle = libFilter.trim().toLowerCase();
+  const entries = lib.filter((e) =>
+    !needle || e.name.toLowerCase().includes(needle));
+  renderGrid($('libraryGrid'), entries, {
+    onOpen: openLibEditor,
+    actions: [
+      { label: 'Organize', title: 'Save as a typed resource', run: (entry) => organizeResource(entry) },
+      { label: '✎', title: 'View or update this drawing', run: openLibEditor },
+      { label: '✕', title: 'Delete from the library', run: deleteLibEntry },
+    ],
+    empty: 'the library is empty — every SVG or DXF you upload while working '
+      + 'lands here automatically, or use “+ New” above',
+  });
+}
+
+/** A one-line status on the library page. */
+function libSay(msg, error = false) {
+  const el = $('libraryMsg');
+  el.hidden = !msg;
+  el.textContent = msg;
+  el.className = error ? 'lib-note error' : 'lib-note muted';
+}
+
+async function deleteLibEntry(entry) {
+  if (!confirm(`Delete "${entry.name}" from the library? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/library/${encodeURIComponent(entry.name)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    const url = libPreviews.get(entry.name);
+    if (url) { URL.revokeObjectURL(url); libPreviews.delete(entry.name); }
+    lib = lib.filter((e) => e.name !== entry.name);
+    libSay(`deleted "${entry.name}"`);
+    renderLibraryPage();
+  } catch (e) {
+    libSay(String(e.message ?? e), true);
+  }
+}
+
+/* ------------------------------------------------ the model-screen picker */
+
+let pickerResources = [];
+let pickerSlot = null;   // 'subject' | 'boundary' | 'stack' | 'profile'
+
+const PICKER_INFO = {
+  subject: {
+    title: 'Subject from the library',
+    note: 'replaces the current drawing — a loaded boundary (frame) and its placement stay put',
+  },
+  boundary: {
+    title: 'Boundary from the library',
+    note: 'the drawing becomes the frame that crops the subject',
+  },
+  stack: {
+    title: 'Stack a library drawing',
+    note: 'the drawing is added on top of the ones already loaded',
+  },
+  profile: {
+    title: 'Sweep profile from the library',
+    note: 'the drawing becomes the cross-section swept along the frame',
+  },
+};
+
+async function openPicker(slot) {
+  pickerSlot = slot;
+  const info = PICKER_INFO[slot];
+  $('libPickTitle').textContent = info.title;
+  $('libPickNote').textContent = info.note;
+  $('libPickNote').style.color = '';
+  $('libraryPicker').hidden = false;
+  await refreshLibrary();
+  try {
+    pickerResources = (await resourceRequest()).resources;
+    if (pickerSlot === slot) renderPickerGrid();
+  } catch (e) { $('libPickNote').textContent = e.message; }
+}
+
+function closePicker() {
+  $('libraryPicker').hidden = true;
+  pickerSlot = null;
+}
+
+function renderPickerGrid() {
+  const kind = ['subject', 'stack'].includes(pickerSlot) ? 'pattern' : pickerSlot;
+  const resources = pickerResources.filter((r) => r.kind === kind).map((r) => ({
+    name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
+    size: 0, saved: r.updated, resourceRecord: r,
+  }));
+  renderGrid($('libPickGrid'), [...resources, ...lib], {
+    onOpen: applyLibraryEntry,
+    empty: 'nothing in the library yet — “+ add file…” to upload one now',
+  });
+}
+
+/** Feed a chosen library drawing to the slot it was picked for. */
+async function applyFileToSlot(slot, file) {
+  if (slot === 'subject') return swapSubject(file);
+  if (slot === 'boundary') return applyBoundaryFile(file);
+  if (slot === 'stack') return addDrawing(file);
+  if (slot === 'profile') return applyProfileFile(file);
+}
+
+async function applyLibraryEntry(entry) {
+  const slot = pickerSlot;
+  closePicker();
+  try {
+    setStatus(`getting ${entry.name}…`);
+    const file = entry.resourceRecord ? await resourceFile(entry.resourceRecord, 'drawing') : await libraryFileFrom(entry);
+    await applyFileToSlot(slot, file);
+    if (slot === 'subject' && picked === file && entry.resourceRecord?.files.original) {
+      await restoreResourceTrace(entry.resourceRecord, file);
+    }
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  }
+}
+
+/** Replace the model's drawing — the described "switch the subject" case. */
+async function swapSubject(file) {
+  if (!DRAWING.test(file.name)) {
+    return setStatus('the subject must be a .dxf or .svg file', true);
+  }
+  const hadModel = !!baseModel();
+  // With a boundary loaded, swapping the content is the whole point of the
+  // frame workflow, so it happens straight away; without one, replacing an
+  // existing model asks first — the painting on the old drawing is lost.
+  if (hadModel && !boundaryPicked) {
+    const ok = confirm(`Replace "${picked?.name ?? 'the drawing'}" with "${file.name}"?\n\n`
+      + 'The current model and its painting are replaced.');
+    if (!ok) return;
+  }
+  await pickFile(file, true);
+  if (hadModel) await generate(null);   // show the new subject at once
+}
+
+/** Upload a brand-new file from the picker, then put it straight to work. */
+async function pickerAddFile(file) {
+  const slot = pickerSlot;
+  try {
+    await fetch('/api/library', { method: 'POST', body: uploadForm(file, file.name) })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? res.statusText);
+        return data;
+      });
+    closePicker();
+    setStatus(`${file.name} saved to the library`);
+    await refreshLibrary();
+    await applyFileToSlot(slot, file);
+  } catch (e) {
+    const note = $('libPickNote');
+    note.textContent = String(e.message ?? e);
+    note.style.color = '#f87171';
+  }
+}
+
+/* --------------------------------------------------- the entry editor ---- */
+
+function libEditSay(msg, error = false) {
+  const el = $('libEditStatus');
+  el.textContent = msg;
+  el.className = error ? 'muted error' : 'muted';
+}
+
+function libEditKindUI() {
+  const svg = $('libEditKind').value === 'svg';
+  $('libEditSource').disabled = !svg;
+  $('libEditKindHint').textContent = svg
+    ? 'Paste SVG markup below, or load it from a file.'
+    : 'DXF is not meant for hand-editing — load it from a file.';
+  updateLibPreview();
+}
+
+async function openLibEditor(entry) {
+  libEditEntry = entry ?? null;
+  libEditFile = null;
+  const kind = entry?.kind ?? 'svg';
+  $('libEditTitle').textContent = entry ? 'Update library drawing' : 'New library drawing';
+  $('libEditMode').textContent = entry ? entry.name : 'not saved yet';
+  $('libEditName').value = entry ? entry.name.replace(/\.(svg|dxf)$/i, '') : '';
+  $('libEditKind').value = kind;
+  $('libEditFile').textContent = 'no file loaded — paste SVG markup instead';
+  $('libEditDelete').hidden = !entry;
+  libEditSay('');
+  libEditKindUI();
+  if (entry?.kind === 'svg') {
+    $('libEditSource').value = '';
+    try {
+      $('libEditSource').value = await (await libraryContentBlob(entry.name)).text();
+    } catch { /* empty is fine — the user can paste again */ }
+  } else {
+    $('libEditSource').value = '';
+  }
+  $('libEditor').hidden = false;
+  $('libEditName').focus();
+  updateLibPreview();
+  if (entry?.kind === 'dxf') loadDxfEntryPreview(entry);
+}
+
+function closeLibEditor() {
+  $('libEditor').hidden = true;
+  libEditEntry = null;
+  libEditFile = null;
+}
+
+/** The tiny rendered preview under the editor, from the current SVG text. */
+let libPreviewTimer = null;
+function scheduleLibPreview() {
+  clearTimeout(libPreviewTimer);
+  libPreviewTimer = setTimeout(updateLibPreview, 350);
+}
+
+/** An existing DXF entry's outline preview in the editor (server-rendered). */
+function loadDxfEntryPreview(entry) {
+  const box = $('libEditPreview');
+  box.textContent = 'drawing the preview…';
+  box.style.color = '#9aa3af';
+  const img = document.createElement('img');
+  img.alt = '';
+  img.onload = () => {
+    box.textContent = '';
+    box.style.color = '';
+    box.append(img);
+  };
+  img.onerror = () => {
+    box.textContent = 'this DXF could not be previewed';
+    box.style.color = '#9aa3af';
+  };
+  img.src = `/api/library/${encodeURIComponent(entry.name)}/preview`;
+}
+
+function updateLibPreview() {
+  const box = $('libEditPreview');
+  box.textContent = '';
+  if ($('libEditKind').value !== 'svg') {
+    box.textContent = 'DXF — load a file to see or edit it';
+    box.style.background = '';
+    return;
+  }
+  box.style.background = '#fff';
+  const src = $('libEditSource').value.trim();
+  if (!src) {
+    box.textContent = 'paste SVG to see it here';
+    box.style.color = '#9aa3af';
+    return;
+  }
+  box.style.color = '';
+  const url = URL.createObjectURL(new Blob([src], { type: 'image/svg+xml' }));
+  const img = document.createElement('img');
+  img.alt = '';
+  img.onload = () => { box.textContent = ''; box.append(img); URL.revokeObjectURL(url); };
+  img.onerror = () => { URL.revokeObjectURL(url); box.textContent = 'not a readable SVG yet'; };
+  img.src = url;
+}
+
+/** The body multipart for save: a loaded file wins over the pasted text. */
+function libEditorForm() {
+  const form = new FormData();
+  const kind = $('libEditKind').value;
+  if (libEditFile) {
+    form.append('file', libEditFile);
+  } else if (kind === 'svg') {
+    form.append('svg', $('libEditSource').value);
+  }
+  return form;
+}
+
+async function saveLibEditor() {
+  const kind = $('libEditKind').value;
+  let name = $('libEditName').value.trim().replace(/\.(svg|dxf)$/i, '');
+  if (!name) return libEditSay('give the entry a name first', true);
+  name = `${name}.${kind}`;
+  const original = libEditEntry?.name ?? null;
+  const form = libEditorForm();
+  if (!form.has('file') && !form.has('svg')) {
+    if (kind === 'svg') return libEditSay('give the drawing some content — paste SVG or load a file', true);
+    return libEditSay('a DXF needs a file — load one first', true);
+  }
+  try {
+    if (original && name !== original) {
+      // A rename: save the content under the new name, then drop the old one.
+      // The new name must be free, or the save is refused before anything moves.
+      form.append('name', name);
+      const res = await fetch('/api/library', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        return libEditSay(res.status === 409
+          ? `"${name}" already exists — pick another name, or update that entry instead`
+          : data.error ?? res.statusText, true);
+      }
+      await fetch(`/api/library/${encodeURIComponent(original)}`, { method: 'DELETE' });
+    } else if (original) {
+      const res = await fetch(`/api/library/${encodeURIComponent(name)}`, { method: 'PUT', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
+    } else {
+      form.append('name', name);
+      const res = await fetch('/api/library', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        return libEditSay(res.status === 409
+          ? `"${name}" already exists — pick another name, or open it and update instead`
+          : data.error ?? res.statusText, true);
+      }
+    }
+    const stale = new Set([original, name].filter(Boolean));
+    for (const n of stale) {
+      const url = libPreviews.get(n);
+      if (url) URL.revokeObjectURL(url);
+      libPreviews.delete(n);
+    }
+    closeLibEditor();
+    await refreshLibrary();
+    if (currentScreen === 'library') libSay(`saved "${name}" to the library`);
+  } catch (e) {
+    libEditSay(String(e.message ?? e), true);
+  }
+}
+
+/* ----------------------------------------------------------- wiring ---- */
+
+$('startLibrary').onclick = () => { libReturn = 'start'; showScreen('library'); };
+$('libraryBack').onclick = () => showScreen(libReturn);
+$('libraryNew').onclick = () => openLibEditor(null);
+$('libraryFilter').addEventListener('input', (e) => { libFilter = e.target.value; renderLibraryPage(); });
+
+/** Backfill: unpack the drawings embedded in the saved projects. */
+$('libraryImport').onclick = async () => {
+  const btn = $('libraryImport');
+  btn.disabled = true;
+  libSay('scanning the saved projects…');
+  try {
+    const res = await fetch('/api/library/import', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+    const nSvg = data.imported.filter((e) => e.kind === 'svg').length;
+    const nDxf = data.imported.length - nSvg;
+    if (!data.added) {
+      libSay('already up to date — every drawing inside the saved projects is in the library.');
+    } else {
+      libSay(`imported ${data.added} drawing${data.added === 1 ? '' : 's'}`
+        + ` from ${data.projects} project${data.projects === 1 ? '' : 's'}`
+        + ` (${nSvg} SVG, ${nDxf} DXF)${data.duplicates ? ` — ${data.duplicates} already there` : ''}.`);
+    }
+    await refreshLibrary();
+  } catch (e) {
+    libSay(String(e.message ?? e), true);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+$('subjectLibrary').onclick = () => openPicker('subject');
+$('addDrawingLibrary').onclick = () => openPicker('stack');
+$('boundaryLibrary').onclick = () => openPicker('boundary');
+$('profileLibrary').onclick = () => openPicker('profile');
+
+$('libPickClose').onclick = closePicker;
+$('libraryPicker').addEventListener('pointerdown', (e) => {
+  if (e.target === $('libraryPicker')) closePicker();
+});
+$('libPickManage').onclick = () => {
+  closePicker();
+  libReturn = currentScreen === 'model' ? 'model' : 'start';
+  showScreen('library');
+};
+$('libPickNew').onclick = () => $('libPickFile').click();
+$('libPickFile').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file && DRAWING.test(file.name)) pickerAddFile(file);
+};
+
+$('libEditClose').onclick = closeLibEditor;
+$('libEditCancel').onclick = closeLibEditor;
+$('libEditSave').onclick = saveLibEditor;
+$('libEditDelete').onclick = () => {
+  if (libEditEntry) deleteLibEntry(libEditEntry);
+  closeLibEditor();
+};
+$('libEditor').addEventListener('pointerdown', (e) => {
+  if (e.target === $('libEditor')) closeLibEditor();
+});
+$('libEditPick').onclick = () => $('libEditFileInput').click();
+$('libEditKind').onchange = libEditKindUI;
+$('libEditSource').addEventListener('input', scheduleLibPreview);
+$('libEditFileInput').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!DRAWING.test(file.name)) return libEditSay('load a .dxf or .svg file', true);
+  libEditFile = file;
+  const kind = file.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf';
+  $('libEditKind').value = kind;
+  $('libEditFile').textContent = `${file.name} — ${libKB(file.size)}`;
+  libEditKindUI();
+  if (kind === 'svg') {
+    try {
+      $('libEditSource').value = await file.text();
+      updateLibPreview();
+    } catch {
+      libEditSay('could not read that file', true);
+    }
+  } else {
+    $('libEditSource').value = '';
+    updateLibPreview();
+  }
+  if (!$('libEditName').value.trim()) {
+    $('libEditName').value = file.name.replace(/\.(svg|dxf)$/i, '');
+  }
+};
+
+// Escape closes the picker or the editor, whichever is on top.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('libEditor').hidden) closeLibEditor();
+  else if (!$('libraryPicker').hidden) closePicker();
+});
+
+
+// Typed resources complement the original drawing shelf; projects embed exact
+// input snapshots and keep resource IDs/revisions as provenance.
+async function resourceRequest(path = '', options = {}) {
+  const response = await fetch('/api/resources' + path, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error ?? response.statusText);
+  return data;
+}
+function resourceMessage(error) { $('resourceStatus').textContent = error.message ?? String(error); }
+async function resourceFile(record, slot) {
+  const response = await fetch(`/api/resources/${record.id}/${slot}`);
+  if (!response.ok) throw new Error('Could not load resource file');
+  return Object.assign(new File([await response.blob()], record.files[slot].name), {
+    resource: { id: record.id, revision: record.revision, name: record.name },
+  });
+}
+async function saveResourceFile(file, kind, existing = null) {
+  const name = prompt('Resource name', existing?.name ?? file.name.replace(/\.[^.]+$/, ''));
+  if (name === null) return;
+  const form = new FormData();
+  form.set('name', name); form.set('kind', kind); form.set('drawing', file);
+  await resourceRequest(existing ? '/' + existing.id : '', { method: existing ? 'PUT' : 'POST', body: form });
+  await refreshResources();
+}
+async function organizeResource(entry) {
+  try {
+    await saveResourceFile(await libraryFileFrom(entry), $('resourceKind').value || 'pattern');
+  } catch (e) { resourceMessage(e); }
+}
+function appendResourceThumbnail(container, record) {
+  const img = document.createElement('img');
+  img.alt = `${record.name} preview`;
+  img.loading = 'lazy';
+  // SVGs retain their own appearance; DXFs use the converter's outline preview.
+  container.style.background = record.files.drawing.name.toLowerCase().endsWith('.svg') ? '#fff' : '#101216';
+  img.onerror = () => {
+    container.replaceChildren();
+    const retry = document.createElement('button');
+    retry.className = 'ghost'; retry.textContent = 'Preview unavailable · Retry';
+    retry.onclick = (event) => {
+      event.stopPropagation(); container.replaceChildren(); appendResourceThumbnail(container, record);
+    };
+    container.append(retry);
+  };
+  img.src = `/api/resources/${record.id}/preview?revision=${encodeURIComponent(record.revision)}`;
+  container.append(img);
+}
+async function refreshResources() {
+  try {
+    const { resources } = await resourceRequest();
+    const grid = $('resourceGrid'); grid.replaceChildren();
+    for (const record of resources.filter((r) => !$('resourceKind').value || r.kind === $('resourceKind').value)) {
+      const card = document.createElement('div'); card.className = 'project-tile';
+      const title = document.createElement('div'); title.className = 'tile-body';
+      title.textContent = `${record.name} · ${record.kind}`; card.append(title);
+      const thumb = document.createElement('div'); thumb.className = 'tile-thumb';
+      appendResourceThumbnail(thumb, record);
+      card.prepend(thumb);
+      const actions = document.createElement('div'); actions.className = 'tile-body'; card.append(actions);
+      const action = (label, handler) => {
+        const button = document.createElement('button'); button.className = 'ghost'; button.textContent = label;
+        button.onclick = async () => { button.disabled = true; try { await handler(); } catch (e) { resourceMessage(e); } finally { button.disabled = false; } };
+        actions.append(button);
+      };
+      action(record.kind === 'pattern' ? 'Create model' : 'Use in model', async () => {
+        const file = await resourceFile(record, 'drawing');
+        if (record.kind === 'boundary') await applyBoundaryFile(file);
+        else if (record.kind === 'profile') await applyProfileFile(file);
+        else {
+          await pickFile(file);
+          if (record.files.original) await restoreResourceTrace(record, file);
+        }
+        showScreen('model');
+      });
+      if (record.files.original) action('Edit image / trace', async () => {
+        await restoreResourceTrace(record, null);
+        traceReturn = 'library'; showScreen('trace');
+      });
+      action('Rename', async () => {
+        const name = prompt('Resource name', record.name); if (name === null) return;
+        const form = new FormData(); form.set('name', name);
+        await resourceRequest('/' + record.id, { method: 'PUT', body: form }); await refreshResources();
+      });
+      action('Duplicate', async () => {
+        const name = prompt('Name for the copy', record.name + ' copy'); if (name === null) return;
+        const form = new FormData(); form.set('name', name); form.set('kind', record.kind);
+        form.set('trace', JSON.stringify(record.trace));
+        for (const slot of Object.keys(record.files)) form.set(slot, await resourceFile(record, slot));
+        await resourceRequest('', { method: 'POST', body: form }); await refreshResources();
+      });
+      if (!record.files.original) action('Replace drawing…', async () => {
+        const input = document.createElement('input'); input.type = 'file'; input.accept = '.svg,.dxf';
+        input.onchange = async () => { try { if (input.files[0]) await saveResourceFile(input.files[0], record.kind, record); } catch(e) { resourceMessage(e); } };
+        input.click();
+      });
+      action('Delete', async () => {
+        if (!confirm(`Delete resource “${record.name}” and its saved revisions? Existing projects retain their own copies.`)) return;
+        await resourceRequest('/' + record.id, { method: 'DELETE' }); await refreshResources();
+      });
+      grid.append(card);
+    }
+    if (!grid.children.length) grid.textContent = 'No resources in this category yet. Add a drawing or save a pattern from the trace editor.';
+  } catch (e) { resourceMessage(e); }
+}
+async function restoreResourceTrace(record, drawing) {
+  const original = await resourceFile(record, 'original');
+  const edited = record.files.edited ? await resourceFile(record, 'edited') : original;
+  const svg = await (await resourceFile(record, 'drawing')).text();
+  clearTrace();
+  traceState.original = original; traceState.source = traceState.committedSource = edited;
+  traceState.resource = { id: record.id, revision: record.revision, name: record.name };
+  traceState.name = record.name; traceState.svg = svg; traceState.svgFile = drawing;
+  traceState.params = { ...DEFAULT_TRACE_PARAMS, ...record.trace };
+  traceState.committedParams = { ...traceState.params };
+  populateTrace(); await editCanvasReady; $('traceUse').disabled = false; $('modelTrace').hidden = !drawing;
+}
+$('resourceImport').onclick = async () => {
+  const button = $('resourceImport'); button.disabled = true;
+  try {
+    const result = await resourceRequest('/import', { method: 'POST' });
+    $('resourceStatus').textContent = `Imported ${result.added}; already present ${result.existing}.` +
+      (result.skipped.length ? ' Could not import: ' + result.skipped.join('; ') : '');
+    await refreshResources();
+  } catch (e) { resourceMessage(e); } finally { button.disabled = false; }
+};
+$('resourceKind').onchange = refreshResources;
+$('resourceUpload').onclick = () => $('resourceFile').click();
+$('resourceFile').onchange = async (event) => {
+  const file = event.target.files[0]; event.target.value = '';
+  if (file) try { await saveResourceFile(file, $('resourceKind').value || 'pattern'); } catch(e) { resourceMessage(e); }
+};
+$('savePattern').onclick = async () => {
+  if (!traceState.source) return;
+  const existing = traceState.resource;
+  const name = prompt('Pattern name', existing?.name ?? traceState.name); if (name === null) return;
+  const button = $('savePattern'); button.disabled = true;
+  $('traceScreen').inert = true;
+  try {
+    await editCanvasReady;
+    clearTimeout(traceTimer);
+    if (!await runTrace()) throw new Error('Finish tracing successfully before saving the pattern.');
+    const form = new FormData(); form.set('name', name); form.set('kind', 'pattern');
+    form.set('original', traceState.original ?? traceState.source);
+    form.set('edited', await currentTraceFile());
+    form.set('drawing', new File([traceState.svg], 'pattern.svg', { type: 'image/svg+xml' }));
+    form.set('trace', JSON.stringify(traceState.params));
+    const record = await resourceRequest(existing ? '/' + existing.id : '', { method: existing ? 'PUT' : 'POST', body: form });
+    traceState.resource = { id: record.id, revision: record.revision, name: record.name };
+    traceState.name = record.name;
+    $('traceName').textContent = `· ${record.name} (saved)`;
+  } catch(e) { traceError(e.message ?? String(e)); } finally { button.disabled = false; $('traceScreen').inert = false; }
 };
 </script>
 </body>

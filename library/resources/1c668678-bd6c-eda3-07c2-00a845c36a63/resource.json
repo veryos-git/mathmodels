@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "1c668678-bd6c-eda3-07c2-00a845c36a63",
+  "name": "Photoronoi",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:37.634Z",
+  "updated": "2026-09-10T10:37:37.634Z",
+  "revision": "04577040-624a-4e5f-884e-33582e79bc9d",
+  "files": {
+    "drawing": {
+      "name": "Photoronoi.dxf",
+      "path": "revisions/04577040-624a-4e5f-884e-33582e79bc9d/drawing.dxf"
+    }
+  },
+  "trace": null
+}

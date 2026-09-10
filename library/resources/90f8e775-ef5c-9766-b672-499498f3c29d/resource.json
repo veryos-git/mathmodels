@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "90f8e775-ef5c-9766-b672-499498f3c29d",
+  "name": "thinnerroof - window_boundary",
+  "kind": "boundary",
+  "created": "2026-09-10T10:37:36.768Z",
+  "updated": "2026-09-10T10:37:36.768Z",
+  "revision": "5cfa54a9-3292-45f4-9b41-09e987d147ee",
+  "files": {
+    "drawing": {
+      "name": "thinnerroof - window_boundary.dxf",
+      "path": "revisions/5cfa54a9-3292-45f4-9b41-09e987d147ee/drawing.dxf"
+    }
+  },
+  "trace": null
+}

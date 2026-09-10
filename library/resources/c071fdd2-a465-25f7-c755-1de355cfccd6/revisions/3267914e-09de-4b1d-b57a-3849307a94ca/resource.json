@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "c071fdd2-a465-25f7-c755-1de355cfccd6",
+  "name": "window_positive - window_boundary_small",
+  "kind": "boundary",
+  "created": "2026-09-10T10:37:35.989Z",
+  "updated": "2026-09-10T10:37:35.989Z",
+  "revision": "3267914e-09de-4b1d-b57a-3849307a94ca",
+  "files": {
+    "drawing": {
+      "name": "window_positive - window_boundary_small.dxf",
+      "path": "revisions/3267914e-09de-4b1d-b57a-3849307a94ca/drawing.dxf"
+    }
+  },
+  "trace": null
+}

@@ -9,6 +9,14 @@ of a hand-drawn sketch** — traced to an SVG right in the page first.
 
 ![a gothic window with its faces painted](docs/preview.png)
 
+## Reusable resources
+
+The **Resource library** stores named patterns, boundaries and sweep profiles.
+**Save pattern** in the Trace editor preserves the original image, paint edits,
+trace settings and SVG. Resources have file-based revisions; model projects
+keep self-contained snapshots. See [resource storage and migration](docs/resource-storage.md)
+for the workflow, file layout and API.
+
 ## The workflow
 
 The app is three full-screen steps, each using the whole window:

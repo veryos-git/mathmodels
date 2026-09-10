@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "cd105045-0885-0d88-fc78-3df94970cef0",
+  "name": "v1 - Sketch 2 (2)",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:38.529Z",
+  "updated": "2026-09-10T10:37:38.529Z",
+  "revision": "053343fd-cbdf-4aef-8840-e946a6a4958d",
+  "files": {
+    "drawing": {
+      "name": "v1 - Sketch 2 (2).dxf",
+      "path": "revisions/053343fd-cbdf-4aef-8840-e946a6a4958d/drawing.dxf"
+    }
+  },
+  "trace": null
+}

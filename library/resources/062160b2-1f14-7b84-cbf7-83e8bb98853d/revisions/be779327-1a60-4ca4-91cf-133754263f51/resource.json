@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "062160b2-1f14-7b84-cbf7-83e8bb98853d",
+  "name": "window - boundary (3)",
+  "kind": "boundary",
+  "created": "2026-09-10T10:37:38.008Z",
+  "updated": "2026-09-10T10:37:38.008Z",
+  "revision": "be779327-1a60-4ca4-91cf-133754263f51",
+  "files": {
+    "drawing": {
+      "name": "window - boundary (3).dxf",
+      "path": "revisions/be779327-1a60-4ca4-91cf-133754263f51/drawing.dxf"
+    }
+  },
+  "trace": null
+}

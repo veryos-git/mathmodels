@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "b6eec058-415d-ba71-81f0-84b4f9d7438d",
+  "name": "window_boundary_summand - path_real (1)",
+  "kind": "boundary",
+  "created": "2026-09-10T10:37:38.424Z",
+  "updated": "2026-09-10T10:37:38.424Z",
+  "revision": "b7c78cdc-da26-4f95-b2a5-9cf66d80542d",
+  "files": {
+    "drawing": {
+      "name": "window_boundary_summand - path_real (1).dxf",
+      "path": "revisions/b7c78cdc-da26-4f95-b2a5-9cf66d80542d/drawing.dxf"
+    }
+  },
+  "trace": null
+}

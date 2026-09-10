@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "6c3359e9-0922-78f1-153b-232742cb8875",
+  "name": "Part Studio 1 - Sketch 1",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:39.490Z",
+  "updated": "2026-09-10T10:37:39.490Z",
+  "revision": "34858d77-3bc6-4178-963e-439ee4e0e23d",
+  "files": {
+    "drawing": {
+      "name": "Part Studio 1 - Sketch 1.dxf",
+      "path": "revisions/34858d77-3bc6-4178-963e-439ee4e0e23d/drawing.dxf"
+    }
+  },
+  "trace": null
+}

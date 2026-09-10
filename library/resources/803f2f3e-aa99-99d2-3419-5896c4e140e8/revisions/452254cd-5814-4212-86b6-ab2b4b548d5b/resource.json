@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "803f2f3e-aa99-99d2-3419-5896c4e140e8",
+  "name": "Screenshot from 2026-08-05 10-10-42",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:37.172Z",
+  "updated": "2026-09-10T10:37:37.172Z",
+  "revision": "452254cd-5814-4212-86b6-ab2b4b548d5b",
+  "files": {
+    "drawing": {
+      "name": "Screenshot from 2026-08-05 10-10-42.svg",
+      "path": "revisions/452254cd-5814-4212-86b6-ab2b4b548d5b/drawing.svg"
+    }
+  },
+  "trace": null
+}

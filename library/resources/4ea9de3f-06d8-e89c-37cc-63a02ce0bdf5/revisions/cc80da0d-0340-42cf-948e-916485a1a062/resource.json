@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "4ea9de3f-06d8-e89c-37cc-63a02ce0bdf5",
+  "name": "hook2prof2",
+  "kind": "profile",
+  "created": "2026-09-10T10:37:37.969Z",
+  "updated": "2026-09-10T10:37:37.969Z",
+  "revision": "cc80da0d-0340-42cf-948e-916485a1a062",
+  "files": {
+    "drawing": {
+      "name": "hook2prof2.dxf",
+      "path": "revisions/cc80da0d-0340-42cf-948e-916485a1a062/drawing.dxf"
+    }
+  },
+  "trace": null
+}
