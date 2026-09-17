@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "08924548-7740-e510-1058-3becf69bc474",
+  "name": "window_positive - path",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:39.016Z",
+  "updated": "2026-09-10T10:37:39.016Z",
+  "revision": "f008d8d6-400b-4f0b-919c-d41a4a3de673",
+  "files": {
+    "drawing": {
+      "name": "window_positive - path.dxf",
+      "path": "revisions/f008d8d6-400b-4f0b-919c-d41a4a3de673/drawing.dxf"
+    }
+  },
+  "trace": null
+}

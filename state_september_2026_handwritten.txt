@@ -1,0 +1,38 @@
+# state september 2026
+
+this app started as a little 'convert this image to an svg project' but ended up in a large app that can generate 3d models for 3d printing. unfortunately its a bit messy now. please help me to clean it up and make it more proper. 
+the idea is to have a proper data model and CRUD for all parts of the app. i know usually one does not store the data in the github repo but for this app it is ok. the most important thing is to properly store graphics and their manipulation (paint edit tools) and their resulting svg. 
+based this data the user can then create 3d model projects that also have to be CRUD. the thing is that this app can do multiple stuff and we now have to figure out how to properly store this. 
+
+## example workflows:
+
+### gothic tracery 3d model.
+
+requires a path, that is the basic frame of a gothic ornament. this will be likely DXW/DXF file format. also requires a profile that can be swept along the paths . should create a complex 3d geometry.
+not implemented but wished are: classical gothic tracery has often times some kind of two layers , one coarse path and then the sharp cusps pointy elements. the pointy elements often are only a small part of the actual profile so that it looks like they flow  out of the big profile. 
+this gives a very nice complex look. it would be great to have this implemented in the app, but this requires extensive reverse engeneering. i created a folder 'reverse_engeneering' with example files. 
+a second nice addition would be rounded revolved endings. when two cusp arcs end tangentally they for a harsh orthogonal profile end, this can be rounded by revolving the profile 90 degrees along the orthogonal line. very hard to describe with words, i need to show images. 
+
+
+### stained glass window
+requires a path with connected lines. since the user most likely has no svg and does not want to waste time to manually trace an image with a path tool in any software, the app contains a tool that can convert images to svgs by detecting the lines. 
+the resulting svg is then a pattern that should be reusable and should get a name, for example 'crystal' , 'ghost' . the second step is to generate a 3d model. in this step the user can define how thick the frame is going to be. the regions between the lines 
+are converted to 3d objects aswell and the user can set different hues. the lightness of a hue is then going to be created by simply setting a different height of the region, in fdm 3d printing this corresponds to the thickness of actual plastic, more plastic will
+block more light and get darker. 
+
+using the stained glass as 'windows' :
+i have another 3d object i modeled in CAD. it is a lantern that has a frame that has slits where i can slide in the flat stained glass pieces. in order for this to work , the stained glass motivs ('crystal', 'ghost' ....) need a 'boundry' that constraints the stained glass in 
+a kind of frame, so that they fit to the lantern exactly. therefore another 'library' of boundries needs to be implemented so that i do not have to always reupload a boundry dxf.  
+
+not yet implemented: a proper workflow to add custom filaments and calibrate them so that the preview generated looks more like the acutal result. this would require the user to be able to generate a calibration file , print it , compare it with the filaments in the 
+software and adjust the actual look corresponding to the real printed item. 
+
+not yet implemented: if the image contains black areas such as large eyes of a cute thing in colorbook images , either the outline of this large black dots have to be traced or they should be treated as filled black regions in the svg.  
+
+
+
+
+
+please use a file based storage, since speed is not crucial in this app and the conveniance of having files that one can browse in a file browser is the bigger advantage. 
+
+do not feel restricted by the browser that renders the gui, feel free to use any executable on the server by using 'Deno.command'. 

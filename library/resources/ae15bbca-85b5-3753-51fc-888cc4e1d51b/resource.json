@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "ae15bbca-85b5-3753-51fc-888cc4e1d51b",
+  "name": "window_boundary_summand - pattern2",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:38.013Z",
+  "updated": "2026-09-10T10:37:38.013Z",
+  "revision": "cc05cd04-7ae9-4ebd-b664-528a7589f522",
+  "files": {
+    "drawing": {
+      "name": "window_boundary_summand - pattern2.dxf",
+      "path": "revisions/cc05cd04-7ae9-4ebd-b664-528a7589f522/drawing.dxf"
+    }
+  },
+  "trace": null
+}

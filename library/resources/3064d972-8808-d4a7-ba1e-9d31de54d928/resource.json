@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "3064d972-8808-d4a7-ba1e-9d31de54d928",
+  "name": "window_positive - veryos_basic_lantern_window_frame_boundary",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:39.026Z",
+  "updated": "2026-09-10T10:37:39.026Z",
+  "revision": "e91dc051-7790-409c-82fd-36ac7f532190",
+  "files": {
+    "drawing": {
+      "name": "window_positive - veryos_basic_lantern_window_frame_boundary.dxf",
+      "path": "revisions/e91dc051-7790-409c-82fd-36ac7f532190/drawing.dxf"
+    }
+  },
+  "trace": null
+}

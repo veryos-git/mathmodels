@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "3422185b-b2bc-c2aa-4bd2-ec6f4d180be5",
+  "name": "window - Sketch 3",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:39.086Z",
+  "updated": "2026-09-10T10:37:39.086Z",
+  "revision": "1b525d6f-081f-4c8e-9311-30299ca48406",
+  "files": {
+    "drawing": {
+      "name": "window - Sketch 3.dxf",
+      "path": "revisions/1b525d6f-081f-4c8e-9311-30299ca48406/drawing.dxf"
+    }
+  },
+  "trace": null
+}

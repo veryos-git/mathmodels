@@ -1,3 +1,5 @@
+import { importProjectResources } from "./storage/import_projects.ts";
+import { ResourceStore, atomicWrite } from "./storage/resources.ts";
 /// Deno web server: upload a DXF or SVG, get back a relief STL.
 /// The heavy lifting is done by tools/dxf2stl.py (ezdxf + svgelements +
 /// shapely + trimesh).
@@ -35,6 +37,19 @@ const MAX_PROJECT = 32 * 1024 * 1024;
 // Leading character is alphanumeric, so "..", ".hidden" and absolute paths are
 // all rejected before the name ever reaches the filesystem.
 const PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
+
+// The drawing library: every SVG (or DXF) the user uploads while working is
+// kept here as a reusable resource, so a subject, boundary or profile can be
+// swapped in later without re-uploading the file.
+const LIBRARY_DIR = Deno.env.get("LIBRARY_DIR") ?? "library";
+const resources = new ResourceStore(`${LIBRARY_DIR}/resources`, async (path) => {
+  const data = await runScript([path, "--preview", "--sagitta", String(THUMB_SAGITTA)]);
+  return svgFromCurves((data.pattern as { curves?: number[][][] })?.curves ?? []);
+});
+// An entry's name carries its extension. Leading alphanumeric keeps ".." and
+// absolute paths out; the server never touches the filesystem with a name
+// that failed this check.
+const LIBRARY_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,95}\.(dxf|svg)$/i;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -551,7 +566,7 @@ async function putProject(req: Request, name: string): Promise<Response> {
     throw new HttpError(400, "that is not a vector2stl project");
   }
   await Deno.mkdir(PROJECT_DIR, { recursive: true });
-  await Deno.writeTextFile(path, body);
+  await atomicWrite(path, body);
   // A thumbnail travels as a data URL; stored beside the project so the start
   // screen can show it without reading the whole project JSON.
   if (typeof parsed.thumbnail === "string" && parsed.thumbnail.startsWith("data:image/png;base64,")) {
@@ -598,6 +613,7 @@ async function cloneProject(name: string): Promise<Response> {
 
 /** GET /api/projects/:name/thumbnail — the PNG saved beside the project. */
 async function serveThumbnail(name: string): Promise<Response> {
+  projectPath(name);
   try {
     const data = await Deno.readFile(thumbPath(name));
     return new Response(data, {
@@ -606,6 +622,457 @@ async function serveThumbnail(name: string): Promise<Response> {
   } catch {
     throw new HttpError(404, `no thumbnail for "${name}"`);
   }
+}
+
+/* ---------------------------------------------------------------- library */
+
+/** The on-disk name of a library entry, after validation. */
+function libraryPath(name: string): string {
+  if (!LIBRARY_NAME.test(name)) {
+    throw new HttpError(
+      400,
+      "a library name must end in .svg or .dxf and use only letters, digits, spaces, . _ ( ) and -",
+    );
+  }
+  return `${LIBRARY_DIR}/${name}`;
+}
+
+async function libraryExists(name: string): Promise<boolean> {
+  try {
+    await Deno.stat(libraryPath(name));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Write bytes into the library atomically (temp file + rename). */
+async function writeLibrary(name: string, bytes: Uint8Array): Promise<void> {
+  await Deno.mkdir(LIBRARY_DIR, { recursive: true });
+  const tmp = `${LIBRARY_DIR}/.${name}.tmp-${crypto.randomUUID()}`;
+  await Deno.writeFile(tmp, bytes);
+  await Deno.rename(tmp, libraryPath(name));
+}
+
+/** Content out of a create/update body: an uploaded file or pasted SVG text. */
+async function libraryContent(
+  form: FormData,
+  kind: "svg" | "dxf",
+): Promise<Uint8Array> {
+  const file = form.get("file");
+  if (file instanceof File && file.size > 0) {
+    if (file.size > MAX_UPLOAD) throw new HttpError(413, "that file is too large (16 MB max)");
+    const fileKind = file.name.toLowerCase().endsWith(".svg") ? "svg" : "dxf";
+    if (fileKind !== kind) {
+      throw new HttpError(400, `that is a .${fileKind} file, not a .${kind}`);
+    }
+    return new Uint8Array(await file.arrayBuffer());
+  }
+  const text = form.get("svg");
+  if (kind === "svg" && typeof text === "string" && text.trim() !== "") {
+    if (text.length > MAX_UPLOAD) {
+      throw new HttpError(413, "that SVG is too large (16 MB max)");
+    }
+    // Cheap sanity check: the converter reads SVG XML, so insist on a root.
+    if (!/<\s*(svg|!DOCTYPE)[\s>]/i.test(text)) {
+      throw new HttpError(400, "that does not look like an SVG — paste SVG markup or upload a file");
+    }
+    return new TextEncoder().encode(text);
+  }
+  throw new HttpError(400, "give the drawing some content (upload a file or paste SVG)");
+}
+
+/** A name the caller proposed, made safe and given the right extension. */
+function libraryEntryName(raw: string | null, kind: "svg" | "dxf"): string {
+  const name = (raw ?? "").trim();
+  const stem = name.replace(/\.(svg|dxf)$/i, "").trim() || `drawing`;
+  const candidate = `${stem}.${kind}`;
+  if (!LIBRARY_NAME.test(candidate)) {
+    throw new HttpError(
+      400,
+      "a library name may use letters, digits, spaces, . _ ( ) and -, and must start with a letter or digit",
+    );
+  }
+  return candidate;
+}
+
+/** GET /api/library — every saved drawing, newest first. */
+async function listLibrary(): Promise<Response> {
+  const entries: Array<{
+    name: string;
+    kind: "svg" | "dxf";
+    size: number;
+    saved: string;
+  }> = [];
+  try {
+    for await (const entry of Deno.readDir(LIBRARY_DIR)) {
+      if (!entry.isFile || !LIBRARY_NAME.test(entry.name)) continue;
+      const info = await Deno.stat(`${LIBRARY_DIR}/${entry.name}`);
+      entries.push({
+        name: entry.name,
+        kind: entry.name.toLowerCase().endsWith(".svg") ? "svg" : "dxf",
+        size: info.size,
+        saved: (info.mtime ?? new Date()).toISOString(),
+      });
+    }
+  } catch {
+    // No directory yet simply means nothing has been uploaded.
+  }
+  entries.sort((a, b) => b.saved.localeCompare(a.saved));
+  return Response.json({ entries });
+}
+
+/**
+ * POST /api/library — add a drawing to the library. The body is a multipart
+ * form: `file` (an uploaded .svg/.dxf) or `svg` (pasted SVG markup), an
+ * optional `name`, and optional `replace=1` to overwrite an existing entry.
+ */
+async function createLibrary(req: Request): Promise<Response> {
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    throw new HttpError(400, "expected a multipart form upload");
+  }
+  const file = form.get("file");
+  const kind: "svg" | "dxf" =
+    (file instanceof File && file.size > 0 && !file.name.toLowerCase().endsWith(".svg"))
+      ? "dxf"
+      : "svg";
+  const name = libraryEntryName(
+    typeof form.get("name") === "string" ? String(form.get("name")) : (file instanceof File ? file.name : null),
+    kind,
+  );
+  if (await libraryExists(name) && form.get("replace") !== "1") {
+    throw new HttpError(409, `a library entry called "${name}" already exists`);
+  }
+  const bytes = await libraryContent(form, kind);
+  await writeLibrary(name, bytes);
+  await dropThumbnail(name);   // new content, new preview
+  const info = await Deno.stat(libraryPath(name));
+  return Response.json({
+    name,
+    kind,
+    size: info.size,
+    saved: (info.mtime ?? new Date()).toISOString(),
+  });
+}
+
+/** GET /api/library/:name — the drawing itself, as a download. */
+async function getLibrary(name: string): Promise<Response> {
+  try {
+    const data = await Deno.readFile(libraryPath(name));
+    const svg = name.toLowerCase().endsWith(".svg");
+    return new Response(data, {
+      headers: {
+        "content-type": svg ? "image/svg+xml" : "application/dxf",
+        "content-disposition": `attachment; filename="${name.replace(/"/g, "")}"`,
+        "cache-control": "no-cache",
+      },
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(404, `no library entry called "${name}"`);
+  }
+}
+
+/** SHA-256 of some bytes, as hex — used to dedupe imported drawings. */
+async function shaHex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* ------------------------------------------------------- DXF thumbnails */
+
+// DXF has no native bitmap and the browser cannot render it, so a library
+// entry's preview is drawn by the converter — the same parser the 3D pipeline
+// uses — as a lightweight SVG of flattened outlines, cached beside the entry
+// under LIBRARY_DIR/.thumbnails (a dot-directory, so it never appears in the
+// library listing). SVG entries preview as themselves.
+const THUMB_DIR = `${LIBRARY_DIR}/.thumbnails`;
+// A looser flattening than the model's: thumbnails only need the silhouette.
+const THUMB_SAGITTA = 0.1;
+
+function libThumbPath(name: string): string {
+  return `${THUMB_DIR}/${name}.svg`;
+}
+
+async function dropThumbnail(name: string): Promise<void> {
+  await Deno.remove(libThumbPath(name)).catch(() => {});
+}
+
+/** Flattened outline curves -> an SVG that looks right on a dark tile. */
+function svgFromCurves(curves: number[][][]): string {
+  const flat = curves.flat();
+  if (!flat.length) throw new HttpError(422, "this drawing has no geometry to preview");
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const [x, y] of flat) {
+    if (x < minx) minx = x;
+    if (x > maxx) maxx = x;
+    if (y < miny) miny = y;
+    if (y > maxy) maxy = y;
+  }
+  const w = maxx - minx || 1, h = maxy - miny || 1;
+  const extent = Math.max(w, h);
+  const pad = extent * 0.02;
+  const stroke = Math.max(0.02, extent * 0.004);
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const left = r2(minx - pad), top = r2(miny - pad);
+  const right = r2(maxx + pad), bottom = r2(maxy + pad);
+  const out: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${left} ${top} `
+      + `${r2(right - left)} ${r2(bottom - top)}">`,
+    `<rect x="${left}" y="${top}" width="${r2(right - left)}" `
+      + `height="${r2(bottom - top)}" fill="#101216"/>`,
+    `<g fill="none" stroke="#e6e9ed" stroke-width="${stroke}" `
+      + 'stroke-linecap="round" stroke-linejoin="round">',
+  ];
+  // DXF's y axis points up; SVG's points down, so mirror about the middle.
+  const flip = miny + maxy;
+  for (const curve of curves) {
+    let d = "";
+    for (const [i, [x, y]] of curve.entries()) {
+      d += `${i ? "L" : "M"}${x.toFixed(2)} ${(flip - y).toFixed(2)}`;
+    }
+    if (d) out.push(`<path d="${d}"/>`);
+  }
+  out.push("</g></svg>");
+  return out.join("");
+}
+
+// One generation in flight per entry, so a grid of tiles does not race.
+const previewsInFlight = new Map<string, Promise<string>>();
+
+/**
+ * GET /api/library/:name/preview — an SVG the browser can show as the entry's
+ * thumbnail. SVG entries return their own file; DXF entries are flattened by
+ * the converter on first request and cached beside the library.
+ */
+async function serveLibraryPreview(name: string): Promise<Response> {
+  if (!LIBRARY_NAME.test(name)) throw new HttpError(400, "not a library entry name");
+  const svg = name.toLowerCase().endsWith(".svg");
+  try {
+    await Deno.stat(libraryPath(name));
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(404, `no library entry called "${name}"`);
+  }
+  // An SVG is its own thumbnail — the same pixels the user saved.
+  if (svg) return getLibrary(name);
+
+  let body: string;
+  try {
+    body = new TextDecoder().decode(await Deno.readFile(libThumbPath(name)));
+  } catch {
+    // Not cached yet: flatten the DXF once (shared by concurrent requests),
+    // then cache the SVG beside the entry.
+    await Deno.mkdir(THUMB_DIR, { recursive: true });
+    let gen = previewsInFlight.get(name);
+    if (!gen) {
+      gen = (async () => {
+        try {
+          const bytes = await Deno.readFile(libraryPath(name));
+          const tmp = `${THUMB_DIR}/.tmp-${crypto.randomUUID()}.dxf`;
+          await Deno.writeFile(tmp, bytes);
+          let svgText: string;
+          try {
+            const data = await runScript([tmp, "--preview", "--sagitta", String(THUMB_SAGITTA)]);
+            const curves = (data.pattern as { curves?: number[][][] })?.curves ?? [];
+            svgText = svgFromCurves(curves);
+          } finally {
+            await Deno.remove(tmp).catch(() => {});
+          }
+          const cachePath = libThumbPath(name);
+          const cacheTmp = `${THUMB_DIR}/.tmp-${crypto.randomUUID()}`;
+          await Deno.writeTextFile(cacheTmp, svgText);
+          await Deno.rename(cacheTmp, cachePath);
+          return svgText;
+        } finally {
+          previewsInFlight.delete(name);
+        }
+      })();
+      previewsInFlight.set(name, gen);
+    }
+    try {
+      body = await gen;
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(422, "could not draw a preview of this DXF");
+    }
+  }
+  return new Response(body, {
+    headers: {
+      "content-type": "image/svg+xml",
+      "cache-control": "no-cache",
+    },
+  });
+}
+
+/**
+ * POST /api/library/import — unpack the drawings embedded in the saved
+ * projects and add them to the library. Older projects predate the library,
+ * so their drawing (subject), stacked drawings and boundary (frame) only
+ * exist inside the .v2sproj blob; this is the backfill that turns them into
+ * reusable resources. Anything whose content is already in the library — or
+ * that turns up twice across projects — is skipped, so re-running is a no-op.
+ */
+async function importProjectsIntoLibrary(): Promise<Response> {
+  await Deno.mkdir(LIBRARY_DIR, { recursive: true });
+
+  // What the library already holds, by content hash, so nothing is duplicated.
+  const present = new Map<string, string>();   // name -> hash
+  for await (const entry of Deno.readDir(LIBRARY_DIR)) {
+    if (!entry.isFile || !LIBRARY_NAME.test(entry.name)) continue;
+    try {
+      present.set(entry.name, await shaHex(await Deno.readFile(`${LIBRARY_DIR}/${entry.name}`)));
+    } catch {
+      // an unreadable entry is left alone
+    }
+  }
+  const seen = new Set(present.values());
+
+  const imported: Array<{ name: string; kind: "svg" | "dxf"; from: string }> = [];
+  let duplicates = 0;    // already in the library (same bytes)
+  let skipped = 0;       // unreadable or unusable
+  let projectCount = 0;
+
+  const takenNames = new Set(present.keys());
+  const freeName = (wanted: string): string => {
+    if (!takenNames.has(wanted)) return wanted;
+    const stem = wanted.replace(/\.(svg|dxf)$/i, "");
+    const ext = wanted.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf";
+    for (let n = 2; ; n++) {
+      const cand = `${stem} (${n})${ext}`;
+      if (!takenNames.has(cand)) return cand;
+    }
+  };
+
+  /** Keep one embedded drawing: content-deduped, stored under `wanted`. */
+  const keep = async (
+    wantedStem: string,
+    embeddedName: string,
+    bytes: Uint8Array,
+    from: string,
+  ): Promise<void> => {
+    const kind = embeddedName.toLowerCase().endsWith(".svg") ? "svg" : "dxf";
+    if (!/\.(svg|dxf)$/i.test(embeddedName)) {
+      skipped++;
+      return;
+    }
+    const hash = await shaHex(bytes);
+    if (seen.has(hash)) {
+      duplicates++;
+      return;
+    }
+    seen.add(hash);
+    const stem = wantedStem.replace(/[\s.]+$/, "") || embeddedName.replace(/\.(svg|dxf)$/i, "");
+    const name = freeName(`${stem}.${kind}`);
+    const path = `${LIBRARY_DIR}/${name}`;
+    const tmp = `${LIBRARY_DIR}/.${name}.tmp-${crypto.randomUUID()}`;
+    await Deno.writeFile(tmp, bytes);
+    await Deno.rename(tmp, path);
+    takenNames.add(name);
+    imported.push({ name, kind, from });
+  };
+
+  for await (const entry of Deno.readDir(PROJECT_DIR)) {
+    if (!entry.isFile || !entry.name.endsWith(PROJECT_EXT)) continue;
+    projectCount++;
+    const stem = entry.name.slice(0, -PROJECT_EXT.length);
+    let project: {
+      format?: unknown;
+      drawing?: { name?: unknown; data?: unknown };
+      drawings?: Array<{ name?: unknown; data?: unknown }>;
+      boundary?: { name?: unknown; data?: unknown };
+    };
+    try {
+      project = JSON.parse(await Deno.readTextFile(`${PROJECT_DIR}/${entry.name}`));
+    } catch {
+      skipped++;
+      continue;
+    }
+    if (project?.format !== "vector2stl-project") {
+      skipped++;
+      continue;
+    }
+    const base = project.drawing;
+    if (base?.data && typeof base.data === "string" && typeof base.name === "string") {
+      try {
+        await keep(stem, base.name, base64ToBytes(base.data), `${entry.name}`);
+      } catch {
+        skipped++;
+      }
+    } else {
+      skipped++;
+    }
+    // Stacked drawings get their place in the stack as their name: 2, 3, …
+    for (const [i, layer] of (Array.isArray(project.drawings) ? project.drawings : []).entries()) {
+      if (!layer?.data || typeof layer.data !== "string" || typeof layer.name !== "string") {
+        skipped++;
+        continue;
+      }
+      try {
+        await keep(`${stem} ${i + 2}`, layer.name, base64ToBytes(layer.data), `${entry.name} (layer ${i + 2})`);
+      } catch {
+        skipped++;
+      }
+    }
+    // The boundary is the frame — kept as its own reusable resource too.
+    const boundary = project.boundary;
+    if (boundary?.data && typeof boundary.data === "string" && typeof boundary.name === "string") {
+      try {
+        await keep(`${stem} boundary`, boundary.name, base64ToBytes(boundary.data), `${entry.name} (boundary)`);
+      } catch {
+        skipped++;
+      }
+    }
+  }
+
+  return Response.json({
+    projects: projectCount,
+    imported,
+    duplicates,
+    skipped,
+    added: imported.length,
+  });
+}
+
+/** PUT /api/library/:name — replace an entry's content (its name stays). */
+async function putLibrary(req: Request, name: string): Promise<Response> {
+  if (!LIBRARY_NAME.test(name)) {
+    throw new HttpError(400, "a library name must end in .svg or .dxf");
+  }
+  const kind: "svg" | "dxf" = name.toLowerCase().endsWith(".svg") ? "svg" : "dxf";
+  if (!await libraryExists(name)) {
+    throw new HttpError(404, `no library entry called "${name}"`);
+  }
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    throw new HttpError(400, "expected a multipart form upload");
+  }
+  const bytes = await libraryContent(form, kind);
+  await writeLibrary(name, bytes);
+  await dropThumbnail(name);   // new content, new preview
+  const info = await Deno.stat(libraryPath(name));
+  return Response.json({
+    name,
+    kind,
+    size: info.size,
+    saved: (info.mtime ?? new Date()).toISOString(),
+  });
+}
+
+async function deleteLibrary(name: string): Promise<Response> {
+  try {
+    await Deno.remove(libraryPath(name));
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(404, `no library entry called "${name}"`);
+  }
+  await dropThumbnail(name);
+  return Response.json({ name, deleted: true });
 }
 
 /**
@@ -669,6 +1136,11 @@ async function serveStatic(pathname: string): Promise<Response | null> {
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
   try {
+    if (url.pathname === "/api/resources/import" && req.method === "POST") {
+      return Response.json(await importProjectResources(PROJECT_DIR, resources));
+    }
+    const resourceResponse = await resources.handle(req);
+    if (resourceResponse) return resourceResponse;
     if (url.pathname === "/api/trace/upload" && req.method === "POST") {
       return await handleTraceUpload(req);
     }
@@ -701,6 +1173,24 @@ Deno.serve({ port: PORT }, async (req) => {
       if (req.method === "GET") return await getProject(name);
       if (req.method === "PUT") return await putProject(req, name);
       if (req.method === "DELETE") return await deleteProject(name);
+    }
+
+    // The drawing library — every uploaded SVG/DXF kept as a reusable resource.
+    if (url.pathname === "/api/library" && req.method === "GET") return await listLibrary();
+    if (url.pathname === "/api/library" && req.method === "POST") return await createLibrary(req);
+    if (url.pathname === "/api/library/import" && req.method === "POST") {
+      return await importProjectsIntoLibrary();
+    }
+    const libPreview = url.pathname.match(/^\/api\/library\/(.+)\/preview$/);
+    if (libPreview && req.method === "GET") {
+      return await serveLibraryPreview(decodeURIComponent(libPreview[1]));
+    }
+    const libNamed = url.pathname.match(/^\/api\/library\/(.+)$/);
+    if (libNamed) {
+      const name = decodeURIComponent(libNamed[1]);
+      if (req.method === "GET") return await getLibrary(name);
+      if (req.method === "PUT") return await putLibrary(req, name);
+      if (req.method === "DELETE") return await deleteLibrary(name);
     }
 
     if (req.method === "GET") {

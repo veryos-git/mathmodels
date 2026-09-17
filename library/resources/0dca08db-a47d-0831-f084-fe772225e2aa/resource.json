@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "0dca08db-a47d-0831-f084-fe772225e2aa",
+  "name": "default_profile",
+  "kind": "profile",
+  "created": "2026-09-10T10:37:37.986Z",
+  "updated": "2026-09-10T10:37:37.986Z",
+  "revision": "bfbf0577-ccc0-4fd3-a7d4-255db148c2af",
+  "files": {
+    "drawing": {
+      "name": "default_profile.dxf",
+      "path": "revisions/bfbf0577-ccc0-4fd3-a7d4-255db148c2af/drawing.dxf"
+    }
+  },
+  "trace": null
+}

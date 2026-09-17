@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "7a605205-11a0-f24d-7dc4-00a02d8d8018",
+  "name": "paths_dwarf",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:39.062Z",
+  "updated": "2026-09-10T10:37:39.062Z",
+  "revision": "7c078d96-3a41-41a0-9e48-18ead469f677",
+  "files": {
+    "drawing": {
+      "name": "paths_dwarf.dxf",
+      "path": "revisions/7c078d96-3a41-41a0-9e48-18ead469f677/drawing.dxf"
+    }
+  },
+  "trace": null
+}

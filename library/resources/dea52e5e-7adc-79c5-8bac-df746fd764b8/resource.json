@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "dea52e5e-7adc-79c5-8bac-df746fd764b8",
+  "name": "Part Studio 1 - window_boundry",
+  "kind": "pattern",
+  "created": "2026-09-10T10:37:38.044Z",
+  "updated": "2026-09-10T10:37:38.044Z",
+  "revision": "3dbcb8a9-104a-4903-a9ab-99f0db13dc08",
+  "files": {
+    "drawing": {
+      "name": "Part Studio 1 - window_boundry.dxf",
+      "path": "revisions/3dbcb8a9-104a-4903-a9ab-99f0db13dc08/drawing.dxf"
+    }
+  },
+  "trace": null
+}
