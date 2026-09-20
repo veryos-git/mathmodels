@@ -2,7 +2,7 @@ import { atomicWrite, ResourceStore } from "./resources.ts";
 function assert(value: unknown, message = "Assertion failed"): asserts value {
   if (!value) throw new Error(message);
 }
-function drawing(name = "Ghost", kind = "pattern") {
+function drawing(name = "Ghost", kind = "subject") {
   const form = new FormData();
   form.set("name", name);
   form.set("kind", kind);
@@ -22,7 +22,7 @@ async function isolated(test: (store: ResourceStore) => Promise<void>) {
     await Deno.remove(root, { recursive: true });
   }
 }
-Deno.test("traced pattern survives restart, rename and replacement with recoverable revisions", () =>
+Deno.test("traced subject survives restart, rename and replacement with recoverable revisions", () =>
   isolated(async (store) => {
     const form = drawing();
     form.set("original", new File([new Uint8Array([1, 2, 3])], "scan.png"));
@@ -77,6 +77,27 @@ Deno.test("HTTP resource CRUD and validation leave existing records intact", () 
     assert((await request("/" + record.id, "DELETE"))?.status === 200);
     assert((await request("/" + record.id))?.status === 404);
     assert((await store.list()).length === 0);
+  }));
+Deno.test("legacy pattern manifests and clients are read and stored as subject", () =>
+  isolated(async (store) => {
+    const created = await store.save(drawing("Old subject"));
+    // Rewrite the manifest the way a pre-rename save stored it.
+    const manifest = `${store.root}/${created.id}/resource.json`;
+    const record = JSON.parse(await Deno.readTextFile(manifest));
+    record.kind = "pattern";
+    await Deno.writeTextFile(manifest, JSON.stringify(record));
+    assert((await store.get(created.id)).kind === "subject");
+    assert((await store.list())[0].kind === "subject");
+    // An older client still posting "pattern" is accepted and stored canonically.
+    const saved = await store.save(
+      drawing("Legacy client", "pattern"),
+      "123e4567-e89b-12d3-a456-426614174000",
+    );
+    assert(saved.kind === "subject");
+    const onDisk = JSON.parse(
+      await Deno.readTextFile(`${store.root}/${saved.id}/resource.json`),
+    );
+    assert(onDisk.kind === "subject");
   }));
 Deno.test("invalid uploads and trace settings do not publish resources", () =>
   isolated(async (store) => {
@@ -138,11 +159,11 @@ Deno.test("project import preserves trace images and roles and is repeatable", a
     assert(first.added === 3 && first.skipped.length === 0);
     const records = await store.list();
     assert(new Set(records.map((r) => r.kind)).size === 3);
-    const pattern = records.find((r) => r.kind === "pattern")!;
-    assert(pattern.trace?.threshold === 99);
+    const subject = records.find((r) => r.kind === "subject")!;
+    assert(subject.trace?.threshold === 99);
     assert(
       await Deno.readTextFile(
-        `${store.root}/${pattern.id}/${pattern.files.original!.path}`,
+        `${store.root}/${subject.id}/${subject.files.original!.path}`,
       ) === "original",
     );
     const repeated = await importProjectResources(projects, store);
@@ -165,7 +186,7 @@ Deno.test("resource previews cover SVG and DXF, reuse cached geometry, and refre
     assert(response?.status === 200);
     assert(response.headers.get("content-type")?.includes("image/svg+xml"));
     assert((await response.text()).includes("<path"));
-    for (const kind of ["pattern", "boundary", "profile"]) {
+    for (const kind of ["subject", "boundary", "profile"]) {
       const form = drawing("DXF input", kind);
       form.set("drawing", new File(["first"], "input.dxf"));
       const record = await previewStore.save(form);

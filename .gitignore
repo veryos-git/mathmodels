@@ -1,3 +1,8 @@
 # .env holds per-machine local ports (managed by Project Presenter)
 .env
 .env.*
+
+# Generated Python environment and bytecode
+.venv/
+__pycache__/
+*.pyc

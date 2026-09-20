@@ -9,10 +9,20 @@ of a hand-drawn sketch** — traced to an SVG right in the page first.
 
 ![a gothic window with its faces painted](docs/preview.png)
 
+## Workflows and calibration
+
+Use the **Inputs → Shape → Paint → Export** panels for stained glass, or start
+**Gothic tracery** for separate frame/cusp profiles and revolved endings.
+**Filaments & calibration** provides numbered thickness coupons and saved
+backlit-color measurements. Tracing can preserve large black eyes and spots
+as closed shapes. See the [workflow guide](docs/workflows.md) for each path,
+reference geometry, calibration, and command-line options. The project's
+vocabulary is fixed in [docs/terminology.md](docs/terminology.md).
+
 ## Reusable resources
 
-The **Resource library** stores named patterns, boundaries and sweep profiles.
-**Save pattern** in the Trace editor preserves the original image, paint edits,
+The **Resource library** stores named subjects, boundaries and sweep profiles.
+**Save subject** in the Trace editor preserves the original image, paint edits,
 trace settings and SVG. Resources have file-based revisions; model projects
 keep self-contained snapshots. See [resource storage and migration](docs/resource-storage.md)
 for the workflow, file layout and API.
@@ -39,7 +49,7 @@ traced SVG to the builder.
 
 **3D model** — the relief builder: walls, sizes, palette, painting, holes,
 boundary, and export. A **← Start** button returns to the landing screen. When
-the drawing came from a trace, an **Edit trace** button is always available to
+the subject came from a trace, an **Edit trace** button is always available to
 jump back and re-tune it — including for projects reopened later, which keep
 the source photo and its trace settings.
 
@@ -55,7 +65,7 @@ Two trace modes matter for what you get downstream:
 
 So a drawing of enclosed shapes (flower petals, window panes) traces as
 *outline*; a loose pencil sketch traces as *centerline*. The trace's stroke
-width is cosmetic — the relief reads the outlines, not the stroke.
+width is cosmetic — the relief reads the traced lines, not the stroke.
 
 ## Running it
 
@@ -75,7 +85,7 @@ You need Deno and Python 3 with the `venv` module — on Debian/Ubuntu that's
 
 Open the page and pick a starting point on the **Start** screen (trace a photo,
 open a drawing or a project, or use the example). Tune the sizes in the 3D
-step and press **Generate 3D**. The browser gets the face outlines and extrudes
+step and press **Generate 3D**. The browser gets the face shapes and extrudes
 them itself, so painting is instant — nothing goes back to the server until
 you save.
 
@@ -165,51 +175,52 @@ filament of their own.
 Mirroring pairs faces by reflected centroid and only accepts a pair when the
 areas agree too; it reports any face that had no partner rather than guessing.
 
-## Stacked drawings
+## Layered subjects
 
-One drawing is the usual case, but you can stack several: **add drawing…**
-under *drawings* picks another DXF or SVG and puts it on its own **layer** —
-a complete model of its own, frame and faces, sitting **on top of the frame
-of the layer below** and centred on it horizontally. Dropping a second file
-on the page asks whether to add it as a layer or start over.
+One subject is the usual case, but you can layer several: **add subject…**
+under *layered subjects* picks another DXF or SVG and adds it as its own
+**layered subject** — a complete model of its own, frame and faces, sitting
+**on top of the frame of the one below** and centred on it horizontally.
+Dropping a second file on the page asks whether to add it as a layered subject
+or start over.
 
-Every layer shares the one palette: three hues, one brightness scale, the
-same mixes. Painting is per face wherever it sits — click a face on any layer
-and it takes the swatch; **Fill all** and **Random all** paint every layer at
-once. The checkbox on each layer's row hides it, which is how you reach a
-lower layer's faces once a taller stack is in the way.
+Every layered subject shares the one palette: three hues, one brightness scale,
+the same mixes. Painting is per face wherever it sits — click a face on any
+layered subject and it takes the swatch; **Fill all** and **Random all** paint
+every one at once. The checkbox on each row hides it, which is how you reach a
+lower subject's faces once a taller stack is in the way.
 
 Because the colours are shared, exporting never grows: three hues and a solid
 frame still come out as three colour STLs plus `walls.stl`, each file holding
-its colour's pieces from **every** layer, already aligned on top of each
-other. The 3MF likewise keeps its extruder count.
+its colour's pieces from **every** layered subject, already aligned on top of
+each other. The 3MF likewise keeps its filament slot count.
 
-Each layer keeps its own DXF-sublayer selection, its own mounting holes, and
-its own scale — every drawing is fitted to the shared *y size* on its own.
-Wall sizes, the palette range, the sweep profile and the seed are shared by
-all layers: change them and every layer rebuilds together. Projects with
-several layers save as version 2 and reopen with the stack intact; a single
-layer saves exactly as before.
+Each layered subject keeps its own sublayer selection, its own mounting holes,
+and its own scale — every subject is fitted to the shared *y size* on its own.
+Wall sizes, the palette range, the sweep profile and the seed are shared by all
+of them: change them and everything rebuilds together. Projects with several
+layered subjects save as version 2 and reopen with the stack intact; a single
+subject saves exactly as before.
 
-A layer's height is the frame height of everything under it, so a face you
-paint *taller than the frame* pokes into the layer above — keep face heights
-under the wall height when stacking.
+A layered subject's height is the frame height of everything under it, so a face
+you paint *taller than the frame* pokes into the one above — keep face heights
+under the wall height when layering.
 
 ## Settings
 
 | Setting | What it does |
 | --- | --- |
 | wall width | thickness of the ribbon each curve is buffered into |
-| keep walls inside the outline | trace the outermost lines along the inside of the wall, so the model comes out no wider than the drawing |
+| keep walls inside the silhouette | trace the outermost lines along the inside of the wall, so the model comes out no wider than the subject |
 | wall overlap | how far each face reaches into the wall around it, so the two fuse when printed |
 | wall height | how tall the walls stand |
 | layer height | what your slicer prints in; every palette shade is a whole number of these |
 | lowest / tallest face | the ends of the palette's height range |
 | curve accuracy | max chord error when flattening arcs, circles and splines |
-| y size | how tall the finished model is in mm, walls included; the width follows the drawing's proportions |
+| y size | how tall the finished model is in mm, walls included; the width follows the subject's proportions |
 | scale | what the y size works out to — set it yourself to scale by hand instead |
 | seed | fixes the starting heights so a result is reproducible |
-| layers | which layers to read; shown when a drawing has more than one |
+| sublayers | which sublayers to read; shown when a subject has more than one |
 
 Once a model is on screen every one of these applies **as soon as you leave the
 box** — tab out, press Enter, or click the spinner arrows — and the model comes
@@ -218,7 +229,7 @@ are never rerolled behind your back, which is what the seed, **↻** and the
 *Random* buttons are for. Changes made while a rebuild is running collapse into
 a single extra pass rather than piling up.
 
-*Lowest* / *tallest face* need no rebuild at all — the outlines do not depend on
+*Lowest* / *tallest face* need no rebuild at all — the wall curves do not depend on
 them, so only the palette and the shading change. A face painted at 0.7 mm is
 still 0.7 mm; it just sits at a different point of the range.
 
@@ -251,7 +262,7 @@ hues     // the three hue angles, in degrees
 | Colour by area | rank by size, a hue and height per band |
 | Height by area | bigger faces stand taller, colours untouched |
 | Radial rings | rings stepping out from the middle |
-| Vertical gradient | low at the foot of the drawing, tall at the top |
+| Vertical gradient | low at the foot of the subject, tall at the top |
 | Checkerboard | two colours alternating over a 10 mm grid |
 | Cap the tall ones | crown whatever already stands high — builds on the current state |
 | Flatten | everything back to one thin layer |
@@ -281,6 +292,15 @@ the page can.
 By default the frame is **one solid in its own colour** — *use black frame* is
 on — and exports as its own `walls.stl` on its own extruder.
 
+A **frame-only** model is the boundary plus the subject's own lines. When the
+subject does not reach the boundary — a small motif inside a lantern-sized crop
+— it would print as a loose second part, so the converter draws the shortest
+**connection rib** from every floating piece to the boundary (or, with no walled
+boundary, to the largest piece). The ribs are walls like any other: the frame's
+own width, height and colour. Full models keep the clean frame and let the
+painted faces do the joining; the 3MF export's *Frame only* version carries the
+ribs, while its colour versions do not.
+
 Turn it off and the frame is built instead from thin layers cycling through the
 palette's three hues until it reaches the wall height — five 0.2 mm layers for a
 1 mm frame — so it prints from filaments you have already loaded, no extruder of
@@ -289,7 +309,7 @@ its own needed.
 | Control | |
 | --- | --- |
 | use black frame | one solid in its own colour (the default) |
-| frame layer (mm) | with it off, the thickness of each band; 0.2 mm is a typical print layer |
+| frame band (mm) | with it off, the thickness of each band; 0.2 mm is a typical print layer |
 
 Three base hues plus a solid frame is **four** extruders, which is what a
 Snapmaker holds — the mixes need no filament of their own, since they are built
@@ -298,10 +318,10 @@ model ever needs more.
 
 The mixed frame reads as a dark edge from the side, where all three colours are
 in view. Straight down from above you see only the **topmost** layer, so that
-band's colour is what the frame's top surface will be — change *frame layer* to
+band's colour is what the frame's top surface will be — change *frame band* to
 land the last band on the hue you want.
 
-It is not free: each band is a full extrusion of the wall outline, so the frame
+It is not free: each band is a full extrusion of the wall ribbon, so the frame
 costs one solid per band — a 2 mm frame in 0.2 mm layers is roughly ten times
 the frame triangles, which on the gothic example took the STL from 2.9 MB to
 16 MB. Slicers cope; it is only worth knowing before you wonder where the size
@@ -320,7 +340,7 @@ the join. It costs a little geometry — 0.1 mm on the gothic example takes the
 STL from 57k to 71k triangles — and nothing else:
 
 - the outside of the model does not move; the growth is clipped to the
-  silhouette, so a face on the edge of the drawing cannot spill past the frame's
+  silhouette, so a face on the edge of the subject cannot spill past the frame's
   outer face
 - face ids are settled before it is applied, so changing it never renumbers
   what you have painted — the page re-fits the faces on the spot and keeps the
@@ -332,23 +352,23 @@ STL from 57k to 71k triangles — and nothing else:
 
 Set it to `0` for the exact fit.
 
-## Keeping the walls inside the outline
+## Keeping the walls inside the silhouette
 
 A curve is traced down the **middle** of its wall, so the frame stands half a
-wall width outside the drawing: a 100 mm square walled 10 mm wide comes off the
-printer 110 mm across. That is usually what you want — the drawing is the
+wall width outside the subject: a 100 mm square walled 10 mm wide comes off the
+printer 110 mm across. That is usually what you want — the subject is the
 skeleton and the wall hangs on it either side.
 
-Tick **keep walls inside the outline** and the outermost line becomes the edge
+Tick **keep walls inside the silhouette** and the outermost line becomes the edge
 of the model instead. That curve is moved half a wall width inwards, everything
 else is trimmed to stay behind it, and the same square comes out at exactly
-100 mm — walls still 10 mm thick, opening 80 mm. Use it when the drawing *is*
+100 mm — walls still 10 mm thick, opening 80 mm. Use it when the subject *is*
 the finished size: a part that has to fit a 100 mm slot, a tile that has to butt
 against its neighbour.
 
 Only the outside moves:
 
-- curves inside the drawing keep running down the middle of their walls, and a
+- curves inside the subject keep running down the middle of their walls, and a
   shape sitting inside another one — an island in a face — is left alone; it has
   nothing to do with how wide the model prints
 - a shape with no room to pull a wall into is left as drawn: an open stroke has
@@ -367,7 +387,7 @@ which renumbers the faces and starts the painting fresh.
 
 By default the frame is not flat: the bundled **`default_profile.dxf`** — a
 small triangular moulding — is loaded when the page opens and swept along every
-curve of the drawing, the way a CAD sweep runs a profile along a path. The
+curve of the subject, the way a CAD sweep runs a profile along a path. The
 profile row under the wall settings shows what is loaded; **sweep profile…**
 picks a different DXF or SVG, and the row's ✕ goes back to flat walls (the
 classic behaviour: every curve buffered to *wall width* and extruded to *wall
@@ -377,12 +397,12 @@ a gothic window) shows the shape of it.
 **profile width (×)** stretches the section sideways — ×2 doubles the frame's
 width while its height stays as drawn.
 
-The profile drawing's own axes become the sweep's: **x runs across the path**,
+The profile's own axes become the sweep's: **x runs across the path**,
 **y is the height**. It is re-anchored to the centre of its base — draw the
 section sitting on the x axis, centred on the origin, and it lands on the path
-exactly. Loose entities are fine: the outline is rebuilt from whatever closes
+exactly. Loose entities are fine: the closed section is rebuilt from whatever closes
 into a ring, and construction lines inside it are ignored. The profile is used
-at the millimetres it was drawn in — it never scales with the drawing.
+at the millimetres it was drawn in — it never scales with the subject.
 
 While a profile is set:
 
@@ -390,7 +410,7 @@ While a profile is set:
   boxes grey out); the faces, the *y size* fit and the palette keep working
   against those dimensions, so painting is unchanged
 - the frame is always **one solid in its own colour** — the palette-cycled
-  frame layers are hidden, a sloped moulding has no flat bands to paint
+  frame bands are hidden, a sloped moulding has no flat bands to paint
 - **mounting holes are off**: cutting them would need a mesh boolean the
   converter does not have, and placing one is refused
 
@@ -404,50 +424,55 @@ one.
 
 ## Cropping to a boundary
 
-Drop a **second** drawing — a closed polygon — and it **bounds** the pattern:
-everything that lies outside it is cut away. This is how a pattern becomes a
+Drop a **second** subject — a closed polygon — and it **bounds** the subject:
+everything that lies outside it is cut away. This is how a subject becomes a
 leaf, a badge, a pendant or a window shape instead of a full sheet of it.
 
-- **boundary…** (under *drawings*) picks the polygon. It is read in the
-  pattern's *own coordinates* and scaled with it, so draw it over the pattern
-  in the same file and it lands exactly where you drew it. The ✕ goes back to
-  the whole drawing. Loading one sets *scale* to **×1 in the boundary's own
-  units** — the part comes out at exactly the size the boundary file says.
-- **centre & fit to the pattern** (on by default) re-anchors the boundary for
+- **boundary…** picks the polygon. It is read in the subject's *own
+  coordinates* and scaled with it, so draw it over the subject in the same file
+  and it lands exactly where you drew it. The ✕ goes back to the whole subject.
+  Loading one sets *scale* to **×1 in the boundary's own units** — the part
+  comes out at exactly the size the boundary file says.
+- **centre & fit to the subject** (on by default) re-anchors the boundary for
   files that do not share a coordinate system: the polygon is centred on the
-  pattern's box and scaled uniformly — never stretched — until it just fits
-  inside it. This is what makes a boundary exported from one CAD tool crop an
-  SVG pattern exported from another. Turn it off to keep the boundary exactly
+  subject's box and scaled uniformly — never stretched — until it just fits
+  inside it. This is what makes a boundary exported from one CAD tool crop a
+  subject exported from another. Turn it off to keep the boundary exactly
   where it was drawn.
 - **wall along the boundary** (on by default) turns the boundary into a wall
-  of its own, so the cropped pattern comes out with a rim and every face along
+  of its own, so the cropped subject comes out with a rim and every face along
   the cut is enclosed like any other. Turn it off for a **flush cut**: faces
   the boundary crosses are trimmed to it, but end open at the cut edge.
 - **boundary size (×)** resizes the polygon about its own centre, and
-  **nudge x / y** slides it over the drawing in finished millimetres — the two
+  **nudge x / y** slides it over the subject in finished millimetres — the two
   together place a crop by eye when it was not drawn exactly where you want it.
 - **use boundary size (1:1)** puts the scale back on ×1 in the boundary's own
   units — the exact size the boundary DXF or SVG was drawn at — with the
-  pattern scaled to whatever fills it. It is the quick way back after the
+  subject scaled to whatever fills it. It is the quick way back after the
   *y size* or *scale* boxes have moved you off it.
-- **window content** is the pattern seen through the frame: **content size (×)**
-  resizes it about its own centre and **content x / y** slide it under the
-  boundary in finished millimetres, while the boundary keeps its size. Where
-  the boundary controls move the *frame*, these move the *picture* behind it.
-- **position window content…** opens a 2D preview of the frame and the pattern
-  together. Drag to slide the content, scroll to resize it — both redraw
+- **subject inside the boundary** is the subject seen through the boundary:
+  **subject size (×)** resizes it about its own centre and **subject x / y**
+  slide it under the boundary in finished millimetres, while the boundary keeps
+  its size. Where the boundary controls move the *crop*, these move the
+  *subject* behind it.
+- **position subject…** opens a 2D preview of the boundary and the subject
+  together. Drag to slide the subject, scroll to resize it — both redraw
   instantly, without waiting for the 3D rebuild — then **Done** re-runs the
-  model once.
+  model once. Sliding or resizing the subject never moves the painting: each
+  face is matched in the subject's own coordinates, so it keeps its colour and
+  thickness. If the crop does cut a painted face away or fold two into one while
+  you position, the model still rebuilds and the status line reports the faces
+  that were reset.
 
 With a boundary loaded, *y size* and *scale* fit the **crop**, not the
-pattern — the boundary is the finished outline, and *scale* ×1 means the
-boundary file's own units. The boundary is shared across stacked drawings,
-applied to each at its own scale (and, when one is set, the base drawing's
+subject — the boundary is the finished silhouette, and *scale* ×1 means the
+boundary file's own units. The boundary is shared across layered subjects,
+applied to each at its own scale (and, when one is set, the base subject's
 scale so the nudge means the same place on every layer).
 
-The polygon is read from every closed outline in its file — a circle is a
-boundary, a rectangle is, and several shapes crop the pattern once each. An
-outline drawn inside another one makes a hole in it, the way a filled shape
+The polygon is read from every closed shape in its file — a circle is a
+boundary, a rectangle is, and several shapes crop the subject once each. A
+shape drawn inside another one makes a hole in it, the way a filled shape
 would: two concentric circles crop to a ring. Mounting holes still cut through
 the result; a swept profile still forms the frame (its rim follows the
 boundary). The boundary travels with a saved project, like the profile does.
@@ -469,7 +494,7 @@ when a hole splits a face in two or swallows a small one whole.
 
 ## Saving and reopening a project
 
-A project holds everything needed to pick the work back up: the drawing itself,
+A project holds everything needed to pick the work back up: the subject itself,
 every setting, the layer selection, the palette's three hues, the frame choice,
 every face's stack of coloured layers, the holes, and the callback script. There are two places to put one.
 
@@ -488,14 +513,14 @@ drawing.
 page to reopen. Use this to move work between machines or to keep a copy
 outside the app.
 
-Either way the drawing is embedded rather than referenced, so a project stands
+Either way the subject is embedded rather than referenced, so a project stands
 alone. A drawing that was made by tracing a photo keeps its **source image and
 trace settings** too, so reopening a project brings the trace step back with
 them — tweak a knob and press **Use this trace** to re-commit. With several
-stacked drawings the project holds every layer — its drawing, scale, sublayers,
+layered subjects the project holds every layer — its subject, scale, sublayers,
 faces and holes — and is written as format version 2; single-drawing projects
 keep version 1, and both open in either direction. Face ids are derived from
-the drawing and the wall settings; if a project no longer produces the same
+the subject and the wall settings; if a project no longer produces the same
 number of faces, it says so and starts fresh instead of pinning colours to the
 wrong faces.
 
@@ -514,11 +539,11 @@ save button; the state it sends is intercepted and written out as a project.
 *y size* is the size control: **50 mm** by default, and the finished model is
 that tall including the walls, which stand half their width outside the
 outermost curve on each side — unless they are
-[kept inside the outline](#keeping-the-walls-inside-the-outline), when the
-drawing alone is the size. The width follows from the drawing's own
+[kept inside the silhouette](#keeping-the-walls-inside-the-silhouette), when the
+subject alone is the size. The width follows from the subject's own
 proportions — 50 mm of the example works out at 22.6 × 50.0 mm.
 
-Drop a drawing in and it is fitted straight away, whatever units it was drawn
+Drop a subject in and it is fitted straight away, whatever units it was drawn
 in, so an SVG in pixels needs no conversion. *scale* shows the multiplier that
 came out of it (`×0.597459`); set that instead and *y size* follows, so the two
 boxes always agree. Widening the walls re-fits the scale rather than quietly
@@ -529,106 +554,85 @@ get to resize finished work.
 
 ## Saving the model
 
-Downloads are named after the **project name**, not the drawing file: name it
+Downloads are named after the **project name**, not the subject file: name it
 `Rose Window v2` and you get `Rose Window v2.stl`, `Rose Window v2.3mf`,
 `Rose Window v2-1-orange.stl` and so on, whatever `.dxf` it grew out of. The
-name is suggested from the drawing when you first drop one in, and characters a
+name is suggested from the subject when you first drop one in, and characters a
 project name cannot hold become `-`.
 
 - **Download STL** — one file containing the walls and every face, exactly as
   previewed.
-- **Export 3MF (Snapmaker)** — a single 3MF holding every **colour
-  combination**: the colour groups (which faces are printed together) stay put,
-  while the colours trade places across them. A two-colour model has two
-  combinations, three colours six, and so on — every permutation. Each
-  combination is written as one merged object. Every export also always
-  carries the two plain printable versions on their own **build plates** — the
-  whole model in one colour, and the frame alone — and the combinations fill
-  the remaining plates, one plate at a time (see *3MF* below). Under the
-  button, the **3MF surface patterns** checkboxes repeat every combination
-  once per ticked pattern — hilbert curve, concentric, monotonic and friends —
-  so one file compares every colour arrangement against every fill pattern.
-  See *3MF* below.
+- **Download .3mf (BambuStudio)** / **Download .3mf (Snapmaker Orca)** —
+  choose colour arrangements from top-view thumbnails, then download the selected
+  objects as a printer-specific project (P1S / U1, 0.4 mm nozzles). The default
+  selection targets about three plates. Plate 1 includes a single-hue model,
+  a frame-only model, and a black-frame-plus-one-hue model. One surface pattern
+  applies to all selected objects; patterns do not multiply the object count.
+  Plate diagrams show the reserved prime-tower space. Open the file **as a project**
+  to retain printer settings, colours, grouping and plate placement.
 - **Export STLs by colour** — one STL per hue, named for the hue in use
   (`…-1-orange.stl`, `…-2-teal.stl`, …), for multi-material printing. Each
-  *layer* goes to its own colour's file, so a stacked face is split across them
+  *layer* goes to its own colour's file, so a face's paint stack is split across them
   at the right heights. A solid frame adds `…-walls.stl`; a mixed frame has its
   bands filed under their own colours instead.
   Browsers ask for permission the first time a page saves several files at once.
 
 ## 3MF
 
-A 3MF is a zip. The geometry is plain 3MF core — one `.model` per part under
-`3D/Objects/`, each holding `<vertices>` and `<triangles>` — and the **colour
-is not in the mesh at all**. It lives in `Metadata/model_settings.config`:
+The download buttons create a ZIP-based 3MF project containing shared mesh
+resources, complete assembly objects, per-part filament assignments and embedded
+printer settings. The Bambu Studio target uses the P1S profile; the Snapmaker
+Orca target uses the U1 profile. Both use the object/component structure found
+in the supplied reference projects.
 
-```xml
-<object id="4">
-  <metadata key="name" value="2-lime"/>
-  <metadata key="extruder" value="2"/>     <!-- this is the colour -->
-  <part id="3" subtype="normal_part"> … </part>
-</object>
-```
-
-The export writes that flavour: the one Snapmaker's slicer (a Bambu Studio
-fork) reads, with the production extension and a `[Content_Types].xml`,
-`_rels/.rels` and `3D/_rels/3dmodel.model.rels` to match. Palette row *n*
-becomes extruder *n*, so orange is extruder 1 and violet is extruder 3; a solid
-frame takes the next one after those.
-
-Every part is placed with the **same** transform, centred on the 270 × 270 bed,
-so the colours stay registered on top of each other. This matters: importing
-loose STLs makes the slicer centre each one independently, which pulls them out
-of alignment — in the reference file this project was built from, the loose
-colours sat up to 22 mm away from the frame.
-
-No printer profile is written, so opening the file uses whatever printer and
-filaments you already have selected rather than overriding them. Three hues and
-a solid frame come to four extruders; turning the black frame off puts the
-frame on the palette's own colours and brings that down to three.
-
-The 3MF button writes **one file** containing every permutation of the palette
-colours actually used — two colours, two combinations; three colours, six. Each
-combination is a merged multi-colour object: the same colour groups exist in
-each, but the extruder a group gets is swapped, so `orange-green` and
-`green-orange` are the two ways a two-colour model can be loaded without
-repainting. The frame (an unnumbered group) keeps its extruder in every
-combination; only the numbered palette rows trade places.
+Colour groups keep their geometry while filament assignments are permuted.
+The selection dialog chooses which arrangements to include. Frame components
+remain aligned with the filled regions, and each selected version is positioned
+as a whole object. A solid unnumbered frame stays black across colour variations.
 
 ### Build plates
 
-The slicer's project format groups the build into **plates** — `Metadata/
-model_settings.config` holds one `<plate>` per plate with its `model_instance`
-list, and an `<assemble>` block places every object on its plate. The export
-uses that to keep every version printable without overflowing the bed:
+The selection dialog and exporter share one packing plan. Each selected model
+is a single assembly, with its colour volumes kept together. Only assemblies
+appear in the 3MF build list. Each assembly belongs to exactly one plate; build
+transforms include the slicer's global plate-grid offsets.
 
-| Plate | Name | What is on it |
-| --- | --- | --- |
-| 1 | `single_color_version` | the whole relief — faces and frame — as one colour on one extruder, for a single-spool test print |
-| 2 | `frame_only_version` | just the frame (the unnumbered groups), for checking the rim alone |
-| 3+ | `multi_color_versions` (then unnamed) | the colour/pattern combinations, as many as fit, spilling onto the next plate |
+Plate 1 always includes the three colour-comparison versions — single hue,
+frame only and black frame plus one hue — followed by selected colour
+arrangements. The flat 0.2 mm silhouette plate is always exported as well; it
+joins plate 1 when there is room and otherwise starts the next plate rather
+than failing the export. It is extruded one 0.2 mm layer shaped like the
+model's silhouette: the boundary when one crops the subject, otherwise
+the filled silhouette of the frame. Remaining arrangements fill subsequent
+plates. The export refuses models too large to fit the three required versions
+together with tower clearance; it does not silently rescale them. Frame-only
+exports remain available as STL.
 
-Plates 1 and 2 are built from the *same* meshes as the combinations — nothing
-new to model — so they add no geometry work, only their own object files the
-way every combination already has one. A drawing with no faces ships only what
-it has: a frame-only drawing gets its one combination and no version plates.
-When the frame is *mixed* (its layers filed under the palette rows) there is no
-unnumbered frame volume left to print alone, so that model skips the frame-only
-plate. The example `example_3dobject_versions.3mf` in the project root shows
-the same three plates hand-made in the slicer. A plain colour-split 3MF
-(an output path ending `.3mf` without `--variations`) keeps its colour parts
-on the first, unnamed plate and adds the two version plates after it.
+P1S plates use a 256 mm bed and avoid the excluded front-left corner. U1 plates
+use the reference profile's 270 mm bed at (0.5, 1) mm. Both reserve space for a
+rectangular prime tower, its brim and at least 5 mm additional clearance, using
+all export colours for a conservative reservation on every plate. Default
+reservations are at least 54 × 54 mm and include extra depth headroom of
+25% or 15 mm beyond the estimate, growing for finer layers or taller models.
+The saved profiles disable tower ribs/cones, object brims, skirts and supports,
+whose footprints would otherwise change the packing. Changing these settings
+inside a slicer requires checking the layout again.
+
+The two machine profiles support four filament slots including black, so select
+at most three other hues. Assigned filament colours are included; material and
+process settings use the reference PLA profiles. Thumbnail colours show group
+assignments, not a simulation of transmitted light through stacked layers.
+
+See [3MF implementation and validation](docs/3mf-export.md) for profile provenance,
+format details and the limits of pre-slicing tower estimates. The older direct
+CLI `out.3mf` colour-split writer remains a legacy path; use `--slicer-options`
+for the new plate-aware export.
 
 ### Surface patterns
 
-The **3MF surface patterns** checkboxes add a second axis to that grid: every
-colour combination is repeated once per ticked pattern, so a three-colour model
-with four patterns comes back as 24 objects. Each plate is filled before the
-next one starts, so a big comparison simply arrives on several build plates
-(plate 1 the single-colour version, plate 2 the frame-only version, then the
-colour/pattern plates). A pattern is how the slicer's nozzle travels to fill a
-solid layer — the top and bottom surfaces of the relief. The checkboxes are the
-eight the slicer knows:
+Choose one surface pattern in the export dialog. Colour arrangements have
+priority; the selected pattern applies to every selected version. The supported
+pattern names are:
 
 | Checkbox | 3MF value | What the nozzle draws |
 | --- | --- | --- |
@@ -660,20 +664,20 @@ Both vector readers produce the same thing — flattened polylines in millimetre
 conversion step.
 
 **DXF** — `LINE`, `ARC`, `CIRCLE`, `ELLIPSE`, `LWPOLYLINE`, `POLYLINE` and
-`SPLINE`, with `INSERT` block references exploded. Layers come from the drawing.
+`SPLINE`, with `INSERT` block references exploded. Sublayers come from the file.
 
 **SVG** — `path` (all commands, including arcs and relative forms), `rect`
 (incl. rounded), `circle`, `ellipse`, `line`, `polyline`, `polygon`, plus
 `<use>` references. Transforms are applied, nested groups included. Groups name
 the layers, using the Inkscape label when there is one, so the layer picker
 works the same way. Hidden elements (`display:none`, `visibility:hidden`) are
-left out. Only outlines matter — fills and strokes are ignored.
+left out. Only the paths matter — fills and strokes are ignored.
 
-**Sizing.** SVG's y axis points down and the model's points up, so the drawing
+**Sizing.** SVG's y axis points down and the model's points up, so the subject
 is flipped for you. Lengths follow the SVG spec: a page declared in physical
 units (`width="100mm"`) comes out at that size, and a unitless page is read as
 CSS pixels at 96 dpi, so `100` becomes 26.46 mm. In the page none of that
-matters — *y size* fits the drawing to the millimetres you want whatever it
+matters — *y size* fits the subject to the millimetres you want whatever it
 was drawn in. On the command line, set `--scale` yourself; for a unitless page
 meant to be millimetres, use `3.7795`.
 
@@ -689,7 +693,7 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --wall-width 1.0 --seed 7
 .venv/bin/python tools/dxf2stl.py drawing.svg out.stl --scale 3.7795
 .venv/bin/python tools/dxf2stl.py sketch.dxf --inspect     # layers + geometry counts
-.venv/bin/python tools/dxf2stl.py sketch.dxf --regions     # face outlines as JSON
+.venv/bin/python tools/dxf2stl.py sketch.dxf --regions     # face shapes as JSON
 
 # heights.json: {"0": 1.1, "3": 0.2}   holes.json: [{"x": 12, "y": 80, "d": 4}]
 # --wall-stack takes the same layer list for the frame
@@ -698,16 +702,19 @@ The converter runs standalone:
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --stacks stacks.json
 .venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --split
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.3mf  --stacks stacks.json
-# one 3MF with every colour permutation, each repeated per surface pattern;
-# it always starts with single-colour and frame-only plates, and the many
-# combinations spill across further build plates as each one fills
-.venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --variations \
-    --patterns concentric,hilbertcurve,archimedeanchords,monotonic
+# Preview selectable colour variants and the packing plan:
+# options.json: {"target":"bambu","preview":true,"pattern":"concentric",
+#                "layerHeight":0.2,"colours":{"1-orange":"#FF9900","2-teal":"#00AAAA"}}
+.venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --slicer-options options.json
+# Set preview:false to download; optionally add selected IDs from the preview.
+# Without selected, the export targets about three plates. target can be snapmaker.
+# Legacy --variations now uses the new Snapmaker writer with one surface pattern:
+.venv/bin/python tools/dxf2stl.py sketch.dxf out_dir --stacks stacks.json --variations --patterns concentric
 # keep the model inside its outermost line instead of straddling it
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --wall-width 10 --confine-walls
 # advanced: sweep a closed cross-section along every curve for the frame
 .venv/bin/python tools/dxf2stl.py paths.dxf out.stl --profile profile.dxf --profile-scale 1.5
-# advanced: bound the pattern with a closed polygon — everything outside is cut away
+# advanced: bound the subject with a closed polygon — everything outside is cut away
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --boundary crop.dxf
 # centre & fit the boundary instead of keeping it as drawn, then place it by eye
 .venv/bin/python tools/dxf2stl.py sketch.dxf out.stl --boundary crop.dxf --boundary-fit \
@@ -728,14 +735,15 @@ The converter runs standalone:
 A face is a stack of layers, bottom first, each with a thickness `t` and a
 colour group `g`; `--heights` is the shorthand for a stack one layer deep.
 `--split` writes one STL per group into the output directory instead of a
-single file; an output named `.3mf` writes a 3MF project instead, with the
-single-colour and frame-only version plates always included.
+single file. An output named `.3mf` invokes the older colour-split project writer.
+Use `--slicer-options` or `--variations` for the plate-aware export with single-hue,
+frame-only and black-frame-plus-one-hue versions together on plate 1.
 
-`--also` is repeatable, in stacking order: each extra drawing is centred on
+`--also` is repeatable, in layering order: each extra subject is centred on
 the base drawing and sits on the frame top of the one below it. Everything
-but the drawing, its scale, its layers and its assignments is shared —
+but the subject, its scale, its sublayers and its assignments is shared —
 one wall size, one profile, one seed, and one set of colour groups, so
-`--split` and 3MF exports merge the stacked layers into the same files.
+`--split` and 3MF exports merge the layered subjects into the same files.
 
 A face's id is its index in `--regions` output. That order is pinned by area
 then centroid *before* the overlap is applied, so the same drawing and wall
@@ -758,7 +766,7 @@ go to stderr.
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/convert` | `file` + settings + `stacks` → STL body, stats in the `x-stats` header |
 | `POST /api/export` | as above plus `groups` → JSON listing one base64 STL per group |
-| `POST /api/export3mf` | as above → a 3MF project, colours assigned to extruders; a `patterns` field (comma-separated) repeats every colour combination per pattern. Every export opens with a single-colour and a frame-only build plate and spreads the combinations across further plates |
+| `POST /api/export3mf` | drawing + settings + `slicerOptions` JSON (`target`, `preview`, `selected`, `colours`, `layerHeight`, `pattern`) → preview catalogue and packing plan, or one base64 3MF project with selected colour assemblies |
 | `GET /api/example.dxf` | the bundled `sketch.dxf` |
 | `GET /api/default-profile.dxf` | the bundled sweep profile (404 if absent) |
 | `GET /api/projects` | the saved projects, newest first, each with a `thumb` flag |
@@ -770,13 +778,13 @@ go to stderr.
 JSON array. All are sent as form fields, and `holes` applies to every route. A
 second file field, `profile`, switches the frame to a swept cross-section (see
 *Sweep profile*) — with `profileScale` stretching its width — and refuses
-`holes` and `wallStack`. Another file field, `boundary`, bounds the pattern
+`holes` and `wallStack`. Another file field, `boundary`, bounds the subject
 with a closed polygon (see *Cropping to a boundary*), with `boundaryScale`,
 `boundaryX`, `boundaryY` placing it, `boundaryFit=0` keeping it as drawn
 instead of centred and fitted, and `boundaryWall=0` cutting flush instead of
 walling it. Uploads are capped at 16 MB. Failures return `{error, log}` with a 4xx status.
 
-Stacked drawings: `file` is repeatable (base layer first, 8 max), and the
+Layered subjects: `file` is repeatable (base first, 8 max), and the
 building routes take per-layer fields for layer N (N = 2, 3, …) with the N
 suffix — `scaleN`, `layersN`, `stacksN`, `heightsN`, `holesN`. Everything
 else is shared. `/api/regions` then adds a `drawings` array with one entry

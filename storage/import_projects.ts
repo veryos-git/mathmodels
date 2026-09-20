@@ -6,6 +6,7 @@ type Project = {
   drawings?: Embedded[];
   boundary?: Embedded;
   profile?: Embedded;
+  tracery?: { cusps?: Embedded; profile?: Embedded };
   trace?: {
     source?: Embedded;
     original?: Embedded;
@@ -39,32 +40,49 @@ export async function importProjectResources(
         const inputs: Array<
           [ResourceKind, Embedded | undefined, Project["trace"]?]
         > = [
-          ["pattern", project.drawing, project.trace],
+          ["subject", project.drawing, project.trace],
           ...(project.drawings ?? []).map((
             d,
-          ): [ResourceKind, Embedded] => ["pattern", d]),
+          ): [ResourceKind, Embedded] => ["subject", d]),
+          ["subject", project.tracery?.cusps],
+          ["profile", project.tracery?.profile],
           ["boundary", project.boundary],
           ["profile", project.profile],
         ];
+        const idFor = async (
+          kind: string,
+          input: Embedded,
+          trace: Project["trace"],
+        ) => {
+          const key = JSON.stringify([kind, input.data, trace ?? null]);
+          const digest = new Uint8Array(
+            await crypto.subtle.digest(
+              "SHA-256",
+              new TextEncoder().encode(key),
+            ),
+          );
+          const hex = [...digest].map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+          return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${
+            hex.slice(12, 16)
+          }-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+        };
         for (const [kind, input, trace] of inputs) {
           if (!input) continue;
           try {
             const drawing = file(input);
             if (!drawing) throw new Error("Missing drawing");
-            const key = JSON.stringify([kind, input.data, trace ?? null]);
-            const digest = new Uint8Array(
-              await crypto.subtle.digest(
-                "SHA-256",
-                new TextEncoder().encode(key),
-              ),
-            );
-            const hex = [...digest].map((b) => b.toString(16).padStart(2, "0"))
-              .join("");
-            const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${
-              hex.slice(12, 16)
-            }-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+            // Resources imported before the rename derived their id from the
+            // old "pattern" role, so look for that id too and stay idempotent.
+            const ids = kind === "subject"
+              ? [
+                await idFor("subject", input, trace),
+                await idFor("pattern", input, trace),
+              ]
+              : [await idFor(kind, input, trace)];
+            const id = ids[0];
             const records = await store.list();
-            if (records.some((r) => r.id === id)) {
+            if (records.some((r) => ids.includes(r.id))) {
               result.existing++;
               continue;
             }

@@ -22,13 +22,13 @@ Usage:
 --profile takes a drawing holding one closed cross-section and sweeps it along
 every curve to form the frame, replacing the flat --wall-width ribbons.
 
---boundary takes a drawing holding a closed polygon and cuts the pattern down
+--boundary takes a drawing holding a closed polygon and cuts the subject down
 to it: whatever lies outside is thrown away, and the boundary itself is walled
-so the cropped pattern comes out with a rim (--no-boundary-wall cuts flush
+so the cropped subject comes out with a rim (--no-boundary-wall cuts flush
 instead). The polygon is read in the drawing's own coordinates and scaled with
-it, so it is drawn over the pattern; --boundary-scale, --boundary-x and
+it, so it is drawn over the subject; --boundary-scale, --boundary-x and
 --boundary-y place it by eye. --boundary-fit instead centres the boundary on
-the pattern and scales it uniformly to just fit inside it, for files that do
+the subject and scales it uniformly to just fit inside it, for files that do
 not share a coordinate system.
 
 --effect reshapes every face without touching the painting: maya-pyramid
@@ -41,6 +41,7 @@ drawing is centred on the base drawing and sits on the frame top of the one
 below; colour groups are shared, so split and 3MF exports merge the layers.
 """
 
+from gothic import solid_union, revolved_ending
 import argparse
 import base64
 import itertools
@@ -63,7 +64,7 @@ from shapely import STRtree
 from shapely.affinity import scale as aff_scale
 from shapely.affinity import translate
 from shapely.geometry import LinearRing, LineString, Point, Polygon
-from shapely.ops import polygonize, unary_union
+from shapely.ops import nearest_points, polygonize, unary_union
 from shapely.prepared import prep
 
 # Entity types make_path() can turn into a polyline. Anything else (TEXT,
@@ -415,7 +416,7 @@ def plan_regions(curves, wall_width, wall_overlap=0.0, clip=None):
 
     `clip` is the boundary the model may not reach past: everything is cut to
     it before the faces are worked out, so a face's id is its place among the
-    faces that survive rather than among the ones the pattern had before it
+    faces that survive rather than among the ones the subject had before it
     was cropped.
     """
     lines = [LineString(c) for c in curves]
@@ -496,7 +497,7 @@ def load_profile(path, sagitta):
     return translate(profile, xoff=-(minx + maxx) / 2.0, yoff=-miny)
 
 
-def chain_curves(curves):
+def chain_curves(curves, min_dot=-1.0):
     """Curves joined end-to-end into the longest possible polylines.
 
     Entities rarely arrive as one polyline per visual stroke, and a swept
@@ -538,6 +539,8 @@ def chain_curves(curves):
             else:
                 continue
             score = outward[0] * cand[0] + outward[1] * cand[1]
+            if score < min_dot:
+                continue
             if best is None or score > best[0]:
                 best = (score, j, forward)
         return best[1:] if best else None
@@ -649,9 +652,9 @@ def sweep_profile(profile, chains):
 
 # ------------------------------------------------------------- boundary crop
 #
-# A second drawing — a closed polygon — bounds the pattern: whatever lies
-# outside it is cut away. The polygon is read in the pattern's own coordinates
-# and scaled with it, so a crop drawn over the pattern lands where it was
+# A second drawing — a closed polygon — bounds the subject: whatever lies
+# outside it is cut away. The polygon is read in the subject's own coordinates
+# and scaled with it, so a crop drawn over the subject lands where it was
 # drawn, with its own size multiplier and nudge on top for placing it by eye.
 
 
@@ -686,8 +689,8 @@ def load_boundary(path, sagitta):
 def place_boundary(boundary, scale, boundary_scale, dx, dy, fit_to=None):
     """The boundary moved into the scaled drawing's coordinates.
 
-    As drawn, it is scaled with the pattern and stays registered on it. Fit
-    instead re-anchors it: the boundary is centred on the pattern's box and
+    As drawn, it is scaled with the subject and stays registered on it. Fit
+    instead re-anchors it: the boundary is centred on the subject's box and
     scaled — uniformly, so its shape holds — until it just fits inside it.
     That is the behaviour you want when the two files came out of different
     coordinate systems. Its own size multiplier works about its centre, and
@@ -695,7 +698,7 @@ def place_boundary(boundary, scale, boundary_scale, dx, dy, fit_to=None):
     in — so both mean the same thing whatever the drawing was drawn in.
     """
     # The drawing's scale comes first — the fit is worked out in the scaled
-    # coordinates, where the pattern's box is measured.
+    # coordinates, where the subject's box is measured.
     placed = aff_scale(boundary, xfact=scale, yfact=scale, origin=(0.0, 0.0))
     if fit_to is not None:
         (pminx, pminy, pmaxx, pmaxy) = fit_to
@@ -717,12 +720,12 @@ def place_boundary(boundary, scale, boundary_scale, dx, dy, fit_to=None):
     return placed
 
 
-def transform_curves(curves, scale, dx, dy):
-    """Resize and slide the pattern — the window's content — under the boundary.
+def transform_curves(curves, scale, dx, dy, centre=None):
+    """Resize and slide the subject inside the boundary.
 
-    The boundary is the frame and stays put; this moves what is shown through
-    it. Scaling is about the pattern's own centre, and the shift is in model
-    millimetres, so both mean the same thing whatever the drawing was drawn in.
+    The boundary stays put; this moves what is shown through it. Scaling is
+    about the subject's own centre, and the shift is in model millimetres, so
+    both mean the same thing whatever the subject was drawn in.
     """
     if scale == 1.0 and not dx and not dy:
         return curves
@@ -730,6 +733,8 @@ def transform_curves(curves, scale, dx, dy):
     ys = [p[1] for c in curves for p in c]
     cx = (min(xs) + max(xs)) / 2.0
     cy = (min(ys) + max(ys)) / 2.0
+    if centre is not None:
+        cx, cy = centre
     out = []
     for c in curves:
         out.append([(round((x - cx) * scale + cx + dx, 6),
@@ -742,7 +747,7 @@ def clip_curves(curves, region):
     """Every curve trimmed to the part of it that lies inside `region`.
 
     Most curves are wholly in or wholly out, and answering that from a
-    prepared geometry is far cheaper than intersecting each one: a pattern
+    prepared geometry is far cheaper than intersecting each one: a subject
     cropped to a small window is thousands of curves thrown away untouched.
     """
     guard = prep(region)
@@ -778,16 +783,16 @@ def polys_centre(polys):
 
 
 def preview(args):
-    """The pattern and boundary outlines, in millimetres, for the 2D window.
+    """The subject and boundary outlines, in millimetres, for the 2D window.
 
     This is only the geometry the browser needs to draw the position preview:
-    the pattern's flattened curves and the boundary's own rings, both at their
+    the subject's flattened curves and the boundary's own rings, both at their
     drawn size. The browser scales and slides them exactly as `place_boundary`
     and `transform_curves` will, so the preview matches the crop.
     """
     curves, _, _ = read_curves(args.input, args.sagitta, args.layers, scale=1.0)
     out = {
-        "pattern": {
+        "subject": {
             "curves": [[[round(x, 3), round(y, 3)] for x, y in c] for c in curves],
         },
         "boundary": None,
@@ -801,6 +806,39 @@ def preview(args):
                 rings.append([[round(x, 3), round(y, 3)] for x, y in interior.coords])
         out["boundary"] = {"rings": rings}
     return out
+
+
+def frame_connections(wall_polys, crop, wall_width):
+    """Short ribs bridging floating frame pieces, so a frame-only print holds together.
+
+    A frame-only model is the boundary plus the subject's own lines. When the
+    subject does not reach the boundary — a small motif inside a lantern-sized
+    crop — the silhouette prints as a loose second part. This returns one
+    straight rib from each piece that would float to the piece it should hold
+    on to: the boundary rim when the boundary is walled, otherwise the largest
+    piece in the frame.
+    """
+    if crop is None:
+        return []
+    pieces = list(polygons_of(unary_union(wall_polys)))
+    if len(pieces) < 2:
+        return []
+    rim = unary_union([
+        LineString(ring.coords).buffer(wall_width / 2.0, cap_style="round",
+                                       join_style="round")
+        for poly in polygons_of(crop)
+        for ring in (poly.exterior, *poly.interiors)
+    ])
+    anchored = [piece for piece in pieces if piece.intersects(rim)]
+    anchor = max(anchored or pieces, key=lambda piece: piece.area)
+    ribs = []
+    for piece in pieces:
+        if piece.equals(anchor) or piece.intersects(anchor):
+            continue
+        start, end = nearest_points(piece, anchor)
+        if start.distance(end) > 1e-6:
+            ribs.append(LineString([start, end]))
+    return ribs
 
 
 def plan_drawing(path, scale, layers_csv, args, boundary=None):
@@ -830,18 +868,33 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
         # width the faces are planned against, its top is the wall height.
         wall_width, wall_height = maxx - minx, maxy
 
-    # The boundary crops the pattern. Walled — the default — the cut curves
+    cusp_curves = []
+    cusp_section = None
+    if args.cusps:
+        if profile is None:
+            raise ConvertError("Cusp paths require a main sweep profile")
+        if not (0 < args.cusp_width <= 10 and 0 < args.cusp_height <= 10 and args.cusp_z >= 0):
+            raise ConvertError("Cusp width/height must be positive and elevation must not be negative")
+        cusp_curves, _, _ = read_curves(args.cusps, args.sagitta, None, scale)
+        cusp_section = load_profile(args.cusp_profile, args.sagitta) if args.cusp_profile else profile
+        cusp_section = aff_scale(cusp_section, xfact=args.cusp_width, yfact=args.cusp_height, origin=(0, 0))
+        cusp_section = translate(cusp_section, yoff=args.cusp_z)
+        wall_height = max(wall_height, cusp_section.bounds[3])
+    if args.round_ends and profile is None:
+        raise ConvertError("Rounded endings require a sweep profile")
+
+    # The boundary crops the subject. Walled — the default — the cut curves
     # plus the boundary's own rings are the drawing from here on, so the rim
     # closes the faces along the cut like any other wall. Cut flush instead and
-    # the pattern is planned as drawn and trimmed afterwards, so a face the cut
+    # the subject is planned as drawn and trimmed afterwards, so a face the cut
     # runs through survives as the part of it that is inside.
     crop = n_cropped = None
     n_curves = len(curves)
     if boundary is not None:
         fit_to = None
         if args.boundary_fit:
-            # The pattern's own box, in its drawing units, before scaling: the
-            # boundary is fitted to this, so the crop lands on the pattern
+            # The subject's own box, in its drawing units, before scaling: the
+            # boundary is fitted to this, so the crop lands on the subject
             # whatever coordinate systems the two files were drawn in.
             xs = [p[0] for c in curves for p in c]
             ys = [p[1] for c in curves for p in c]
@@ -849,19 +902,30 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
         crop = place_boundary(boundary, scale, args.boundary_scale,
                               args.boundary_x, args.boundary_y, fit_to)
 
-    # The window content — the pattern itself — is resized and slid under the
+    # The subject inside the boundary — the subject itself — is resized and slid under the
     # boundary after the boundary is placed, so the frame stays put while the
     # crop finds its composition. Without a boundary this would only shift the
     # model and break the finished-size maths, so it is applied to the crop.
+    content = None
     if boundary is not None:
-        curves = transform_curves(curves, args.pattern_scale,
-                                  args.pattern_x, args.pattern_y)
+        points = [p for c in curves for p in c]
+        centre = ((min(p[0] for p in points)+max(p[0] for p in points))/2,
+                  (min(p[1] for p in points)+max(p[1] for p in points))/2)
+        # Kept so the paint can be matched back in the subject's own frame, where
+        # sliding or resizing the content leaves every face where it was.
+        content = {"scale": args.subject_scale,
+                   "shift": [args.subject_x, args.subject_y],
+                   "centre": [centre[0], centre[1]]}
+        if cusp_curves:
+            cusp_curves = transform_curves(cusp_curves, args.subject_scale, args.subject_x, args.subject_y, centre)
+        curves = transform_curves(curves, args.subject_scale,
+                                  args.subject_x, args.subject_y)
 
     if boundary is not None:
         inside = clip_curves(curves, crop)
         if not inside:
             raise ConvertError("the boundary does not overlap the drawing — "
-                               "nothing of the pattern would be left")
+                               "nothing of the subject would be left")
         n_cropped = len(curves) - len(inside)
         n_curves = len(inside)
         if args.boundary_wall:
@@ -884,6 +948,34 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
     else:
         frame_mesh = None
 
+    if profile is not None and (args.cusps or args.round_ends):
+        solids = [frame_mesh]
+        if crop is not None and cusp_curves:
+            cusp_curves = clip_curves(cusp_curves, crop)
+        end_section = cusp_section if args.cusps else profile
+        end_chains = chain_curves(cusp_curves if args.cusps else swept, min_dot=-0.5)
+        if cusp_curves:
+            solids.append(sweep_profile(cusp_section, end_chains))
+        if args.round_ends:
+            for chain in end_chains:
+                if chain[0] == chain[-1] or len(chain) < 2:
+                    continue
+                for index, neighbour in ((0, 1), (-1, -2)):
+                    point = np.asarray(chain[index], dtype=float)
+                    forward = point - np.asarray(chain[neighbour], dtype=float)
+                    forward /= max(np.linalg.norm(forward), 1e-12)
+                    # Avoid rolling an ending at a connection to the main frame.
+                    if args.cusps and any(LineString(c).distance(Point(point)) <= max(1e-4, args.sagitta*2) for c in swept):
+                        continue
+                    tangent = -forward if index == 0 else forward
+                    normal = np.array([-tangent[1], tangent[0]])
+                    solids.append(revolved_ending(end_section, point, normal, forward,
+                                                  args.end_angle, args.end_side))
+        try:
+            frame_mesh = solid_union(solids)
+        except (ValueError, RuntimeError) as error:
+            raise ConvertError(f"Could not fuse tracery: {error}") from error
+
     # Where the model is allowed to reach. A walled boundary is a curve like
     # any other, so its wall straddles the line with half of it outside, just
     # as the drawing's own outermost curve does; confined, the model ends on
@@ -896,6 +988,39 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
 
     wall_polys, region_polys = plan_regions(curves, wall_width,
                                             args.wall_overlap, clip)
+    if cusp_curves:
+        cusp_walls = unary_union([LineString(c).buffer((cusp_section.bounds[2] - cusp_section.bounds[0])/2) for c in cusp_curves])
+        region_polys = [q for p in region_polys for q in polygons_of(p.difference(cusp_walls))]
+    if args.frame_only:
+        region_polys = []
+
+    # A frame-only print is the boundary plus the subject's own lines, so a
+    # subject that floats inside the boundary would come off the bed as a loose
+    # second part. Ribs bridge every floating piece to the boundary; the full
+    # model keeps the clean frame and lets the painted faces do the joining.
+    connection_curves, connection_polys, connection_mesh = [], [], None
+    if crop is not None:
+        connection_curves = frame_connections(wall_polys, crop, wall_width)
+        if connection_curves:
+            if profile is not None:
+                connection_mesh = sweep_profile(
+                    profile,
+                    chain_curves([list(rib.coords) for rib in connection_curves]))
+            else:
+                connection_polys = [
+                    rib.buffer(wall_width / 2.0, cap_style="round",
+                               join_style="round")
+                    for rib in connection_curves
+                ]
+    if args.frame_only:
+        if connection_polys:
+            wall_polys = wall_polys + connection_polys
+        if connection_mesh is not None:
+            try:
+                frame_mesh = solid_union([frame_mesh, connection_mesh])
+            except (ValueError, RuntimeError) as error:
+                raise ConvertError(f"Could not fuse the frame connections: {error}") from error
+
     summary = {
         "curves": n_curves,
         "layers": [{"name": n, "entities": c} for n, c in sorted(used.items())],
@@ -904,8 +1029,14 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
     if n_cropped is not None:
         summary["cropped"] = n_cropped
     return {
+        "paint_scale": scale,
+        "content": content,
+        "crop": crop,
         "wall_polys": wall_polys,
         "region_polys": region_polys,
+        "connection_curves": connection_curves,
+        "connection_polys": connection_polys,
+        "connection_mesh": connection_mesh,
         "wall_height": wall_height,
         "frame_mesh": frame_mesh,
         "summary": summary,
@@ -1199,6 +1330,42 @@ def write_group_files(outdir, layers, wall_stack=None):
     return written, n_walls, n_regions
 
 
+# The flat version of the model: one layer thick, shaped like the outermost
+# outline, so it prints as a single-colour backing plate.
+OUTLINE_THICKNESS = 0.2
+
+
+def outline_solid(layers, thickness=OUTLINE_THICKNESS):
+    """One flat plate shaped like the model's outermost outline.
+
+    With a boundary the outline is the boundary itself — the finished size the
+    crop was fitted to. Without one it is the *silhouette* of the frame: the
+    frame is a lattice of ribbons, and the plate is its projection, so the
+    openings between the walls are filled rather than cut out. Stacked drawings
+    share one plate covering all of them. Returns None when there is nothing to
+    cover.
+    """
+    shapes = []
+    for drawing in layers:
+        shape = drawing.get("crop")
+        if shape is None:
+            walls = drawing.get("wall_polys") or []
+            if not walls:
+                continue
+            shape = unary_union([Polygon(poly.exterior)
+                                 for poly in polygons_of(unary_union(walls))])
+        if not shape.is_empty:
+            shapes.append(shape)
+    if not shapes:
+        return None
+    solids = [
+        trimesh.creation.extrude_polygon(poly, thickness)
+        for poly in polygons_of(unary_union(shapes))
+        if not poly.is_empty and poly.area > 0
+    ]
+    return trimesh.util.concatenate(solids) if solids else None
+
+
 def write_project_3mf(path, layers, wall_stack=None):
     """Every colour as its own part of one 3MF, with an extruder each."""
     merged, n_walls, n_regions = colour_buckets(layers, wall_stack)
@@ -1214,7 +1381,7 @@ def write_project_3mf(path, layers, wall_stack=None):
         else:
             members.append((label, mesh, spare))
             spare += 1
-    return write_3mf(path, members), n_walls, n_regions
+    return write_3mf(path, members, outline_solid(layers)), n_walls, n_regions
 
 
 # The surface patterns a Bambu Studio / Snapmaker slicer knows. These are the
@@ -1227,63 +1394,17 @@ SURFACE_PATTERNS = (
 
 
 def write_project_3mf_variations(outdir, layers, wall_stack=None, patterns=None):
-    """One 3MF holding every permutation of the palette's colour groups.
-
-    The frame — an unnumbered group such as "walls" — keeps its colour in every
-    combination; the numbered palette groups trade places, so a two-colour model
-    has two combinations and a three-colour model six. Each combination is
-    written as one merged assembly object. The file also always carries the two
-    plain printable versions on their own build plates — the whole model in one
-    colour, and the frame alone — and the combinations fill the remaining
-    plates, spilling onto fresh ones as a plate fills.
-
-    `patterns` is an optional list of the slicer's top/bottom surface patterns
-    ("concentric", "hilbertcurve", …). When given, every colour combination is
-    repeated once per pattern, so the export compares every colour arrangement
-    against every fill pattern.
-    """
-    merged, n_walls, n_regions = colour_buckets(layers, wall_stack)
-    palette = sorted((m for m in merged if m[0].split("-", 1)[0].isdigit()),
-                     key=lambda m: int(m[0].split("-", 1)[0]))
-    fixed = sorted((m for m in merged if not m[0].split("-", 1)[0].isdigit()),
-                   key=lambda m: m[0])
-    n = len(palette)
-    os.makedirs(outdir, exist_ok=True)
-    patterns = [p for p in (patterns or []) if p]
-
-    combinations = []
-    # permutations(range(0)) is one empty tuple, so a frame-only model still
-    # exports exactly one combination.
-    for perm in itertools.permutations(range(n)):
-        members = [(label, mesh, perm[i] + 1)
-                   for i, (label, mesh, _) in enumerate(palette)]
-        members += [(label, mesh, n + 1 + i)
-                    for i, (label, mesh, _) in enumerate(fixed)]
-        by_extruder = [None] * n
-        for i, slot in enumerate(perm):
-            by_extruder[slot] = palette[i][0]
-        order = "-".join(label.split("-", 1)[1] for label in by_extruder)
-        base = order or "frame"
-        if patterns:
-            combinations.extend((f"{base} {pattern}", members, pattern)
-                                for pattern in patterns)
-        else:
-            combinations.append((base, members, None))
-
-    path = os.path.join(outdir, "variations.3mf")
-    n_combos, n_parts, n_tris, n_plates, n_versions = write_3mf_assemblies(
-        path, combinations)
-
-    return [{
-        "file": "variations.3mf",
-        "variations": n_combos,
-        "patterns": len(patterns),
-        "combinations": math.factorial(n),
-        "parts": n_parts,
-        "triangles": n_tris,
-        "plates": n_plates,
-        "versions": n_versions,
-    }], n_walls, n_regions
+    """Default Snapmaker export: selected colour variants on about three plates."""
+    from slicer_3mf import export
+    if patterns and len(patterns) > 1:
+        raise ConvertError("Choose one surface pattern per export; colour variations no longer multiply across patterns.")
+    try:
+        result = export(outdir, layers, wall_stack, {
+            "target": "snapmaker", "pattern": (patterns or ["monotonicline"])[0],
+        })
+    except ValueError as error:
+        raise ConvertError(str(error)) from error
+    return result["files"], result["walls"], result["regions"]
 
 
 """3MF, in the flavour Snapmaker's slicer (a Bambu Studio fork) writes.
@@ -1468,14 +1589,15 @@ def _plates_xml(plates, placed):
     return "".join(blocks) + '  <assemble>\n' + assembled + '  </assemble>\n'
 
 
-def write_3mf(path, members):
+def write_3mf(path, members, outline=None):
     """members: [(name, mesh, extruder)] — one entry per colour group.
 
     The colour groups stay registered on top of each other on the first plate,
     as one multi-extruder model. When the model has faces to print, the same
     relief also appears once more in one colour on its own plate
     ("single_color_version") and the frame by itself on another
-    ("frame_only_version").
+    ("frame_only_version"). `outline` adds one more: the flat, one-colour
+    0.2 mm plate shaped like the outermost outline ("outline_version").
     """
     solids = [m for m in members if len(m[1].faces)]
     if not solids:
@@ -1496,6 +1618,10 @@ def write_3mf(path, members):
         objects.append({"object_id": 2 * len(objects) + 2, "name": label,
                         "members": [(label, mesh, extruder)], "pattern": None})
     versions = _version_members(solids)
+    if outline is not None and len(outline.faces):
+        # The flat outline plate is a single-colour version of its own: one
+        # volume on the first extruder, the way the slicer export prints it.
+        versions = versions + [("outline 0.2", [("outline 0.2", outline, 1)])]
     for vi, (name, version_members) in enumerate(versions):
         objects.append({"object_id": 1000 + vi, "name": name,
                         "members": version_members, "pattern": None})
@@ -1513,7 +1639,8 @@ def write_3mf(path, members):
         placed[obj["object_id"]] = own_place([m for _, m, _ in obj["members"]])
 
     version_plate = {"single color": "single_color_version",
-                     "frame only": "frame_only_version"}
+                     "frame only": "frame_only_version",
+                     "outline 0.2": "outline_version"}
     plates = [("", [objects[i]["object_id"] for i in range(colour_count)])]
     for obj in objects[colour_count:]:
         plates.append((version_plate[obj["name"]], [obj["object_id"]]))
@@ -1768,7 +1895,7 @@ def write_3mf_assemblies(path, combinations):
 
     # Colour assignments: one object per combination/version, one part per
     # colour. The surface pattern is an object-level override of the slicer's
-    # global top/bottom surface pattern, so each combination gets the pattern
+    # global top/bottom surface pattern, so each combination gets the subject
     # it was built for (the meshes are identical; only the slicing differs).
     settings_objects = "".join(
         _settings_object_xml(
@@ -1926,7 +2053,7 @@ def main():
     ap.add_argument("--regions", action="store_true",
                     help="report the wall and region outlines as JSON, then exit")
     ap.add_argument("--preview", action="store_true",
-                    help="report the pattern and boundary outlines as JSON for "
+                    help="report the subject and boundary outlines as JSON for "
                          "the 2D window-position preview, then exit")
     ap.add_argument("--heights", default=None, metavar="FILE",
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
@@ -1934,20 +2061,19 @@ def main():
                     help='JSON file mapping face id to its layer stack, e.g. '
                          '{"0": [{"t": 0.65, "g": "1-orange"}, {"t": 1.1, "g": "3-violet"}]}')
     ap.add_argument("--wall-stack", default=None, metavar="FILE",
-                    help='JSON list of frame layers, e.g. [{"t": 0.2, "g": "1-orange"}]; '
+                    help='JSON list of frame bands, e.g. [{"t": 0.2, "g": "1-orange"}]; '
                          "without it the frame is one solid of --wall-height")
     ap.add_argument("--split", action="store_true",
                     help="write one STL per colour group into the output directory")
     ap.add_argument("--variations", action="store_true",
-                    help="write one 3MF per permutation of the palette colour "
-                         "groups into the output directory; the file opens with "
-                         "single-colour and frame-only build plates, and the "
-                         "combinations spill across plates as each fills")
+                    help="write a Snapmaker 3MF with colour permutations, "
+                         "targeting three plates and keeping the required "
+                         "versions together on plate 1")
+    ap.add_argument("--slicer-options", metavar="FILE",
+                    help="JSON selection, target printer and preview options for plate-aware 3MF export")
     ap.add_argument("--patterns", default=None, metavar="LIST",
-                    help="comma-separated top/bottom surface patterns for the "
-                         "--variations export, e.g. concentric,hilbertcurve; "
-                         "every colour combination is repeated once per pattern "
-                         "(choose from " + ", ".join(SURFACE_PATTERNS) + ")")
+                    help="one top/bottom surface pattern for the "
+                         "--variations export (choose from " + ", ".join(SURFACE_PATTERNS) + ")")
     ap.add_argument("--groups", default=None, metavar="FILE",
                     help="JSON file mapping region id to a colour group; makes "
                          "the output a directory holding one STL per group")
@@ -1979,14 +2105,23 @@ def main():
     ap.add_argument("--profile-scale", type=float, default=1.0,
                     help="stretch the profile's width (its x axis); the height "
                          "stays as drawn")
+    ap.add_argument("--cusps", help="Separate SVG/DXF cusp paths in the frame coordinate system")
+    ap.add_argument("--cusp-profile", help="Optional independent closed section for cusp paths")
+    ap.add_argument("--cusp-width", type=float, default=0.55)
+    ap.add_argument("--cusp-height", type=float, default=0.55)
+    ap.add_argument("--cusp-z", type=float, default=0.0)
+    ap.add_argument("--round-ends", action="store_true")
+    ap.add_argument("--end-angle", type=float, default=90.0)
+    ap.add_argument("--end-side", type=int, choices=[-1, 1], default=1)
+    ap.add_argument("--frame-only", action="store_true", help="Generate tracery without glass faces")
     ap.add_argument("--boundary", default=None, metavar="FILE",
                     help="DXF/SVG holding a closed polygon that bounds the "
                          "drawing: everything outside it is cut away. It is "
                          "read in the drawing's own coordinates and scaled "
-                         "with it, so draw it over the pattern")
+                         "with it, so draw it over the subject")
     ap.add_argument("--boundary-fit", dest="boundary_fit",
                     action=argparse.BooleanOptionalAction, default=True,
-                    help="centre the boundary on the pattern and scale it "
+                    help="centre the boundary on the subject and scale it "
                          "uniformly to just fit inside it — for files that do "
                          "not share a coordinate system (--no-boundary-fit "
                          "keeps the boundary as drawn)")
@@ -2000,14 +2135,14 @@ def main():
                     help="nudge the boundary sideways, in finished millimetres")
     ap.add_argument("--boundary-y", type=float, default=0.0, metavar="MM",
                     help="nudge the boundary up or down, in finished millimetres")
-    ap.add_argument("--pattern-scale", type=float, default=1.0,
-                    help="resize the pattern (the window content) about its own "
+    ap.add_argument("--subject-scale", type=float, default=1.0,
+                    help="resize the subject inside the boundary about its own "
                          "centre, while the boundary stays put")
-    ap.add_argument("--pattern-x", type=float, default=0.0, metavar="MM",
-                    help="slide the pattern sideways under the boundary, in "
+    ap.add_argument("--subject-x", type=float, default=0.0, metavar="MM",
+                    help="slide the subject sideways under the boundary, in "
                          "finished millimetres")
-    ap.add_argument("--pattern-y", type=float, default=0.0, metavar="MM",
-                    help="slide the pattern up or down under the boundary, in "
+    ap.add_argument("--subject-y", type=float, default=0.0, metavar="MM",
+                    help="slide the subject up or down under the boundary, in "
                          "finished millimetres")
     ap.add_argument("--effect", choices=EFFECTS, default="none",
                     help="reshape every face: maya-pyramid steps each one in "
@@ -2076,7 +2211,7 @@ def main():
                                "frame — clear the holes or the profile")
         if args.wall_stack:
             raise ConvertError("a layered frame needs flat walls — "
-                               "clear the frame layers or the profile")
+                               "clear the frame bands or the profile")
 
     # One boundary bounds every drawing in the stack. It is read once, in the
     # drawings' own coordinates, and placed per drawing at that drawing's
@@ -2084,7 +2219,7 @@ def main():
     boundary = None
     if args.boundary:
         positive("boundary size", args.boundary_scale)
-        positive("pattern size", args.pattern_scale)
+        positive("subject size", args.subject_scale)
         boundary = load_boundary(args.boundary, args.sagitta)
 
     # Every drawing is planned on its own first; stacking shifts them after.
@@ -2106,8 +2241,20 @@ def main():
         drawing["wall_polys"] = [translate(p, dx, dy) for p in drawing["wall_polys"]]
         drawing["region_polys"] = [translate(p, dx, dy)
                                    for p in drawing["region_polys"]]
+        if drawing["crop"] is not None:
+            # The crop is the outermost outline the 3MF outline version uses,
+            # so it has to ride with the drawing like everything else does.
+            drawing["crop"] = translate(drawing["crop"], dx, dy)
         if drawing["frame_mesh"] is not None:
             drawing["frame_mesh"].apply_translation((dx, dy, 0.0))
+        if drawing["connection_curves"]:
+            drawing["connection_curves"] = [translate(rib, dx, dy)
+                                            for rib in drawing["connection_curves"]]
+        if drawing["connection_polys"]:
+            drawing["connection_polys"] = [translate(rib, dx, dy)
+                                           for rib in drawing["connection_polys"]]
+        if drawing["connection_mesh"] is not None:
+            drawing["connection_mesh"].apply_translation((dx, dy, 0.0))
         drawing["holes"] = shift_holes(drawing["holes"], dx, dy)
         drawing["offset"] = (dx, dy)
     layers[0]["offset"] = (0.0, 0.0)
@@ -2120,7 +2267,7 @@ def main():
         drawing["effect"] = effect        # one effect for the whole model
         z += drawing["wall_height"]
 
-    def region_payload(i, poly, cutter):
+    def region_payload(i, poly, cutter, drawing):
         # area and centroid describe the whole face, not the cut pieces, so
         # they stay put as holes are added and removed.
         payload = {
@@ -2128,6 +2275,34 @@ def main():
             "centroid": [round(poly.centroid.x, 4), round(poly.centroid.y, 4)],
             "parts": [polygon_json(q) for q in cut(poly, cutter)],
         }
+        # Match paint in drawing coordinates, independent of wall width,
+        # model scale, layer centring, mounting holes and face ordering.
+        dx, dy = drawing["offset"]
+        source = aff_scale(translate(poly, -dx, -dy),
+                           xfact=1 / drawing["paint_scale"],
+                           yfact=1 / drawing["paint_scale"], origin=(0, 0))
+        # The window-content transform is undone as well, so sliding or
+        # resizing the subject under its boundary never moves a face's paint:
+        # the subject stays put in this frame and only the crop travels.
+        content = drawing.get("content")
+        if content is not None:
+            step = content["scale"]
+            shift_x, shift_y = content["shift"]
+            cx, cy = content["centre"]
+            cx /= drawing["paint_scale"]
+            cy /= drawing["paint_scale"]
+            shift_x /= drawing["paint_scale"]
+            shift_y /= drawing["paint_scale"]
+            source = translate(source, -(cx + shift_x), -(cy + shift_y))
+            source = aff_scale(source, xfact=1 / step, yfact=1 / step,
+                               origin=(0, 0))
+            source = translate(source, cx, cy)
+        point = source.representative_point()
+        # `area` lets the browser break a tie when several painted faces fold
+        # into one: the biggest predecessor is the one that survived.
+        payload["paintRegion"] = {"polygon": polygon_json(source),
+                                  "area": round(source.area, 6),
+                                  "point": [point.x, point.y]}
         if effect and effect["name"] == "maya-pyramid":
             # The terraces above the first, so the browser can show the same
             # steps the STL is built from instead of guessing at an offset.
@@ -2145,7 +2320,7 @@ def main():
             "walls": [polygon_json(p)
                       for w in drawing["wall_polys"]
                       for p in cut(w, drawing["cutter"])],
-            "regions": [region_payload(i, p, drawing["cutter"])
+            "regions": [region_payload(i, p, drawing["cutter"], drawing)
                         for i, p in enumerate(drawing["region_polys"])],
         }
         if drawing["frame_mesh"] is not None:
@@ -2170,17 +2345,17 @@ def main():
             with open(args.wall_stack) as fp:
                 raw = json.load(fp)
         except (OSError, ValueError) as exc:
-            raise ConvertError(f"could not read the frame layers: {exc}") from None
+            raise ConvertError(f"could not read the frame bands: {exc}") from None
         if not isinstance(raw, list):
-            raise ConvertError("the frame layers must be a JSON array")
+            raise ConvertError("the frame bands must be a JSON array")
         wall_stack = []
         for layer in raw:
             if not isinstance(layer, dict):
-                raise ConvertError("a frame layer is not an object")
+                raise ConvertError("a frame band is not an object")
             try:
                 thickness = float(layer.get("t", layer.get("h")))
             except (TypeError, ValueError):
-                raise ConvertError("a frame layer has no numeric thickness") from None
+                raise ConvertError("a frame band has no numeric thickness") from None
             group = layer.get("g")
             wall_stack.append({"t": round(thickness, 6),
                                "g": None if group is None else str(group)})
@@ -2205,6 +2380,15 @@ def main():
         )
 
     n_holes = sum(len(drawing["holes"]) for drawing in layers)
+
+    if args.slicer_options:
+        from slicer_3mf import export
+        try:
+            options = json.loads(open(args.slicer_options).read())
+            json.dump(export(args.output, layers, wall_stack, options), sys.stdout)
+        except (ValueError, TypeError) as error:
+            raise ConvertError(str(error)) from error
+        return
 
     if args.variations:
         patterns = None

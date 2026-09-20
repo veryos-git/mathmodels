@@ -1,6 +1,14 @@
 /** File-backed reusable inputs. A manifest is the atomic commit point; revisions
  * keep ordinary image/vector files browsable and previous saves recoverable. */
-export type ResourceKind = "pattern" | "boundary" | "profile";
+export type ResourceKind = "subject" | "boundary" | "profile";
+// The subject role was stored as "pattern" before the terminology was settled;
+// old manifests and old clients are read as "subject".
+const LEGACY_KINDS: Record<string, ResourceKind> = { pattern: "subject" };
+const KINDS: ResourceKind[] = ["subject", "boundary", "profile"];
+function normalizeKind(value: unknown): ResourceKind | null {
+  const kind = (LEGACY_KINDS[String(value ?? "subject")] ?? String(value ?? "subject")) as ResourceKind;
+  return KINDS.includes(kind) ? kind : null;
+}
 export interface Resource {
   schemaVersion: 1;
   id: string;
@@ -91,9 +99,13 @@ export class ResourceStore {
   }
   async get(id: string): Promise<Resource> {
     try {
-      return JSON.parse(
+      const record: Resource = JSON.parse(
         await Deno.readTextFile(`${this.path(id)}/resource.json`),
       );
+      // Manifests written before the rename keep working: the note stays on
+      // disk as it was, but every reader sees the canonical kind.
+      record.kind = normalizeKind(record.kind) ?? record.kind;
+      return record;
     } catch (e) {
       if (e instanceof Deno.errors.NotFound) {
         throw new ResourceError(404, "Resource not found");
@@ -129,13 +141,13 @@ export class ResourceStore {
       if (!(e instanceof ResourceError && e.status === 404)) throw e;
     }
     const name = String(form.get("name") ?? previous?.name ?? "").trim();
-    const kind = String(
-      form.get("kind") ?? previous?.kind ?? "pattern",
-    ) as ResourceKind;
+    const kind = normalizeKind(
+      form.get("kind") ?? previous?.kind ?? "subject",
+    );
     if (!name || name.length > 120) {
       throw new ResourceError(400, "Use a name between 1 and 120 characters");
     }
-    if (!["pattern", "boundary", "profile"].includes(kind)) {
+    if (!kind) {
       throw new ResourceError(400, "Invalid resource kind");
     }
     let trace = previous?.trace ?? null;
@@ -180,10 +192,10 @@ export class ResourceStore {
       throw new ResourceError(400, "A resource needs an SVG or DXF drawing");
     }
     if (
-      kind !== "pattern" &&
+      kind !== "subject" &&
       (trace || uploads.some((u) => u.slot !== "drawing") || files.original)
     ) {
-      throw new ResourceError(400, "Only patterns have image tracing data");
+      throw new ResourceError(400, "Only subjects have image tracing data");
     }
     const revision = crypto.randomUUID();
     const dir = `${this.path(id)}/revisions/${revision}`;

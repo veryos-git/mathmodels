@@ -1,3 +1,4 @@
+import { FilamentStore } from "./storage/filaments.ts";
 import { importProjectResources } from "./storage/import_projects.ts";
 import { ResourceStore, atomicWrite } from "./storage/resources.ts";
 /// Deno web server: upload a DXF or SVG, get back a relief STL.
@@ -7,8 +8,8 @@ import { ResourceStore, atomicWrite } from "./storage/resources.ts";
 const PYTHON = ".venv/bin/python";
 const SCRIPT = "tools/dxf2stl.py";
 const TRACE_SCRIPT = "tools/trace.py";
-const EXAMPLE = "sketch.dxf";
-const DEFAULT_PROFILE = "default_profile.dxf";
+const EXAMPLE = "reverse_engeneering/gothic_tracery_simple/sketch.dxf";
+const DEFAULT_PROFILE = "reverse_engeneering/gothic_tracery_simple/default_profile.dxf";
 const PORT = Number(Deno.env.get("PORT") ?? 8788);
 const MAX_UPLOAD = 16 * 1024 * 1024;
 const MAX_LAYERS = 8;
@@ -42,9 +43,10 @@ const PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 // kept here as a reusable resource, so a subject, boundary or profile can be
 // swapped in later without re-uploading the file.
 const LIBRARY_DIR = Deno.env.get("LIBRARY_DIR") ?? "library";
+const filaments = new FilamentStore(`${LIBRARY_DIR}/filaments`);
 const resources = new ResourceStore(`${LIBRARY_DIR}/resources`, async (path) => {
   const data = await runScript([path, "--preview", "--sagitta", String(THUMB_SAGITTA)]);
-  return svgFromCurves((data.pattern as { curves?: number[][][] })?.curves ?? []);
+  return svgFromCurves((data.subject as { curves?: number[][][] })?.curves ?? []);
 });
 // An entry's name carries its extension. Leading alphanumeric keeps ".." and
 // absolute paths out; the server never touches the filesystem with a name
@@ -69,6 +71,8 @@ async function takeUpload(
   file: File;
   paths: string[];
   profilePath: string | null;
+  cuspPath: string | null;
+  cuspProfilePath: string | null;
   boundaryPath: string | null;
 }> {
   if (Number(req.headers.get("content-length") ?? 0) > MAX_UPLOAD * MAX_LAYERS) {
@@ -107,7 +111,9 @@ async function takeUpload(
   // one holding the polygon that bounds the pattern.
   const profilePath = await takeExtra(form, "profile", "profile", dir);
   const boundaryPath = await takeExtra(form, "boundary", "boundary", dir);
-  return { form, file, paths, profilePath, boundaryPath };
+  const cuspPath = await takeExtra(form, "cusps", "cusp paths", dir);
+  const cuspProfilePath = await takeExtra(form, "cuspProfile", "cusp profile", dir);
+  return { form, file, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath };
 }
 
 /**
@@ -189,9 +195,9 @@ function handleInspect(req: Request): Promise<Response> {
 }
 
 /**
- * POST /api/preview — the raw pattern and boundary outlines, so the browser can
- * draw the 2D window-position preview and reposition the content without a
- * full 3D rebuild on every drag.
+ * POST /api/preview — the raw subject and boundary outlines, so the browser can
+ * draw the 2D window-position preview and reposition the subject inside the
+ * boundary without a full 3D rebuild on every drag.
  */
 function handlePreview(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
@@ -217,11 +223,13 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
     sagitta: "--sagitta",
     scale: "--scale",
     profileScale: "--profile-scale",
+    cuspWidth: "--cusp-width", cuspHeight: "--cusp-height", cuspZ: "--cusp-z",
+    endAngle: "--end-angle", endSide: "--end-side",
     effectSteps: "--effect-steps",
     effectInset: "--effect-inset",
   });
 
-  // A boundary polygon crops every drawing: what falls outside it is cut off.
+  // A boundary polygon crops every subject: what falls outside it is cut off.
   // Its own placement fields only mean anything while one is loaded.
   if (boundaryPath) {
     args.push("--boundary", boundaryPath);
@@ -229,9 +237,9 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
       boundaryScale: "--boundary-scale",
       boundaryX: "--boundary-x",
       boundaryY: "--boundary-y",
-      patternScale: "--pattern-scale",
-      patternX: "--pattern-x",
-      patternY: "--pattern-y",
+      subjectScale: "--subject-scale",
+      subjectX: "--subject-x",
+      subjectY: "--subject-y",
     }));
     // Centring and fitting is the default; only leaving it turns the flag off.
     if (form.get("boundaryFit") === "0") args.push("--no-boundary-fit");
@@ -256,6 +264,8 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
     args.push("--seed", String(Math.trunc(Number(seed))));
   }
 
+  if (form.get("roundEnds") === "1") args.push("--round-ends");
+  if (form.get("frameOnly") === "1") args.push("--frame-only");
   const layers = form.get("layers");
   if (typeof layers === "string" && layers !== "") args.push("--layers", layers);
   return args;
@@ -267,12 +277,14 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
  */
 function handleRegions(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     return Response.json(await runScript([
       paths[0],
       "--regions",
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(cuspPath ? ["--cusps", cuspPath] : []),
+      ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await layerSpecs(form, dir, paths),
     ]));
@@ -342,13 +354,15 @@ async function layerSpecs(
 /** POST /api/convert — the DXF plus settings in, an STL out. */
 function handleConvert(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
+    const { form, file, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     const output = `${dir}/output.stl`;
     const args = [
       paths[0],
       output,
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(cuspPath ? ["--cusps", cuspPath] : []),
+      ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "stacks", "--stacks", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
@@ -376,7 +390,7 @@ function handleConvert(req: Request): Promise<Response> {
  */
 function handleExport(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     // Colours travel either per layer (stacks) or per face (groups).
     const stacks = await mapFlag(form, "stacks", "--stacks", dir);
     const groups = await mapFlag(form, "groups", "--groups", dir);
@@ -391,6 +405,8 @@ function handleExport(req: Request): Promise<Response> {
       "--split",
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(cuspPath ? ["--cusps", cuspPath] : []),
+      ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
@@ -877,7 +893,7 @@ async function serveLibraryPreview(name: string): Promise<Response> {
           let svgText: string;
           try {
             const data = await runScript([tmp, "--preview", "--sagitta", String(THUMB_SAGITTA)]);
-            const curves = (data.pattern as { curves?: number[][][] })?.curves ?? [];
+            const curves = (data.subject as { curves?: number[][][] })?.curves ?? [];
             svgText = svgFromCurves(curves);
           } finally {
             await Deno.remove(tmp).catch(() => {});
@@ -1076,30 +1092,25 @@ async function deleteLibrary(name: string): Promise<Response> {
 }
 
 /**
- * POST /api/export3mf — one 3MF holding every colour variation.
- * Each permutation of the palette's colour groups is written out, so a
- * two-colour model comes back as two files (blue on orange, orange on blue)
- * and three colours as six. The meshes are identical; only the extruder a
- * group is assigned to changes, the way Snapmaker's slicer reads colour.
- * Every file starts with the plain printable versions on their own build
- * plates — the whole model in one colour, then the frame alone — and the
- * colour/pattern combinations fill the remaining plates, spilling onto fresh
- * ones as a plate fills.
+ * POST /api/export3mf — selectable colour assemblies with printer-specific
+ * plate layout. slicerOptions.preview returns thumbnails and a packing plan;
+ * the same options plus selected IDs produce the downloadable project.
  */
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, boundaryPath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     const output = `${dir}/variations`;
-    // Comma-separated surface patterns chosen in the export panel; each colour
-    // combination is repeated once per pattern. Absent = colour permutations
-    // only, as before.
+    // Legacy callers may specify one pattern; the dialog sends slicerOptions.
     const patterns = form.get("patterns");
     const stats = await runScript([
       paths[0],
       output,
       "--variations",
+      ...await mapFlag(form, "slicerOptions", "--slicer-options", dir),
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(cuspPath ? ["--cusps", cuspPath] : []),
+      ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "stacks", "--stacks", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
@@ -1133,12 +1144,32 @@ async function serveStatic(pathname: string): Promise<Response | null> {
   }
 }
 
+async function calibrationCoupon(req: Request): Promise<Response> {
+  let body: { thicknesses?: unknown; layerHeight?: unknown };
+  try { body = await req.json(); } catch { throw new HttpError(400, "Expected coupon settings"); }
+  const lh = Number(body.layerHeight);
+  const values = body.thicknesses;
+  if (!(lh >= 0.05 && lh <= 1) || !Array.isArray(values) || values.length < 2 || values.length > 16 ||
+      values.some((t) => typeof t !== "number" || !Number.isFinite(t) || t <= 0 || t > 10 || Math.abs(t/lh-Math.round(t/lh)) > 1e-5)) {
+    throw new HttpError(400, "Use 2–16 positive patch thicknesses in whole print layers (up to 10 mm)");
+  }
+  return withTempDir(async (dir) => {
+    const output = `${dir}/calibration.stl`;
+    const result = await new Deno.Command(PYTHON, {args:["tools/calibration.py", output, "--thicknesses", JSON.stringify(values)], stdout:"piped", stderr:"piped"}).output();
+    if (!result.success) throw new HttpError(422, "Could not generate calibration coupon", new TextDecoder().decode(result.stderr));
+    return new Response(await Deno.readFile(output), {headers:{"content-type":"model/stl", "content-disposition":"attachment; filename=filament-calibration.stl"}});
+  });
+}
+
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
   try {
     if (url.pathname === "/api/resources/import" && req.method === "POST") {
       return Response.json(await importProjectResources(PROJECT_DIR, resources));
     }
+    if (url.pathname === "/api/calibration" && req.method === "POST") return await calibrationCoupon(req);
+    const filamentResponse = await filaments.handle(req);
+    if (filamentResponse) return filamentResponse;
     const resourceResponse = await resources.handle(req);
     if (resourceResponse) return resourceResponse;
     if (url.pathname === "/api/trace/upload" && req.method === "POST") {
@@ -1194,6 +1225,11 @@ Deno.serve({ port: PORT }, async (req) => {
     }
 
     if (req.method === "GET") {
+      if (url.pathname.startsWith("/api/gothic-example/")) {
+        const name = url.pathname.slice("/api/gothic-example/".length);
+        if (!["frame.dxf", "cusps.dxf", "frame-profile.svg", "cusp-profile.svg"].includes(name)) throw new HttpError(404, "Unknown gothic reference");
+        return new Response(await Deno.readFile(`examples/gothic/${name}`), {headers:{"content-type":name.endsWith(".svg")?"image/svg+xml":"application/dxf"}});
+      }
       if (url.pathname === "/api/example.dxf") {
         return new Response(await Deno.readFile(EXAMPLE), {
           headers: {

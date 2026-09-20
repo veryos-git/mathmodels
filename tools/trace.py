@@ -32,6 +32,9 @@ CMD_RE = re.compile(r"([ML])\s*([-\d.]+)\s+([-\d.]+)")
 def preprocess(img: np.ndarray, p: dict) -> np.ndarray:
     """Grayscale -> denoise -> threshold -> despeckle -> (optionally) skeleton."""
     if img.ndim == 3:
+        if img.shape[2] == 4:
+            alpha = img[:, :, 3:4].astype(float) / 255
+            img = (img[:, :, :3] * alpha + 255 * (1-alpha)).astype(np.uint8)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     img = cv2.medianBlur(img, 3)
@@ -261,12 +264,24 @@ def main() -> None:
         print(f"error: cannot read image {args.input}", file=sys.stderr)
         sys.exit(1)
 
-    binary = preprocess(img, p)
-    height, width = binary.shape
-
+    # Preserve broad dark features before skeletonizing line art. A disk opening
+    # separates thick interiors (eyes, spots) from ordinary pen strokes.
+    raw = preprocess(img, {**p, "traceMode": "outline", "skeletonize": False})
+    height, width = raw.shape
+    blobs = np.zeros_like(raw)
+    if p.get("blackAreas", "none") == "outline" and p.get("traceMode", "centerline") == "centerline":
+        diameter = max(3, min(201, int(p.get("blackMinWidth", 8))))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (diameter, diameter))
+        blobs = cv2.morphologyEx(raw, cv2.MORPH_OPEN, kernel)
     if p.get("traceMode", "centerline") == "centerline":
-        paths = skeleton_paths(binary > 0)
+        from skimage.morphology import skeletonize as sk_skeletonize
+        lines = cv2.bitwise_and(raw, cv2.bitwise_not(blobs))
+        paths = skeleton_paths(sk_skeletonize(lines > 0))
+        # Closed outlines remain closed throughout simplification; they become
+        # paintable faces downstream instead of disappearing into a tiny skeleton.
+        paths += outline_paths(blobs)
     else:
+        binary = preprocess(img, p)
         paths = outline_paths(binary)
 
     # Raw polyline SVG, then reduced/smoothed into the final form.

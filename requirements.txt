@@ -8,3 +8,5 @@ mapbox-earcut==2.0.0  # the triangulator trimesh uses for extrude_polygon
 opencv-python-headless==5.0.0.93  # binarize, despeckle, contour + RDP tracing
 scikit-image==0.26.0              # skimage.morphology.skeletonize (centerline)
 scipy==1.18.0                     # scikit-image dependency, pinned for reproducibility
+
+manifold3d==3.5.3   # robust union of frame, cusp sweeps and revolved endings

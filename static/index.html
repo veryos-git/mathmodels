@@ -324,12 +324,13 @@
   #libraryPicker[hidden], #libEditor[hidden] { display: none; }
   #libraryPickerBox { width: min(860px, 100%); height: min(620px, 100%); background: #14161a;
       border: 1px solid #2a2e35; border-radius: 10px; display: grid;
-      grid-template-rows: auto 1fr; overflow: hidden; }
+      grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
   #libraryPickerBox header, #libEditorBox header { display: flex; align-items: center; gap: 12px;
       padding: 10px 14px; border-bottom: 1px solid #2a2e35; }
   #libraryPickerBox header .muted, #libEditorBox header .muted { flex: 1; }
   #libraryPickerBox button, #libEditorBox button { margin: 0; width: auto; padding: 7px 12px; font-size: 13px; }
-  #libPickGrid { overflow-y: auto; padding: 18px; }
+  #libPickGrid { min-height: 0; overflow-y: auto; padding: 18px;
+      grid-auto-rows: max-content; align-content: start; }
   #libPickGrid .project-tile { cursor: pointer; }
   #libPickGrid .tile-actions { opacity: 1; }   /* hover-action tiles feel tappable on touch */
   #libPickGrid .tile-actions button { display: none; }
@@ -369,13 +370,36 @@
     .lib-edit-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     .lib-edit-body aside { border-right: 0; border-bottom: 1px solid #2a2e35; }
   }
+
+  .workflow-dialog { width:min(900px,95vw); max-height:90vh; overflow:auto; color:#e6e9ed; background:#181b22; border:1px solid #495364; border-radius:12px; padding:22px; }
+  .workflow-dialog::backdrop { background:#000a; }
+  .workflow-dialog header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  .workflow-dialog header button { width:auto; }
+  .filament-layout { display:grid; grid-template-columns:220px 1fr; gap:24px; }
+  .calibration-patches { display:grid; grid-template-columns:repeat(auto-fit,minmax(95px,1fr)); gap:8px; margin:14px 0; }
+  .calibration-patches input { width:100%; height:42px; }
+  #modelSteps { display:grid; grid-template-columns:repeat(auto-fit,minmax(60px,1fr)); gap:4px; position:sticky; top:0; background:#14161a; z-index:3; padding:8px 0; }
+  #modelSteps button { font-size:12px; padding:8px 3px; background:#242a34; margin:0; }
+  #modelSteps button[hidden] { display:none; }
+  #workflowMode, .workflow-dialog select, .workflow-dialog input:not([type=color]):not([type=checkbox]) { width:100%; padding:8px; background:#1d2127; color:#ddd; border:1px solid #394252; border-radius:6px; }
+  .resource-slot { margin-top:14px; font-size:12px; }
+  .resource-slot > span { display:block; margin-top:5px; overflow-wrap:anywhere; }
+  .resource-slot > div { display:flex; gap:5px; }
+  .resource-slot button { width:auto; flex:1; padding:7px 5px; }
+  #sweepInputs .seed-row { display:flex; flex-wrap:wrap; gap:5px; }
+  #sweepInputs .seed-row button { width:auto; padding:7px; }
+  #sweepInputs .seed-row span { overflow-wrap:anywhere; }
+  #modelSteps button[aria-current="step"] { background:#2563eb; }
+  .model-panel[hidden] { display:none; }
+  #workflowProgress { margin-bottom:12px; }
+  @media(max-width:650px) { .filament-layout { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
 <section id="startScreen" class="screen">
   <div class="start-inner">
     <h1>vector2stl</h1>
-    <div class="sub">Turn a sketch into a printable 3D relief.</div>
+    <div class="sub">Turn a subject into a printable 3D relief.</div>
 
     <div class="start-actions">
       <button class="start-card primary" id="startTrace">
@@ -388,9 +412,13 @@
         Open SVG / DXF
         <small>Already have a vector drawing? Start straight from that.</small>
       </button>
+      <button class="start-card" id="startGothic">
+        <span class="icon">♜</span>Gothic tracery
+        <small>Main frame, finer cusp paths and rounded endings.</small>
+      </button>
       <button class="start-card" id="startExample">
         <span class="icon">✨</span>
-        Example sketch
+        Stained glass example
         <small>Open the bundled gothic window to try it out.</small>
       </button>
       <button class="start-card" id="startProjectFile">
@@ -402,7 +430,8 @@
 
     <div class="start-projects-head">
       <h2>Saved projects</h2>
-      <button class="ghost" id="startLibrary" title="Every SVG or DXF you upload is kept here as a reusable drawing — manage them, or start a model from one">Resource library…</button>
+      <button class="ghost" id="startFilaments">Filaments &amp; calibration…</button>
+      <button class="ghost" id="startLibrary" title="Every SVG or DXF you upload is kept here as a reusable resource — manage them, or start a model from one">Resource library…</button>
     </div>
     <div id="startProjects" class="project-grid muted">nothing saved on the server yet</div>
   </div>
@@ -415,7 +444,7 @@
   <header class="screen-bar">
     <button class="ghost" id="traceBack">← Back</button>
     <span class="title">Trace <span class="muted" id="traceName"></span></span>
-    <button class="ghost" id="savePattern">Save pattern…</button>
+    <button class="ghost" id="savePattern">Save subject…</button>
     <button id="traceUse" disabled>Create 3D model →</button>
   </header>
   <div class="trace-layout">
@@ -444,8 +473,13 @@
           centerline</label>
         <label class="radio"><input type="radio" name="traceMode" value="outline"> outline</label>
       </div>
-      <div class="muted" id="traceModeHint">centerline → line art (walls) · outline → closed shapes (paintable faces)</div>
+      <div class="muted" id="traceModeHint">centerline → line art (walls) · outline → closed shapes (paintable regions)</div>
 
+      <label for="blackAreas">Large black areas</label>
+      <select id="blackAreas"><option value="outline">Keep their outlines (eyes and spots)</option><option value="none">Skeletonize everything</option></select>
+      <label for="blackMinWidth">Minimum dark feature width (pixels)</label>
+      <input id="blackMinWidth" type="number" min="3" max="201" step="1" value="8">
+      <div class="muted">Choose a width larger than the normal pen lines. Preserved areas become closed faces you can paint black.</div>
       <div class="slider-row">
         <label for="threshold">threshold</label>
         <input id="threshold" type="range" min="0" max="255" step="1" value="128">
@@ -520,78 +554,84 @@
   </header>
   <div class="model-layout">
 <aside>
-  <h1>3D model</h1>
-  <div class="sub">Set the size, build the relief, then paint and export.</div>
+  <h1 id="workflowTitle">Stained glass</h1>
+  <label for="workflowMode">Project workflow</label>
+  <select id="workflowMode"><option value="glass">Stained glass / relief</option><option value="gothic">Gothic tracery</option></select>
+  <p id="workflowHint" class="muted"></p>
+  <nav id="modelSteps" aria-label="Model workflow">
+    <button data-step="inputs">1 · Inputs</button><button data-step="shape">2 · Shape</button><button data-step="paint">3 · Paint</button><button data-step="export">4 · Export</button>
+  </nav>
+  <div id="workflowProgress" class="muted" role="status"></div>
 
   <div id="drop" tabindex="0" role="button" aria-label="Choose or drop a DXF, SVG, image or project file">
     <strong id="dropName">Drop a .dxf or .svg here</strong>
     <small id="dropHint">or a photo to trace, or a saved .v2sproj — click to browse</small>
   </div>
   <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml,image/png,image/jpeg,image/gif,image/webp">
-  <button class="ghost" id="example">Use the example sketch</button>
+  <button class="ghost" id="example">Use the example subject</button>
 
   <div class="seed-row" style="margin-top:8px"
-       title="Swap the drawing for one already saved in the library — a loaded boundary (frame) and its placement stay put, so you can try subjects quickly without re-uploading">
+       title="Swap the subject for one already saved in the library — a loaded boundary and its placement stay put, so you can try subjects quickly without re-uploading">
     <button class="ghost" id="subjectLibrary">subject from library…</button>
     <span class="muted" style="align-self:center">saved SVG / DXF</span>
   </div>
 
   <fieldset id="layerBox" hidden>
-    <legend>layers</legend>
+    <legend>sublayers</legend>
     <div id="layers"></div>
   </fieldset>
 
   <fieldset id="drawingsBox" hidden>
-    <legend>drawings</legend>
+    <legend>layered subjects</legend>
     <div id="drawings"></div>
-    <button class="ghost" id="addDrawing" title="Stack another DXF or SVG on top of this model">add drawing…</button>
+    <button class="ghost" id="addDrawing" title="Add another subject on top of this model">add subject…</button>
     <div class="seed-row" style="margin-top:6px">
-      <button class="ghost" id="addDrawingLibrary" title="Stack a drawing that is already saved in the library">from library…</button>
-      <span class="muted" style="align-self:center">saved drawing</span>
+      <button class="ghost" id="addDrawingLibrary" title="Add a subject already saved in the library">from library…</button>
+      <span class="muted" style="align-self:center">saved subject</span>
     </div>
   </fieldset>
   <input type="file" id="fileAdd" accept=".dxf,.svg,application/dxf,image/svg+xml">
 
   <fieldset id="boundaryBox">
-    <legend>frame · boundary</legend>
-    <div class="seed-row" title="A DXF or SVG holding a closed polygon drawn over the pattern: everything outside it is cut off">
+    <legend>boundary</legend>
+    <div class="seed-row" title="A DXF or SVG holding a closed polygon drawn over the subject: everything outside it is cut off">
       <button class="ghost" id="boundaryPick">boundary…</button>
-      <span class="muted" id="boundaryName">off — the whole drawing</span>
-      <button class="ghost" id="boundaryClear" hidden title="Use the whole drawing again">✕</button>
+      <span class="muted" id="boundaryName">off — the whole subject</span>
+      <button class="ghost" id="boundaryClear" hidden title="Use the whole subject again">✕</button>
     </div>
     <div class="seed-row" style="margin-top:6px"
-         title="Use one of the drawings saved in the library as the boundary — a closed outline becomes the frame that crops the subject">
+         title="Use one of the drawings saved in the library as the boundary — a closed shape that crops the subject and sets the finished size">
       <button class="ghost" id="boundaryLibrary">from library…</button>
-      <span class="muted" style="align-self:center">saved frame</span>
+      <span class="muted" style="align-self:center">saved boundary</span>
     </div>
     <input type="file" id="boundaryFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
     <div id="boundaryOpts" hidden>
-      <label class="check" title="Centre the boundary on the pattern and scale it uniformly to just fit inside it — the right choice when the two files came out of different coordinate systems. Off keeps the boundary exactly where it was drawn.">
-        <input type="checkbox" id="boundaryFit" checked> centre &amp; fit to the pattern</label>
-      <label class="check" title="Wall the boundary, so the cropped pattern comes out with a rim around it — off cuts flush and leaves the faces along the cut open">
+      <label class="check" title="Centre the boundary on the subject and scale it uniformly to just fit inside it — the right choice when the two files came out of different coordinate systems. Off keeps the boundary exactly where it was drawn.">
+        <input type="checkbox" id="boundaryFit" checked> centre &amp; fit to the subject</label>
+      <label class="check" title="Wall the boundary, so the cropped subject comes out with a rim around it — off cuts flush and leaves the faces along the cut open">
         <input type="checkbox" id="boundaryWall" checked> wall along the boundary</label>
       <input type="number" id="boundaryScale" value="1" step="0.05" min="0.01" hidden>
       <div class="row">
-        <div><label for="boundaryX" title="Slide the boundary across the drawing, in finished millimetres">nudge x (mm)</label>
+        <div><label for="boundaryX" title="Slide the boundary across the subject, in finished millimetres">nudge x (mm)</label>
           <input type="number" id="boundaryX" value="0" step="1"></div>
-        <div><label for="boundaryY" title="Slide the boundary up or down the drawing, in finished millimetres">nudge y (mm)</label>
+        <div><label for="boundaryY" title="Slide the boundary up or down the subject, in finished millimetres">nudge y (mm)</label>
           <input type="number" id="boundaryY" value="0" step="1"></div>
       </div>
       <div id="contentOpts">
-        <div class="group-title" style="margin-top:10px">window content</div>
-        <div class="muted" style="margin-bottom:6px">Resize and slide the pattern inside the frame. The frame keeps its size; the pattern moves behind it.</div>
+        <div class="group-title" style="margin-top:10px">subject inside the boundary</div>
+        <div class="muted" style="margin-bottom:6px">Resize and slide the subject inside the boundary. The boundary keeps its size; the subject moves behind it.</div>
         <div class="row">
-          <div><label for="patternScale" title="Resize the pattern about its own centre, while the boundary (the frame) stays put">content size (×)</label>
-            <input type="number" id="patternScale" value="1" step="0.05" min="0.01"></div>
-          <div><label for="patternX" title="Slide the pattern across the frame, in finished millimetres">content x (mm)</label>
-            <input type="number" id="patternX" value="0" step="1"></div>
+          <div><label for="subjectScale" title="Resize the subject about its own centre, while the boundary stays put">subject size (×)</label>
+            <input type="number" id="subjectScale" value="1" step="0.05" min="0.01"></div>
+          <div><label for="subjectX" title="Slide the subject across the boundary, in finished millimetres">subject x (mm)</label>
+            <input type="number" id="subjectX" value="0" step="1"></div>
         </div>
         <div class="row">
-          <div><label for="patternY" title="Slide the pattern up or down the frame, in finished millimetres">content y (mm)</label>
-            <input type="number" id="patternY" value="0" step="1"></div>
+          <div><label for="subjectY" title="Slide the subject up or down the boundary, in finished millimetres">subject y (mm)</label>
+            <input type="number" id="subjectY" value="0" step="1"></div>
         </div>
         <div class="seed-row" style="margin-top:8px">
-          <button class="ghost" id="contentPosition" title="Open the 2D window preview — drag to move, scroll to resize, without waiting for the 3D render">position window content…</button>
+          <button class="ghost" id="contentPosition" title="Open the 2D window preview — drag to move, scroll to resize, without waiting for the 3D render">position subject…</button>
         </div>
       </div>
     </div>
@@ -605,8 +645,8 @@
       <div><label for="wallHeight">wall height (mm)</label>
         <input type="number" id="wallHeight" value="1.0" step="0.1" min="0.1"></div>
     </div>
-  <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the drawing — instead of the frame standing half a wall width outside it">
-    <input type="checkbox" id="confineWalls"> keep walls inside the outline</label>
+  <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the subject — instead of the frame standing half a wall width outside it">
+    <input type="checkbox" id="confineWalls" checked> keep walls inside the silhouette</label>
   <div class="seed-row" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
     <button class="ghost" id="profilePick">sweep profile…</button>
     <span class="muted" id="profileName">off — flat walls</span>
@@ -617,14 +657,34 @@
     <span class="muted" style="align-self:center">saved section</span>
   </div>
   <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+  <div id="profileDimensions" class="muted" hidden></div>
   <div class="row" id="profileScaleRow" hidden>
     <div><label for="profileScale" title="Stretches the profile's width — its height stays as drawn">profile width (×)</label>
       <input type="number" id="profileScale" value="1" step="0.05" min="0.05"></div>
   </div>
+  <details id="gothicOptions">
+    <summary>Cusp paths &amp; rounded endings</summary>
+    <p class="muted">Cusp paths use the frame's coordinates and scale. They share its base plane, with their own smaller section.</p>
+    <div id="cuspInputs">
+      <div class="resource-slot"><strong>Cusp paths</strong><span id="cuspName" class="muted">No cusp paths</span>
+        <div><button id="cuspPick" class="ghost">Upload…</button><button id="cuspLibrary" class="ghost">Library…</button><button id="cuspClear" class="ghost">Clear</button></div>
+        <input id="cuspFile" type="file" accept=".svg,.dxf" hidden></div>
+      <div class="resource-slot"><strong>Cusp profile</strong><span id="cuspProfileName" class="muted">Reduced main profile</span>
+        <div><button id="cuspProfilePick" class="ghost">Upload…</button><button id="cuspProfileLibrary" class="ghost">Library…</button><button id="cuspProfileClear" class="ghost">Reset</button></div>
+        <input id="cuspProfileFile" type="file" accept=".svg,.dxf" hidden></div>
+    </div>
+    <div class="row"><label>Cusp width (×)<input id="cuspWidth" type="number" value="0.55" min="0.01" max="10" step="0.05"></label><label>Cusp height (×)<input id="cuspHeight" type="number" value="0.55" min="0.01" max="10" step="0.05"></label></div>
+    <label>Cusp elevation (mm)<input id="cuspZ" type="number" value="0" min="0" step="0.1"></label>
+    <label class="check"><input id="roundEnds" type="checkbox"> Revolve open cusp endings</label>
+    <div class="row"><label>Turn (degrees)<input id="endAngle" type="number" value="90" min="1" max="180" step="5"></label><label>Axis side<select id="endSide"><option value="1">Left edge</option><option value="-1">Right edge</option></select></label></div>
+    <p class="muted">Without cusp paths, endings apply to open main-frame paths. Closed paths and cusp connections to the main frame are left joined. Switch axis side if the roll faces the wrong way.</p>
+    <label class="check" title="Print the frame without faces. With a boundary, connection ribs are generated where the subject would otherwise float, so the frame prints as one piece"><input id="frameOnly" type="checkbox"> Frame only (no faces)</label>
+    <button id="gothicExample" class="ghost">Load reference gothic example</button>
+  </details>
   <div class="row">
     <div><label for="wallOverlap" title="How far each face reaches into the wall around it, so the two fuse when printed">wall overlap (mm)</label>
       <input type="number" id="wallOverlap" value="0.1" step="0.05" min="0"></div>
-    <div><label for="frameLayer" title="Thickness of each frame layer">frame layer (mm)</label>
+    <div><label for="frameLayer" title="Thickness of each frame band">frame band (mm)</label>
       <input type="number" id="frameLayer" value="0.2" step="0.05" min="0.01"></div>
   </div>
   <label class="check" title="Print the frame in its own filament instead">
@@ -642,7 +702,7 @@
       <input type="number" id="sagitta" value="0.02" step="0.01" min="0.001"></div>
   </div>
   <div class="row">
-    <div><label for="ySize" title="How tall the finished model is, walls included — the width follows the drawing's proportions">y size (mm)</label>
+    <div><label for="ySize" title="How tall the finished model is, walls included — the width follows the subject's proportions">y size (mm)</label>
       <input type="number" id="ySize" value="50" step="1" min="0.1"></div>
     <div><label for="scale" title="What the y size works out to — set it yourself to scale by hand">scale (×)</label>
       <input type="number" id="scale" value="1" step="any" min="0.000001"></div>
@@ -656,12 +716,12 @@
     <label for="effect" title="Reshapes every face without changing what you painted on it">face effect</label>
     <select id="effect">
       <option value="none">none — flat faces</option>
-      <option value="maya-pyramid">maya pyramid regions</option>
+      <option value="maya-pyramid">maya pyramid faces</option>
     </select>
     <div class="row" id="pyramidRow" hidden>
       <div><label for="effectSteps" title="How many terraces a face is built from; its painted height is shared between them, never thinner than 0.2 mm each">steps</label>
         <input type="number" id="effectSteps" value="4" step="1" min="1" max="24"></div>
-      <div><label for="effectInset" title="How much further in from the outline each terrace sits">step inset (mm)</label>
+      <div><label for="effectInset" title="How much further in from the face's edge each terrace sits">step inset (mm)</label>
         <input type="number" id="effectInset" value="0.3" step="0.05" min="0.01"></div>
     </div>
   </fieldset>
@@ -674,7 +734,8 @@
   </details>
 
   <fieldset id="paintBox" hidden>
-    <legend>palette</legend>
+    <legend>palette &amp; materials</legend>
+    <button class="ghost" id="modelFilaments">Choose filaments / calibrate…</button>
     <div id="paletteScroll">
       <div id="swatches"></div>
       <div class="scale" id="levelScale"></div>
@@ -684,7 +745,7 @@
     </div>
     <label for="height">selected face height (mm)</label>
     <input type="number" id="height" step="0.1" min="0" disabled>
-    <div class="muted" id="selInfo">left click paints · right click stacks · middle removes</div>
+    <div class="muted" id="selInfo">left click paints · right click adds a slab · middle removes one</div>
     <div class="btn-row">
       <button class="ghost" id="randomise" title="Random hue and height for every face">Random all</button>
       <button class="ghost" id="randomHeights" title="Random height for every face, keeping its hue">Random heights</button>
@@ -710,24 +771,12 @@
 
   <fieldset id="exportBox" hidden>
     <legend>export</legend>
-    <button class="ghost" id="saveProject" hidden title="Save the drawing, settings, colours and holes as one file">Save project</button>
+    <button class="ghost" id="saveProject" hidden title="Save the model, settings, colours and holes as one file">Save project</button>
     <button id="download" hidden>Download STL</button>
     <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
-    <button id="export3mf" hidden title="One 3MF with every colour combination and every ticked surface pattern, each merged into one object and laid out on its own build plates — the file always starts with a single-colour plate and a frame-only plate">Export 3MF (Snapmaker)</button>
-    <div id="patternBox">
-      <div class="group-title" style="margin-top:10px">3MF surface patterns</div>
-      <div class="muted">How the nozzle fills a region. Every colour combination is repeated once per ticked pattern; the many versions are split across build plates, and a one-colour and a frame-only plate always come first.</div>
-      <div id="patternList">
-        <label class="check" title="Fill top/bottom layers with a monotonic line"><input type="checkbox" class="pattern" value="monotonicline"> monotonic line</label>
-        <label class="check" title="Fill top/bottom layers monotonically"><input type="checkbox" class="pattern" value="monotonic" checked> monotonic</label>
-        <label class="check" title="Fill top/bottom layers with straight parallel lines"><input type="checkbox" class="pattern" value="rectilinear"> rectilinear</label>
-        <label class="check" title="Fill top/bottom layers with aligned rectilinear lines"><input type="checkbox" class="pattern" value="alignedrectilinear"> aligned rectilinear</label>
-        <label class="check" title="Fill top/bottom layers with concentric rings"><input type="checkbox" class="pattern" value="concentric" checked> concentric</label>
-        <label class="check" title="Fill top/bottom layers with a Hilbert curve"><input type="checkbox" class="pattern" value="hilbertcurve" checked> hilbert curve</label>
-        <label class="check" title="Fill top/bottom layers with an Archimedean spiral (chords)"><input type="checkbox" class="pattern" value="archimedeanchords" checked> archimedean chords</label>
-        <label class="check" title="Fill top/bottom layers with an octagram spiral"><input type="checkbox" class="pattern" value="octagramspiral"> octagram spiral</label>
-      </div>
-    </div>
+    <button id="exportBambu" hidden>Download .3mf (BambuStudio)</button>
+    <button id="export3mf" hidden>Download .3mf (Snapmaker Orca)</button>
+    <div class="muted">Choose colour variations before downloading. Includes single hue, frame only, black frame + one hue, and the flat silhouette plate.</div>
   </fieldset>
 
   <div id="status"></div>
@@ -754,14 +803,14 @@
   <div id="previewBox" role="dialog" aria-modal="true" aria-label="Window position">
     <header>
       <strong>Window position</strong>
-      <span class="muted">drag to move the pattern · scroll to resize it · the frame stays put</span>
+      <span class="muted">drag to move the subject · scroll to resize it · the boundary stays put</span>
       <button class="ghost" id="previewClose" title="Close (Esc)">✕</button>
     </header>
     <div id="previewHost">
       <canvas id="previewCanvas"></canvas>
     </div>
     <footer>
-      <span class="muted">content size</span>
+      <span class="muted">subject size</span>
       <input type="range" id="previewScale" min="0.05" max="5" step="0.01" value="1">
       <span class="val" id="previewScaleVal">×1</span>
       <span class="muted" id="previewSize"></span>
@@ -794,12 +843,12 @@
   </header>
   <main class="lib-main">
     <p class="lib-note muted">Save reusable inputs here, then create and save 3D model projects with their own dimensions and face painting.
-      In the image editor, “Save pattern” keeps your original image, paint edits, trace settings and resulting SVG together.</p>
+      In the image editor, “Save subject” keeps your original image, paint edits, trace settings and resulting SVG together.</p>
     <fieldset>
       <legend>Reusable resources</legend>
-      <p class="muted">Named patterns, fitting boundaries and sweep profiles. Traced patterns keep the original image, paint edits, settings and SVG. Choose a category before adding or organizing a drawing; All resources adds a pattern.</p>
+      <p class="muted">Named subjects, fitting boundaries and sweep profiles. Traced subjects keep the original image, paint edits, settings and SVG. Choose a category before adding or organizing a subject; All resources adds a subject.</p>
       <label for="resourceKind">Show</label>
-      <select id="resourceKind"><option value="">All resources</option><option value="pattern">Patterns</option><option value="boundary">Boundaries</option><option value="profile">Profiles</option></select>
+      <select id="resourceKind"><option value="">All resources</option><option value="subject">Subjects</option><option value="boundary">Boundaries</option><option value="profile">Profiles</option></select>
       <button class="ghost" id="resourceImport">Import saved project resources</button>
       <button class="ghost" id="resourceUpload">Add SVG / DXF…</button>
       <input id="resourceFile" type="file" accept=".svg,.dxf" hidden>
@@ -807,12 +856,12 @@
       <div id="resourceGrid" class="project-grid"></div>
     </fieldset>
     <details><summary>Uncategorized drawings from earlier uploads</summary>
-    <p class="muted">Use “Organize” to keep a drawing as a named resource in the selected category above.</p>
+    <p class="muted">Use “Organize” to keep a subject as a named resource in the selected category above.</p>
     <input type="text" id="libraryFilter" class="bar-name" placeholder="filter…"
            title="Show only library entries whose name contains this">
     <button class="ghost" id="libraryImport"
-            title="Unpack the drawings saved inside your projects on the server and add them to the library — subjects, stacked drawings and boundaries, deduplicated">import from projects…</button>
-    <button class="ghost" id="libraryNew" title="Add a drawing to the library — upload a file or paste SVG markup">+ New</button>
+            title="Unpack the drawings saved inside your projects on the server and add them to the library — subjects, layered subjects and boundaries, deduplicated">import from projects…</button>
+    <button class="ghost" id="libraryNew" title="Add a subject to the library — upload a file or paste SVG markup">+ New</button>
     <div id="libraryMsg" class="lib-note muted" hidden></div>
     <div id="libraryGrid" class="project-grid muted">loading the library…</div>
     </details>
@@ -823,7 +872,7 @@
 <div id="libraryPicker" hidden>
   <div id="libraryPickerBox" role="dialog" aria-modal="true" aria-label="Library picker">
     <header>
-      <strong id="libPickTitle">Pick a drawing</strong>
+      <strong id="libPickTitle">Pick a subject</strong>
       <span class="muted" id="libPickNote"></span>
       <button class="ghost" id="libPickNew" title="Upload a file, keep it in the library, and use it right away">+ add file…</button>
       <button class="ghost" id="libPickManage" title="Open the library page to edit or delete entries">manage…</button>
@@ -838,7 +887,7 @@
 <div id="libEditor" hidden>
   <div id="libEditorBox" role="dialog" aria-modal="true" aria-label="Library entry editor">
     <header>
-      <strong id="libEditTitle">New drawing</strong>
+      <strong id="libEditTitle">New subject</strong>
       <span class="muted" id="libEditMode"></span>
       <button class="ghost" id="libEditClose" title="Close (Esc)">✕</button>
     </header>
@@ -852,7 +901,7 @@
           <option value="dxf">DXF</option>
         </select>
         <div class="muted" id="libEditKindHint">SVG can be pasted below; DXF is loaded from a file.</div>
-        <button class="ghost" id="libEditPick" title="Fill the content from a .dxf or .svg file">load from file…</button>
+        <button class="ghost" id="libEditPick" title="Fill the subject from a .dxf or .svg file">load from file…</button>
         <div class="muted" id="libEditFile">no file loaded — paste SVG markup instead</div>
         <input type="file" id="libEditFileInput" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
         <div class="group-title" style="margin-top:12px">preview</div>
@@ -880,12 +929,15 @@
 } }
 </script>
 <script type="module">
+import { remapPaint } from './region-paint.js';
+import { initFilaments } from './filaments.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
+let filamentManager = null;
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 const round3 = (v) => Math.round(v * 1000) / 1000;
 const round6 = (v) => Math.round(v * 1e6) / 1e6;
@@ -985,6 +1037,8 @@ function mixLevels(lo, hi) {
  * this many steps there is no contrast left to lose.
  */
 function shadeFor(hue, height, lo, hi) {
+  const calibrated = filamentManager?.color(hue, height);
+  if (calibrated) return new THREE.Color(calibrated);
   const t = hi > lo ? clamp((height - lo) / (hi - lo), 0, 1) : 0;
   const deg = HUES[hue];
   if (deg === null) return new THREE.Color(0x000000);   // black at any height
@@ -1034,6 +1088,7 @@ function setHue(row, hex, lo, hi) {
     buildPalette(lo, hi);
     return;
   }
+  filamentManager?.clear(row);
   HUES[row] = black ? null : hsl.h * 360;
   buildPalette(lo, hi);
   layers.forEach((l, li) => {
@@ -1116,7 +1171,7 @@ function buildPalette(lo, hi) {
       b.className = 'swatch';
       b.type = 'button';
       b.style.background = '#' + shadeFor(hue, h, lo, hi).getHexString();
-      b.title = `${h.toFixed(2)} mm of ${hueName(HUES[hue])}`;
+      b.title = `${h.toFixed(2)} mm of ${filamentManager?.name(hue) ?? hueName(HUES[hue])}`;
       b.setAttribute('aria-label', `hue ${hue + 1}, ${h.toFixed(2)} mm`);
       b.setAttribute('aria-pressed', String(held([hue], level)));
       b.onclick = () => arm([hue], level, b);
@@ -1369,7 +1424,7 @@ function rebuildFrame(li) {
   // Profile mode: the swept frame arrives as a finished mesh — show it as is.
   if (l.sweptGeom) {
     const mesh = new THREE.Mesh(l.sweptGeom, new THREE.MeshStandardMaterial({
-      color: 0x2b2f36, metalness: 0.1, roughness: 0.8, wireframe,
+      color: $('workflowMode').value === 'gothic' ? 0xb9c4d2 : 0x2b2f36, metalness: 0.1, roughness: 0.8, wireframe,
     }));
     mesh.userData = { layer: li, region: null };
     l.group.add(mesh);
@@ -1410,7 +1465,7 @@ function frameChanged() {
   layers.forEach((_, li) => rebuildFrame(li));
   const stack = frameStack(layers[0]);
   setStatus(stack
-    ? `frame is ${count(stack.length, 'layer')} of ${stack[0].t} mm, cycling the palette`
+    ? `frame is ${count(stack.length, 'band')} of ${stack[0].t} mm, cycling the palette`
     : 'frame is one solid in its own colour');
 }
 
@@ -1488,7 +1543,7 @@ function rebuildRegion(li, i) {
     const mesh = new THREE.Mesh(slab.geom, new THREE.MeshStandardMaterial({
       // The shade is the painted layer's own, so a terrace shows the colour
       // the palette says that height is, not the terrace's thickness.
-      color: shadeFor(slab.paint.hue, slab.paint.t, l.model.lo, l.model.hi),
+      color: filamentManager?.stackColor(l.stacks[i]) ?? shadeFor(slab.paint.hue, slab.paint.t, l.model.lo, l.model.hi),
       metalness: 0.05, roughness: 0.75, wireframe,
     }));
     mesh.scale.z = Math.max(slab.t, 1e-4);
@@ -1530,7 +1585,7 @@ function buildLayer(li, data, lo, hi, rng, keep = null) {
     region.steps ? region.steps.map((parts) => unitPrism(parts)) : null);
   l.regionMeshes = data.regions.map(() => []);
   const steps = levels(lo, hi);
-  l.stacks = data.regions.map((_, i) => keep
+  l.stacks = data.regions.map((_, i) => keep?.[i]
     ? keep[i].map((layer) => ({ ...layer }))
     : [{ hue: 0, t: steps[Math.floor(rng() * steps.length)] }]);
   for (let i = 0; i < l.stacks.length; i++) rebuildRegion(li, i);
@@ -1552,10 +1607,11 @@ function buildModel(data, lo, hi, rng, keep = null) {
   if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
   $('hint').hidden = true;
   for (const id of ['reset', 'wire', 'top', 'readout', 'paintBox', 'holeBox',
-                    'exportBox', 'saveProject', 'download', 'exportZip', 'export3mf']) {
+                    'exportBox', 'saveProject', 'download', 'exportZip', 'export3mf', 'exportBambu']) {
     $(id).hidden = false;
   }
   $('saveToServer').disabled = false;
+  updateWorkflowProgress();
   renderDrawings();
   updateReadout();
 }
@@ -1628,17 +1684,9 @@ async function applyHoles() {
   const n = allHoles().length;
   const m = baseModel();
   if (!m) { drawHoleMarkers(); return; }
-  const keep = keepStacks();
-  setStatus(n ? 'cutting holes…' : 'removing holes…');
-  try {
-    const res = await fetch('/api/regions', { method: 'POST', body: shapeForm() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? res.statusText);
-    buildModel(data, m.lo, m.hi, null, keep);
+  if (await generate(keepStacks()) === 'restored') {
     select(null);
     setStatus(n ? `${count(n, 'hole')} cut through the model` : 'holes removed');
-  } catch (e) {
-    setStatus(String(e.message ?? e), true);
   }
 }
 
@@ -1727,7 +1775,7 @@ function select(sel) {
   if (!sel) {
     $('height').value = '';
     $('height').disabled = true;
-    $('selInfo').textContent = 'left click paints · right click stacks · middle removes';
+    $('selInfo').textContent = 'left click paints · right click adds a slab · middle removes one';
     return;
   }
   highlight(sel.li, sel.id, 0x4a4a4a);
@@ -1822,7 +1870,7 @@ function drawFaceCard(sel, event) {
       const chip = tag('div', 'chip');
       chip.style.background = shade(layer);
       row.append(chip, tag('span', '',
-        `${hueName(HUES[layer.hue])} · ${layer.t.toFixed(2)} mm`));
+        `${filamentManager?.name(layer.hue) ?? hueName(HUES[layer.hue])} · ${layer.t.toFixed(2)} mm`));
       side.append(row);
     }
     side.append(tag('div', 'foot',
@@ -1850,7 +1898,7 @@ function updateReadout() {
     .join(' · ');
   $('readout').textContent = `${all.length} faces · ${used} raised · `
     + `${slabs} layers · ${Math.min(...totals).toFixed(2)}–${Math.max(...totals).toFixed(2)} mm`
-    + (layers.length > 1 ? ` · ${count(layers.length, 'drawing')}` : '')
+    + (layers.length > 1 ? ` · ${count(layers.length, 'subject')}` : '')
     + `\n${perHue}`;
 }
 
@@ -2188,7 +2236,7 @@ async function pickFile(file, fit = true) {
   $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
   stats.textContent = '';
   $('exportBox').hidden = $('download').hidden = $('exportZip').hidden = $('holeBox').hidden = true;
-  $('export3mf').hidden = true;
+  $('export3mf').hidden = $('exportBambu').hidden = true;
   $('saveProject').hidden = true;
   $('saveToServer').disabled = true;
   // suggest a name from the drawing, unless one is already typed
@@ -2267,6 +2315,8 @@ async function loadStacked(l, fit = true) {
 // Advanced mode: a second drawing holding one closed cross-section. The server
 // sweeps it along every path, so the frame's width and height come from the
 // profile and the wall width/height boxes step aside.
+let cuspPicked = null;
+let cuspProfilePicked = null;
 let profilePicked = null;  // the profile drawing (File), null in standard mode
 let profileDims = null;    // { x, y } mm — what the profile measures
 
@@ -2276,6 +2326,10 @@ function profileUI() {
   $('profileName').textContent = profilePicked ? profilePicked.name : 'off — flat walls';
   $('profileClear').hidden = !on;
   $('profileScaleRow').hidden = !on;
+  $('profileDimensions').hidden = !on;
+  $('wallWidth').closest('.row').hidden = on;
+  $('profileDimensions').textContent = profileDims ? `Section: ${profileDims.x.toFixed(2)} mm wide × ${profileDims.y.toFixed(2)} mm high before width scaling` : '';
+  if (on && $('sweepDetails')) $('sweepDetails').open = true;
   $('wallWidth').disabled = $('wallHeight').disabled = on;
   $('blackFrame').closest('label').hidden = on;
   $('frameLayer').closest('div').hidden = on;
@@ -2362,7 +2416,7 @@ async function inspectSize(file) {
 /** Show or hide the boundary controls and the ✕, and refresh the label. */
 function boundaryUI() {
   const on = !!boundaryPicked;
-  $('boundaryName').textContent = boundaryPicked ? boundaryPicked.name : 'off — the whole drawing';
+  $('boundaryName').textContent = boundaryPicked ? boundaryPicked.name : 'off — the whole subject';
   $('boundaryClear').hidden = !on;
   $('boundaryOpts').hidden = !on;
   // The frame is fixed at 1:1 while a boundary is loaded — only the content
@@ -2420,7 +2474,7 @@ for (const id of ['boundaryX', 'boundaryY']) {
     if (!Number.isFinite(v)) return setStatus(`${id} needs a number`, true);
     refit(id === 'boundaryX'
       ? `boundary nudged ${v} mm across — ${finishedSize()}`
-      : `boundary nudged ${v} mm up — ${finishedSize()}`);
+      : `boundary nudged ${v} mm up — ${finishedSize()}`, true);
   };
 }
 
@@ -2429,7 +2483,7 @@ for (const id of ['boundaryX', 'boundaryY']) {
 $('boundaryWall').onchange = () => {
   refit($('boundaryWall').checked
     ? 'the boundary is walled — the crop has a rim'
-    : 'flush cut — faces end open at the boundary');
+    : 'flush cut — faces end open at the boundary', true);
 };
 
 // Centring and fitting moves the boundary over the pattern but leaves the
@@ -2437,7 +2491,7 @@ $('boundaryWall').onchange = () => {
 $('boundaryFit').onchange = () => {
   refit($('boundaryFit').checked
     ? `boundary centred and fitted — ${finishedSize()}`
-    : `boundary kept as drawn — ${finishedSize()}`);
+    : `boundary kept as drawn — ${finishedSize()}`, true);
 };
 
 boundaryUI();      // a browser that restored the state on reload starts right
@@ -2449,16 +2503,16 @@ boundaryUI();      // a browser that restored the state on reload starts right
 // loaded, and they move the *pattern*, not the frame: the finished outline (the
 // boundary's box) keeps its size while the crop finds its composition.
 
-const patternScaleNum = () => Number($('patternScale').value) || 1;
-const patternXNum = () => Number($('patternX').value) || 0;
-const patternYNum = () => Number($('patternY').value) || 0;
+const subjectScaleNum = () => Number($('subjectScale').value) || 1;
+const subjectXNum = () => Number($('subjectX').value) || 0;
+const subjectYNum = () => Number($('subjectY').value) || 0;
 
 // The 2D preview is drawn from geometry fetched once from the server; every
 // drag and scroll after that is a pure client-side transform, so positioning
 // is trial-and-error without a 3D rebuild.
 let previewData = null;          // { pattern: {curves}, boundary: {rings} }
 let previewPath = null;          // the pattern as one Path2D, in raw millimetres
-let previewPatternBox = null;    // raw bbox of the pattern
+let previewSubjectBox = null;    // raw bbox of the pattern
 let previewBoundaryRings = [];   // raw boundary rings
 let previewBoundaryBox = null;   // raw bbox of the boundary
 let previewKpx = 1;              // device px per model mm, from the last draw
@@ -2498,11 +2552,11 @@ async function loadPreview() {
   if (!res.ok) throw new Error(data.error ?? res.statusText);
 
   previewData = data;
-  previewPatternBox = bboxOf(data.pattern.curves);
+  previewSubjectBox = bboxOf(data.subject.curves);
   previewBoundaryRings = data.boundary?.rings ?? [];
   previewBoundaryBox = bboxOf(previewBoundaryRings);
   const path = new Path2D();
-  for (const c of data.pattern.curves) {
+  for (const c of data.subject.curves) {
     if (c.length < 2) continue;
     path.moveTo(c[0][0], c[0][1]);
     for (let i = 1; i < c.length; i++) path.lineTo(c[i][0], c[i][1]);
@@ -2516,11 +2570,11 @@ async function loadPreview() {
  * `transform_curves` in dxf2stl.py, or the crop would not match.
  */
 function computePreviewGeom() {
-  const S = patternScale() || 1;
-  const ps = patternScaleNum();
-  const ptx = patternXNum();
-  const pty = patternYNum();
-  const pb = previewPatternBox, bb = previewBoundaryBox;
+  const S = subjectScale() || 1;
+  const ps = subjectScaleNum();
+  const ptx = subjectXNum();
+  const pty = subjectYNum();
+  const pb = previewSubjectBox, bb = previewBoundaryBox;
 
   const patCx = (pb.minx + pb.maxx) / 2, patCy = (pb.miny + pb.maxy) / 2;
   const pcx = patCx * S, pcy = patCy * S;         // pattern centre, model mm
@@ -2618,12 +2672,12 @@ function drawPreview() {
 /** Sync the overlay's slider and labels with the sidebar boxes, then redraw. */
 function updatePreview() {
   if ($('previewOverlay').hidden || !previewData) return;
-  const s = patternScaleNum();
+  const s = subjectScaleNum();
   $('previewScale').value = clamp(s, 0.05, 5);
   $('previewScaleVal').textContent = `×${round3(s)}`;
   $('previewSize').style.color = '';
-  $('previewSize').textContent = `content ${patternXNum().toFixed(1)}, `
-    + `${patternYNum().toFixed(1)} mm off-centre`;
+  $('previewSize').textContent = `content ${subjectXNum().toFixed(1)}, `
+    + `${subjectYNum().toFixed(1)} mm off-centre`;
   drawPreview();
 }
 
@@ -2646,32 +2700,36 @@ function closePreview() {
   $('previewOverlay').hidden = true;
 }
 
-/** Push the current content boxes into a 3D rebuild, now or after a pause. */
+/**
+ * Push the current content boxes into a 3D rebuild, now or after a pause.
+ * Placement is never allowed to fail on a paint clash — the crop simply moved,
+ * so faces that cannot be carried over are reset and said so.
+ */
 function applyContent(note) {
   clearTimeout(contentTimer);
   contentTimer = null;
   if (!picked) return;
-  if (baseModel()) refit(note);
+  if (baseModel()) refit(note, true);
   else setStatus(note);
 }
 
-function contentChanged(note) {
+function subjectChanged(note) {
   updatePreview();
   if (!picked) return;
   clearTimeout(contentTimer);
   contentTimer = setTimeout(() => applyContent(note), 400);
 }
 
-for (const id of ['patternScale', 'patternX', 'patternY']) {
+for (const id of ['subjectScale', 'subjectX', 'subjectY']) {
   $(id).onchange = () => {
     const v = Number($(id).value);
     if (!Number.isFinite(v)) return setStatus(`${id} needs a number`, true);
-    if (id === 'patternScale' && !(v > 0)) {
+    if (id === 'subjectScale' && !(v > 0)) {
       return setStatus('content size must be greater than 0', true);
     }
-    contentChanged(id === 'patternScale'
-      ? `content is now ×${v} across`
-      : id === 'patternX'
+    subjectChanged(id === 'subjectScale'
+      ? `subject is now ×${v} across`
+      : id === 'subjectX'
         ? `content slid ${v} mm across`
         : `content slid ${v} mm up`);
   };
@@ -2684,15 +2742,15 @@ $('previewDone').onclick = () => {
   applyContent('content positioned');
 };
 $('previewReset').onclick = () => {
-  $('patternScale').value = 1;
-  $('patternX').value = 0;
-  $('patternY').value = 0;
-  contentChanged('content back to ×1, centred');
+  $('subjectScale').value = 1;
+  $('subjectX').value = 0;
+  $('subjectY').value = 0;
+  subjectChanged('content back to ×1, centred');
 };
 
 $('previewScale').oninput = () => {
-  $('patternScale').value = round3(Number($('previewScale').value));
-  contentChanged(`content is now ×${round3(patternScaleNum())} across`);
+  $('subjectScale').value = round3(Number($('previewScale').value));
+  subjectChanged(`subject is now ×${round3(subjectScaleNum())} across`);
 };
 
 // Drag slides the content; the wheel rescales it about its centre. Both only
@@ -2708,9 +2766,9 @@ $('previewCanvas').addEventListener('pointermove', (e) => {
   const dx = (e.clientX - previewDrag.x) * mmPerCssPx;
   const dy = (e.clientY - previewDrag.y) * mmPerCssPx;
   previewDrag = { x: e.clientX, y: e.clientY };
-  $('patternX').value = round3(patternXNum() + dx);
-  $('patternY').value = round3(patternYNum() - dy);   // canvas y down, model y up
-  contentChanged('content moved');
+  $('subjectX').value = round3(subjectXNum() + dx);
+  $('subjectY').value = round3(subjectYNum() - dy);   // canvas y down, model y up
+  subjectChanged('content moved');
 });
 const endPreviewDrag = () => {
   if (!previewDrag) return;
@@ -2723,8 +2781,8 @@ $('previewCanvas').addEventListener('pointercancel', endPreviewDrag);
 $('previewCanvas').addEventListener('wheel', (e) => {
   e.preventDefault();
   const factor = Math.exp(-e.deltaY * 0.0015);
-  $('patternScale').value = round3(clamp(patternScaleNum() * factor, 0.02, 50));
-  contentChanged(`content is now ×${round3(patternScaleNum())} across`);
+  $('subjectScale').value = round3(clamp(subjectScaleNum() * factor, 0.02, 50));
+  subjectChanged(`subject is now ×${round3(subjectScaleNum())} across`);
 }, { passive: false });
 
 // The preview only ever shows while a boundary is loaded, and its outlines
@@ -2775,7 +2833,7 @@ const outline = () => {
 // finished outline's scale; with a centred-and-fitted boundary the pattern has
 // to be scaled by an extra 1/k so the boundary still lands at the box's scale
 // (the server's own fit cancels it out).
-const patternScale = () => {
+const subjectScale = () => {
   const s = Number($('scale').value) || 1;
   return boundaryPicked ? s / boundaryRatio() : s;
 };
@@ -2808,7 +2866,7 @@ function fitLayer(l) {
   // finished millimetres, so it only lands on the same place of every stacked
   // drawing when they all share one pattern scale — the base drawing's.
   if (boundaryPicked) {
-    l.scale = patternScale();
+    l.scale = subjectScale();
     return;
   }
   if (!l.drawing?.y || !(target > wall)) return;
@@ -2954,7 +3012,7 @@ async function addDrawing(file) {
   }
   renderDrawings();
   // The drawings already loaded keep their painting; the new one starts fresh.
-  await refit(`${file.name} stacked on top — ${count(layers.length, 'drawing')}`);
+  await refit(`${file.name} stacked on top — ${count(layers.length, 'subject')}`);
 }
 
 /** Take a stacked drawing off again; the ones above it drop down a level. */
@@ -2963,7 +3021,7 @@ async function removeDrawing(li) {
   dropLayer(li);
   if (selected?.li === li) select(null);
   renderDrawings();
-  await refit(`removed ${name} — ${count(layers.length, 'drawing')} left`);
+  await refit(`removed ${name} — ${count(layers.length, 'subject')} left`);
 }
 
 $('addDrawing').onclick = () => $('fileAdd').click();
@@ -3035,6 +3093,7 @@ const DEFAULT_TRACE_PARAMS = {
   skeletonize: false,
   invert: false,
   minArea: 10,
+  blackAreas: 'outline', blackMinWidth: 8,
 };
 
 const traceState = {
@@ -3057,6 +3116,7 @@ const TRACE_PARAM_CONTROLS = ['threshold', 'simplify', 'smoothing'];
 
 function gatherTraceParams() {
   return {
+    blackAreas: $('blackAreas').value, blackMinWidth: +$('blackMinWidth').value,
     traceMode: document.querySelector('input[name="traceMode"]:checked').value,
     threshold: +$('threshold').value,
     strokeWidth: DEFAULT_TRACE_PARAMS.strokeWidth,
@@ -3069,6 +3129,8 @@ function gatherTraceParams() {
 }
 
 function applyTraceParams(p) {
+  $('blackAreas').value = p.blackAreas ?? 'none';
+  $('blackMinWidth').value = p.blackMinWidth ?? 8;
   document.querySelector(`input[name="traceMode"][value="${p.traceMode}"]`).checked = true;
   for (const key of TRACE_PARAM_CONTROLS) $(key).value = p[key];
   $('skeletonize').checked = !!p.skeletonize;
@@ -3454,6 +3516,7 @@ async function runTrace() {
 }
 
 async function startTrace(file, ret = 'start') {
+  if (ret === 'start') await newWorkflow('glass');
   clearTrace();
   traceReturn = ret;
   setEditTool('pen');                 // the pen is the default editing tool
@@ -3523,6 +3586,8 @@ document.querySelectorAll('input[name="traceMode"]').forEach((r) =>
   r.addEventListener('change', onTraceParamChange));
 
 $('traceUse').onclick = useTrace;
+$('blackAreas').onchange = onTraceParamChange;
+$('blackMinWidth').onchange = onTraceParamChange;
 
 /* -------------------------------------------------- start screen + nav */
 
@@ -3530,7 +3595,8 @@ $('modelNew').onclick = () => showScreen('start');
 $('modelTrace').onclick = () => { traceReturn = 'model'; showScreen('trace'); };
 
 /** Begin a drawing (drop a trace's SVG in place) and show the model screen. */
-function openDrawing(file) {
+async function openDrawing(file) {
+  if (currentScreen === 'start') await newWorkflow('glass');
   showScreen('model');
   return pickFile(file);
 }
@@ -3601,11 +3667,16 @@ function shapeForm() {
     if (id === 'scale') continue;   // sent below, as the pattern's own scale
     form.append(id, $(id).value);
   }
-  form.append('scale', String(patternScale()));
+  form.append('scale', String(subjectScale()));
   if ($('confineWalls').checked) form.append('confineWalls', '1');
   form.append('layers', selectedLayers());
   // One effect shapes every face of every drawing, so it travels once.
   for (const id of EFFECT_FIELDS) form.append(id, $(id).value);
+  for (const id of ['cuspWidth','cuspHeight','cuspZ','endAngle','endSide']) form.append(id, $(id).value);
+  if (cuspPicked) form.append('cusps', cuspPicked);
+  if (cuspProfilePicked) form.append('cuspProfile', cuspProfilePicked);
+  if ($('roundEnds').checked) form.append('roundEnds','1');
+  if ($('frameOnly').checked) form.append('frameOnly','1');
   if (profilePicked) {
     form.append('profile', profilePicked);
     form.append('profileScale', $('profileScale').value);
@@ -3615,9 +3686,9 @@ function shapeForm() {
     form.append('boundaryScale', $('boundaryScale').value);
     form.append('boundaryX', $('boundaryX').value);
     form.append('boundaryY', $('boundaryY').value);
-    form.append('patternScale', $('patternScale').value);
-    form.append('patternX', $('patternX').value);
-    form.append('patternY', $('patternY').value);
+    form.append('subjectScale', $('subjectScale').value);
+    form.append('subjectX', $('subjectX').value);
+    form.append('subjectY', $('subjectY').value);
     if (!$('boundaryFit').checked) form.append('boundaryFit', '0');
     if (!$('boundaryWall').checked) form.append('boundaryWall', '0');
   }
@@ -3637,16 +3708,22 @@ function shapeForm() {
 
 /** Each drawing's painted stacks, deep-copied, to carry across a rebuild. */
 const keepStacks = () =>
-  layers.map((l) => (l.model ? l.stacks.map((s) => s.map((x) => ({ ...x }))) : null));
+  layers.map((l) => l.model ? Object.assign(
+    l.stacks.map((s) => s.map((x) => ({ ...x }))),
+    { regions: l.model.regions.map((r) => r.paintRegion) }) : null);
+
+let rebuildFailed = false;
+let paintLossNote = '';   // faces a placement rebuild could not carry over
 
 /**
  * Ask the server for the faces and build the preview. `keep` restores painted
- * heights and hues, which is how a saved project comes back.
+ * heights and hues, which is how a saved project comes back. `lenient` lets a
+ * placement change rebuild even when a face has no successor (see remapPaint).
  *
  * Returns 'restored' only when `keep` was actually applied — a caller must not
- * claim a project loaded when the face count forced a fresh start.
+ * claim a project loaded when its paint could not be restored.
  */
-async function generate(keep = null) {
+async function generate(keep = null, { lenient = false } = {}) {
   if (!picked) { setStatus('pick a .dxf or .svg file first', true); return false; }
   const lo = Number($('regionMin').value), hi = Number($('regionMax').value);
   if (!(hi >= lo)) { setStatus('tallest face must be at least the lowest', true); return false; }
@@ -3654,27 +3731,29 @@ async function generate(keep = null) {
   setStatus('finding faces…');
   stats.textContent = '';
   $('go').disabled = true;
+  paintLossNote = '';
   try {
     const res = await fetch('/api/regions', { method: 'POST', body: shapeForm() });
     const data = await res.json();
     if (!res.ok) throw new Error([data.error ?? res.statusText, data.log].filter(Boolean).join('\n'));
 
-    // Face ids come from the drawing and the wall settings, so a project only
-    // lines up if it produced the same number of faces. Each drawing is judged
-    // on its own: a change to one must not throw away the painting on another.
     const drawings = data.drawings ?? [data];
-    let mismatch = false;
     if (keep) {
+      let lost = 0, merged = 0;
       keep = drawings.map((d, li) => {
         const had = keep[li];
-        if (!had) return null;                 // a drawing that was just added
+        if (!had) return null;
+        if (had.regions?.every(Boolean) && d.regions.every((r) => r.paintRegion)) {
+          const carried = remapPaint(had.regions, had, d.regions.map((r) => r.paintRegion),
+            { strict: !lenient });
+          lost += carried.lost ?? 0;
+          merged += carried.merged ?? 0;
+          return carried;
+        }
         if (had.length === d.regions.length) return had;
-        setStatus(`the painting on drawing ${li + 1} had ${had.length} faces but it `
-          + `now makes ${d.regions.length} — starting that one fresh`, true);
-        mismatch = true;      // leave the warning on screen
-        return null;
+        throw new Error('The saved paint does not match these faces. Painting was not reset.');
       });
-      if (keep.every((k) => k === null)) keep = null;
+      paintLossNote = paintLossText(lost, merged);
     }
     const seed = Number($('seed').value);
     buildModel(data, lo, hi, mulberry32(Number.isFinite(seed) && $('seed').value !== ''
@@ -3684,12 +3763,14 @@ async function generate(keep = null) {
     modelThumb = captureModelThumbnail();   // the 3D object just generated
     const faces = drawings.reduce((n, d) => n + d.regions.length, 0);
     const cut = data.cropped ? `${data.cropped} curves cut off by the boundary` : '';
-    if (!keep && !mismatch) {
-      setStatus(`${faces} faces — pick a colour, then click a face`
+    if (!keep) {
+      setStatus((faces ? `${faces} faces — pick a colour, then click a face` : "Tracery ready — save the project or export the frame")
         + (cut ? `\n${cut}` : ''));
     }
+    rebuildFailed = false;
     return keep ? 'restored' : 'fresh';
   } catch (e) {
+    rebuildFailed = true;
     setStatus(String(e.message ?? e), true);
     return false;
   } finally {
@@ -3697,10 +3778,17 @@ async function generate(keep = null) {
   }
 }
 
+/** What to say when a placement rebuild had to drop or absorb painted faces. */
+function paintLossText(lost, merged) {
+  const parts = [];
+  if (lost) parts.push(`${count(lost, 'face')} had no successor`);
+  if (merged) parts.push(`${count(merged, 'face')} merged into another`);
+  return parts.length ? `${parts.join(' and ')} — their paint was reset` : '';
+}
+
 $('go').onclick = async () => {
   // Re-generating keeps the painting: the faces you coloured stay coloured.
-  // Only a change that merges or splits faces can force a fresh start, and
-  // that says so rather than doing it silently. ↻ is how you re-roll heights.
+  // Splits inherit paint; destructive geometry changes keep the previous model.
   const keep = baseModel() ? keepStacks() : null;
   if (await generate(keep) === 'restored' && !status.classList.contains('error')) {
     setStatus('re-built — your painting is kept');
@@ -3715,14 +3803,16 @@ $('go').onclick = async () => {
 let refitting = false;      // a rebuild is in flight
 let refitAgain = false;     // and a setting moved again while it ran
 let refitNote = '';         // what to say once it lands
+let refitLenient = false;   // placement, not shape: never fail on paint
 
 /**
  * Rebuild from the current settings, carrying every painted stack across.
  * Spinner arrows fire a change per click, so overlapping calls collapse into
  * one more pass instead of racing each other into the viewer.
  */
-async function refit(note) {
+async function refit(note, lenient = false) {
   refitNote = note;
+  refitLenient = lenient;
   if (!picked || !baseModel()) return;  // nothing to rebuild before the first Generate
   if (refitting) { refitAgain = true; return; }
   refitting = true;
@@ -3731,8 +3821,10 @@ async function refit(note) {
       refitAgain = false;
       const keep = keepStacks();
       setStatus('re-fitting the model…');
-      const how = await generate(keep);
-      if (how === 'restored' && refitNote) setStatus(refitNote);
+      const how = await generate(keep, { lenient: refitLenient });
+      if (how === 'restored' && (refitNote || paintLossNote)) {
+        setStatus([refitNote, paintLossNote].filter(Boolean).join(' — '));
+      }
     } while (refitAgain);
   } finally {
     refitting = false;
@@ -3763,7 +3855,7 @@ $('confineWalls').onchange = () => {
   if (drawing) fitToYSize();
   refit($('confineWalls').checked
     ? `the walls now stay inside the outline — ${finishedSize()}`
-    : `the walls now straddle the outline — ${finishedSize()}`);
+    : `the walls now straddle the outline — ${finishedSize()}`, true);
 };
 
 // The walls count towards the height, so widening them re-fits the scale
@@ -3888,6 +3980,7 @@ async function fileBase64(file) {
  * drawings only appear once there is more than one of them, as version 2.
  */
 async function buildProject() {
+  if (rebuildFailed || $('go').disabled) throw new Error("Restore valid shape settings before saving; your painting is still kept.");
   const stacked = layers.length > 1;
   const traceFile = picked === traceState.svgFile && traceState.source
     ? traceState.committedSource ?? await currentTraceFile() : null;
@@ -3895,6 +3988,13 @@ async function buildProject() {
     format: PROJECT_FORMAT,
     version: stacked ? 2 : 1,
     saved: new Date().toISOString(),
+    workflow: $('workflowMode').value,
+    filaments: filamentManager?.snapshot(),
+    tracery: {
+      cusps: cuspPicked ? {name:cuspPicked.name,data:await fileBase64(cuspPicked),resource:cuspPicked.resource??null} : null,
+      profile: cuspProfilePicked ? {name:cuspProfilePicked.name,data:await fileBase64(cuspProfilePicked),resource:cuspProfilePicked.resource??null} : null,
+      roundEnds: $('roundEnds').checked, frameOnly: $('frameOnly').checked,
+    },
     drawing: { name: picked.name, data: await fileBase64(picked), resource: picked.resource ?? null },
     // A drawing that came from a trace keeps the raster and its settings, so
     // the trace can be re-tuned after reopening the project.
@@ -3917,8 +4017,8 @@ async function buildProject() {
     // travel with the rest of the settings.
     settings: Object.fromEntries(
       [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize',
-        'profileScale', 'boundaryScale', 'boundaryX', 'boundaryY',
-        'patternScale', 'patternX', 'patternY']
+        'profileScale', 'cuspWidth', 'cuspHeight', 'cuspZ', 'endAngle', 'endSide', 'boundaryScale', 'boundaryX', 'boundaryY',
+        'subjectScale', 'subjectX', 'subjectY']
         .map((id) => [id, $(id).value]),
     ),
     layers: selectedLayers(),
@@ -3952,7 +4052,7 @@ async function buildProject() {
 
 const summary = () => `${layers.reduce((n, l) => n + l.stacks.length, 0)} faces, `
   + count(allHoles().length, 'hole')
-  + (layers.length > 1 ? `, ${count(layers.length, 'drawing')}` : '');
+  + (layers.length > 1 ? `, ${count(layers.length, 'subject')}` : '');
 
 $('saveProject').onclick = async () => {
   if (!baseModel() || !picked) return;
@@ -4043,6 +4143,15 @@ async function applyProject(project) {
   }
 
   showScreen('model');
+  setWorkflow(project.workflow ?? 'glass', false);
+  filamentManager?.restore(project.filaments);
+  const embeddedFile = (value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
+  cuspPicked = embeddedFile(project.tracery?.cusps);
+  cuspProfilePicked = embeddedFile(project.tracery?.profile);
+  for (const [id,value] of Object.entries({cuspWidth:.55,cuspHeight:.55,cuspZ:0,endAngle:90,endSide:1})) $(id).value=value;
+  $('roundEnds').checked = !!project.tracery?.roundEnds;
+  $('frameOnly').checked = !!project.tracery?.frameOnly;
+  updateCuspLabels();
   setStatus('opening project…');
   for (const [id, value] of Object.entries(project.settings ?? {})) {
     if ($(id)) $(id).value = value;
@@ -4145,7 +4254,7 @@ async function applyProject(project) {
   const faces = keep.reduce((n, k) => n + (k?.length ?? 0), 0);
   if (await generate(keep) === 'restored') {
     setStatus(`project opened — ${faces} faces, ${count(allHoles().length, 'hole')}`
-      + (layers.length > 1 ? `, ${count(layers.length, 'drawing')}` : '')
+      + (layers.length > 1 ? `, ${count(layers.length, 'subject')}` : '')
       + (lost ? `\n${count(lost, 'drawing')} in the project could not be read` : '')
       + (movedHues
         ? `\n${count(movedHues, 'layer')} came from a palette row this version `
@@ -4597,8 +4706,6 @@ $('saveToServer').onclick = async () => {
   if (!baseModel() || !picked) return;
   const name = $('projectName').value.trim();
   if (!name) return setStatus('give the project a name first', true);
-  if (shelf.some((p) => p.name === name)
-      && !confirm(`"${name}" already exists on the server. Replace it?`)) return;
 
   setStatus('saving to the server…');
   try {
@@ -4649,13 +4756,15 @@ refreshShelf();
 /* -------------------------------------------------------------- download */
 
 /** The form for a build, carrying every painted height so the STL matches the preview. */
+const materialGroup = (row) => `${row+1}-${(filamentManager?.name(row) ?? hueName(HUES[row])).replace(/[^A-Za-z0-9_-]+/g,'-')}`;
 function buildForm() {
+  if (rebuildFailed || $('go').disabled) throw new Error("Restore valid shape settings before exporting; your painting is still kept.");
   const form = shapeForm();
   // Every layer, so the STL is exactly what the preview shows. The group names
   // are the palette's, shared by every drawing — that is what keeps a stack of
   // them coming back as the same palette hue files plus the frame.
   const painted = (stacks) => JSON.stringify(Object.fromEntries(stacks.map((stack, i) => [
-    i, stack.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` })),
+    i, stack.map((l) => ({ t: l.t, g: materialGroup(l.hue) })),
   ])));
   layers.forEach((l, li) => {
     form.append(li === 0 ? 'stacks' : `stacks${li + 1}`, painted(l.stacks));
@@ -4663,7 +4772,7 @@ function buildForm() {
   const frame = frameStack(layers[0]);
   if (frame) {
     form.append('wallStack', JSON.stringify(
-      frame.map((l) => ({ t: l.t, g: `${l.hue + 1}-${hueName(HUES[l.hue])}` }))));
+      frame.map((l) => ({ t: l.t, g: materialGroup(l.hue) }))));
   }
   return form;
 }
@@ -4720,41 +4829,112 @@ $('download').onclick = async () => {
   }
 };
 
-$('export3mf').onclick = async () => {
-  if (!baseModel()) return;
-  setStatus('building colour & pattern variations…');
-  $('export3mf').disabled = true;
-  try {
-    // The checked surface patterns travel as one comma-separated list; every
-    // colour combination is repeated once per pattern.
-    const form = buildForm();
-    const patterns = [...document.querySelectorAll('.pattern:checked')]
-      .map((cb) => cb.value).join(',');
-    if (patterns) form.append('patterns', patterns);
-    const res = await fetch('/api/export3mf', { method: 'POST', body: form });
-    const info = await res.json();
-    if (!res.ok) {
-      throw new Error([info.error ?? res.statusText, info.log].filter(Boolean).join('\n'));
-    }
-    // One 3MF holding every colour combination, each repeated per pattern.
-    // Every export also carries the whole model in one colour on its own
-    // plate and the frame alone on another, so those always come first.
-    const f = info.files[0];
-    saveBlob(fromBase64(f.data), 'model/3mf', baseName() + '.3mf');
-    const patPart = f.patterns ? ` × ${f.patterns} patterns` : '';
-    const plainPlates = f.versions ? `, plus ${count(f.versions, 'plain-version plate')}` : '';
-    setStatus(`saved ${baseName()}.3mf — ${count(f.variations, 'variation')}`
-      + ` across ${count(f.plates, 'build plate')}${plainPlates}`);
-    stats.textContent = `${f.combinations} colour combinations${patPart}`
-      + ` = ${f.variations} objects · ${f.parts} parts · `
-      + `${f.triangles.toLocaleString()} triangles\n`
-      + 'plates: single colour · frame only'
-      + (f.plates > 2 ? ' · colour/pattern versions' : '');
-  } catch (e) {
-    setStatus(String(e.message ?? e), true);
-  } finally {
-    $('export3mf').disabled = false;
+const slicerDialog = document.createElement('dialog');
+slicerDialog.id = 'slicerDialog';
+slicerDialog.style.cssText = 'width:min(1000px,92vw);max-height:88vh;background:#202530;color:#eee;border:1px solid #657080;border-radius:12px;padding:20px';
+slicerDialog.innerHTML = `<form method="dialog"><button style="float:right;width:auto" aria-label="Close export dialog">Close</button></form>
+  <h2 id="slicerTitle">Choose colour variations</h2>
+  <p>Plate 1 includes the required versions — single hue, frame only and black frame plus one hue. The flat 0.2 mm outline version is always included too: it joins plate 1 when there is room and otherwise starts the next plate. The default selection aims for three plates, with space reserved for prime towers.</p>
+  <label>Surface pattern <select id="slicerPattern"><option value="monotonicline">Monotonic line</option><option value="monotonic">Monotonic</option><option value="alignedrectilinear">Aligned rectilinear</option><option value="concentric">Concentric</option><option value="rectilinear">Rectilinear</option><option value="hilbertcurve">Hilbert curve</option><option value="archimedeanchords">Archimedean chords</option><option value="octagramspiral">Octagram spiral</option></select></label>
+  <p class="muted">One pattern applies to all selected versions. Thumbnails show top-view colour assignments. The download includes a PLA profile; choose your actual filament presets in the slicer.</p>
+  <div id="slicerMessage" role="status" aria-live="polite"></div>
+  <div id="slicerGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;margin:16px 0"></div>
+  <div id="slicerPlates" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+  <p id="slicerCount"></p><button id="slicerDownload" disabled>Download selected .3mf</button>`;
+document.body.append(slicerDialog);
+let slicerState = null;
+let slicerRequest = 0;
+slicerDialog.addEventListener('close', () => { slicerRequest++; });
+const svgNS = 'http://www.w3.org/2000/svg';
+function slicerSvg(name, attributes) {
+  const el = document.createElementNS(svgNS, name);
+  for (const [key, value] of Object.entries(attributes)) el.setAttribute(key, String(value));
+  return el;
+}
+function updateSlicerSelection() {
+  if (!slicerState) return;
+  const { info } = slicerState;
+  const selected = [...$('slicerGrid').querySelectorAll('input:checked')].map(el => el.value);
+  slicerState.options.selected = selected;
+  const plan = info.layout, plates = Math.ceil(selected.length / plan.capacity);
+  $('slicerCount').textContent = `${selected.length} objects · ${count(plates, 'build plate')} · reserved tower area ${plan.tower[2]} × ${plan.tower[3]} mm per plate`;
+  const preview = $('slicerPlates'); preview.replaceChildren();
+  for (let pi = 0; pi < plates; pi++) {
+    const svg = slicerSvg('svg', { viewBox: `0 0 ${plan.bed} ${plan.bed}`, width: 180, height: 180, role: 'img', 'aria-label': `Plate ${pi+1}, pink area reserved for prime tower` });
+    svg.append(slicerSvg('rect', { width: plan.bed, height: plan.bed, fill:'#343b47', stroke:'#adb5bd' }));
+    if (info.target === 'bambu') svg.append(slicerSvg('rect', { x:0, y:plan.bed-28, width:18, height:28, fill:'#b45309' }));
+    const [tx,ty,tw,th] = plan.tower;
+    svg.append(slicerSvg('rect', { x:tx-plan.origin[0], y:plan.bed-(ty-plan.origin[1])-th, width:tw, height:th, fill:'#b34d83' }));
+    selected.slice(pi*plan.capacity,(pi+1)*plan.capacity).forEach((id, index) => {
+      const [x,y] = plan.slots[index];
+      svg.append(slicerSvg('rect', { x:x-plan.origin[0], y:plan.bed-(y-plan.origin[1])-plan.size[1], width:plan.size[0], height:plan.size[1], fill:'#639b8c', stroke:'#d4eee7' }));
+      const label = slicerSvg('text', { x:x-plan.origin[0]+3, y:plan.bed-(y-plan.origin[1])-plan.size[1]+12, fill:'white', 'font-size':10 });
+      label.textContent = pi*plan.capacity+index+1; svg.append(label);
+    });
+    preview.append(svg);
   }
+}
+async function openSlicerExport(target) {
+  if (!baseModel()) return;
+  const request = ++slicerRequest;
+  $('slicerGrid').inert = false;
+  $('slicerPattern').disabled = false;
+  slicerState = null;
+  $('slicerGrid').replaceChildren(); $('slicerPlates').replaceChildren(); $('slicerCount').textContent = '';
+  $('slicerDownload').disabled = true;
+  $('slicerTitle').textContent = target === 'bambu' ? 'Bambu Studio · P1S' : 'Snapmaker Orca · U1';
+  $('slicerMessage').textContent = 'Building colour previews and calculating plate space…';
+  slicerDialog.showModal();
+  try {
+    // Freeze the drawing/settings used by both preview and final export.
+    const form = buildForm();
+    const assignedFilaments = filamentManager?.snapshot() ?? [];
+    const colours = Object.fromEntries(HUES.map((h,i) => [materialGroup(i), assignedFilaments[i]?.color ?? (h === null ? '#000000' : '#'+new THREE.Color().setHSL(h/360, .8, .55, THREE.SRGBColorSpace).getHexString(THREE.SRGBColorSpace))]));
+    const options = { target, colours, layerHeight: Number($('layerHeight').value), pattern: $('slicerPattern').value, preview:true };
+    form.set('slicerOptions', JSON.stringify(options));
+    const res = await fetch('/api/export3mf', { method:'POST', body:form });
+    const info = await res.json();
+    if (!res.ok) throw new Error(info.error ?? res.statusText);
+    if (!slicerDialog.open || request !== slicerRequest) return;
+    slicerState = { info, form, options, name: baseName() };
+    for (const v of info.variants) {
+      const card = document.createElement('label');
+      card.style.cssText = 'display:block;border:1px solid #657080;border-radius:8px;padding:8px;cursor:pointer';
+      const checkbox = document.createElement('input'); checkbox.type='checkbox'; checkbox.value=v.id;
+      checkbox.checked=info.selected.includes(v.id); checkbox.disabled=v.required;
+      checkbox.addEventListener('change',updateSlicerSelection);
+      card.append(checkbox, document.createTextNode(' '+v.name+(v.required?' (required)':'')));
+      const svg = slicerSvg('svg',{ viewBox: info.viewBox.join(' '), width:'100%', height:130 });
+      const patches = v.parts.flatMap(([g,slot]) => info.geometry[g].paths.map(p => ({...p, colour:info.colours[slot-1]}))).sort((a,b) => a.z-b.z);
+      for (const p of patches) svg.append(slicerSvg('path',{ d:p.path, fill:p.colour, 'fill-rule':'evenodd' }));
+      card.append(svg); $('slicerGrid').append(card);
+    }
+    $('slicerMessage').textContent = 'Pink areas in the plate diagrams are reserved for prime towers and clearance.';
+    $('slicerDownload').disabled=false;
+    updateSlicerSelection();
+  } catch (error) { if (request === slicerRequest) $('slicerMessage').textContent = error.message ?? String(error); }
+}
+$('export3mf').onclick = () => openSlicerExport('snapmaker');
+$('exportBambu').onclick = () => openSlicerExport('bambu');
+$('slicerDownload').onclick = async () => {
+  if (!slicerState) return;
+  const request = slicerRequest;
+  const { form, options, name } = slicerState;
+  $('slicerGrid').inert = true;
+  $('slicerPattern').disabled = true;
+  $('slicerDownload').disabled=true;
+  $('slicerMessage').textContent='Generating selected objects…';
+  try {
+    form.set('slicerOptions',JSON.stringify({...options, pattern:$('slicerPattern').value, preview:false}));
+    const res=await fetch('/api/export3mf',{method:'POST',body:form});
+    const info=await res.json();
+    if (!res.ok) throw new Error(info.error ?? res.statusText);
+    const f=info.files[0];
+    saveBlob(fromBase64(f.data),'model/3mf',name+'-'+options.target+'.3mf');
+    if (request === slicerRequest) $('slicerMessage').textContent=`Downloaded ${f.objects} objects on ${count(f.plates, 'plate')}. Open as a project to preserve the plate layout and colours.`;
+    setStatus(`Saved ${f.objects} objects on ${f.plates} plates`);
+  } catch(error) { if (request === slicerRequest) $('slicerMessage').textContent=error.message ?? String(error); }
+  finally { if (request === slicerRequest) { $('slicerDownload').disabled=false; $('slicerGrid').inert=false; $('slicerPattern').disabled=false; } }
 };
 
 const fromBase64 = (b64) => {
@@ -5033,6 +5213,8 @@ let pickerResources = [];
 let pickerSlot = null;   // 'subject' | 'boundary' | 'stack' | 'profile'
 
 const PICKER_INFO = {
+  cusps: {title:'Cusp paths',note:'Uses the same coordinates as the main frame'},
+  cuspProfile: {title:'Cusp profile',note:'An independent closed cross-section for the finer paths'},
   subject: {
     title: 'Subject from the library',
     note: 'replaces the current drawing — a loaded boundary (frame) and its placement stay put',
@@ -5071,7 +5253,7 @@ function closePicker() {
 }
 
 function renderPickerGrid() {
-  const kind = ['subject', 'stack'].includes(pickerSlot) ? 'pattern' : pickerSlot;
+  const kind = ['subject', 'stack', 'cusps'].includes(pickerSlot) ? 'subject' : pickerSlot === 'cuspProfile' ? 'profile' : pickerSlot;
   const resources = pickerResources.filter((r) => r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
@@ -5084,6 +5266,7 @@ function renderPickerGrid() {
 
 /** Feed a chosen library drawing to the slot it was picked for. */
 async function applyFileToSlot(slot, file) {
+  if (slot === 'cusps' || slot === 'cuspProfile') return setCuspFile(slot, file);
   if (slot === 'subject') return swapSubject(file);
   if (slot === 'boundary') return applyBoundaryFile(file);
   if (slot === 'stack') return addDrawing(file);
@@ -5477,6 +5660,7 @@ async function refreshResources() {
         if (record.kind === 'boundary') await applyBoundaryFile(file);
         else if (record.kind === 'profile') await applyProfileFile(file);
         else {
+          if (libReturn === 'start') await newWorkflow('glass');
           await pickFile(file);
           if (record.files.original) await restoreResourceTrace(record, file);
         }
@@ -5548,7 +5732,7 @@ $('savePattern').onclick = async () => {
   try {
     await editCanvasReady;
     clearTimeout(traceTimer);
-    if (!await runTrace()) throw new Error('Finish tracing successfully before saving the pattern.');
+    if (!await runTrace()) return;
     const form = new FormData(); form.set('name', name); form.set('kind', 'pattern');
     form.set('original', traceState.original ?? traceState.source);
     form.set('edited', await currentTraceFile());
@@ -5560,6 +5744,109 @@ $('savePattern').onclick = async () => {
     $('traceName').textContent = `· ${record.name} (saved)`;
   } catch(e) { traceError(e.message ?? String(e)); } finally { button.disabled = false; $('traceScreen').inert = false; }
 };
+
+// A compact, persistent workflow navigator keeps inputs, modelling, painting,
+// and exports in their own panels without changing their existing controls.
+let workflowStep = 'inputs';
+function setupWorkflowPanels() {
+  const aside = document.querySelector('#modelScreen .model-layout > aside');
+  let phase='inputs';
+  const grouped={inputs:[],shape:[],paint:[],export:[]};
+  let collect=false;
+  for(const node of [...aside.children]) {
+    if(node.id==='drop')collect=true;
+    if(node.id==='sizeBox')phase='shape';
+    if(node.id==='paintBox')phase='paint';
+    if(node.id==='exportBox')phase='export';
+    if(node.id==='status')collect=false;
+    if(collect)grouped[phase].push(node);
+  }
+  for(const [name,nodes] of Object.entries(grouped)){
+    const panel=document.createElement('section');panel.id='modelPanel-'+name;panel.className='model-panel';
+    for(const node of nodes)panel.append(node);
+    aside.insertBefore(panel,$('status'));
+  }
+  const sweeps=document.createElement('fieldset'); sweeps.id='sweepInputs';
+  const legend=document.createElement('legend');legend.textContent='Sweep profiles & cusp paths';sweeps.append(legend);
+  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('cuspInputs'),$('gothicExample')])sweeps.append(node);
+  const sweepDetails=document.createElement('details');sweepDetails.id='sweepDetails';
+  const sweepSummary=document.createElement('summary');sweepSummary.textContent='Sweep profiles & cusp paths';sweepDetails.append(sweepSummary,sweeps);
+  $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
+  $('modelPanel-shape').append($('holeBox'));
+  for(const button of $('modelSteps').querySelectorAll('button'))button.onclick=()=>showModelStep(button.dataset.step);
+  showModelStep('inputs');setWorkflow('glass',false);
+}
+function showModelStep(step) {
+  workflowStep=step;
+  for(const panel of document.querySelectorAll('.model-panel'))panel.hidden=panel.id!=='modelPanel-'+step;
+  for(const button of $('modelSteps').querySelectorAll('button')) {
+    if(button.dataset.step===step)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
+  }
+  updateWorkflowProgress();
+}
+function updateWorkflowProgress() {
+  if(!$('workflowProgress'))return;
+  $('modelSteps').querySelector('[data-step=paint]').hidden=$('frameOnly').checked;
+  $('modelSteps').querySelector('[data-step=export]').textContent=$('frameOnly').checked?'3 · Export':'4 · Export';
+  const missing=!picked?'Choose a pattern or main-frame drawing.':$('workflowMode').value==='gothic'&&!profilePicked?'Choose the main sweep profile.':!baseModel()?'Set dimensions, then Generate 3D.':$('frameOnly').checked?'Frame ready. Save the project or export STL / 3MF.':'Model ready. Paint the faces, then save and export.';
+  $('workflowProgress').textContent=missing;
+}
+function setWorkflow(mode, defaults=true) {
+  $('workflowMode').value=mode==='gothic'?'gothic':'glass';
+  const gothic=$('workflowMode').value==='gothic';
+  $('workflowTitle').textContent=gothic?'Gothic tracery':'Stained glass / relief';
+  $('workflowHint').textContent=gothic?'Main frame → profile → finer cusp paths → rounded endings → export':'Pattern → fitting boundary → thickness & filament → paint → export';
+  $('gothicOptions').open=gothic;
+  if ($('sweepDetails')) $('sweepDetails').open=gothic||!!profilePicked;
+  if(defaults){$('frameOnly').checked=gothic;if(gothic)$('blackFrame').checked=true;}
+  updateWorkflowProgress();
+}
+async function newWorkflow(mode) {
+  resetLayers();picked=null;clearTrace();
+  cuspPicked=cuspProfilePicked=null;
+  await setProfile(null);await setBoundary(null);
+  $('projectName').value='';$('roundEnds').checked=false;
+  $('confineWalls').checked=true;
+  $('dropName').textContent='Choose a main-frame drawing';$('dropHint').textContent='Upload SVG / DXF, or choose a library resource';
+  $('saveToServer').disabled=true;$('paintBox').hidden=true;$('exportBox').hidden=true;
+  setWorkflow(mode);updateCuspLabels();setStatus('Choose inputs to begin.');
+}
+function updateCuspLabels() {
+  $('cuspName').textContent=cuspPicked?.name??'No cusp paths';
+  $('cuspProfileName').textContent=cuspProfilePicked?.name??'Reduced main profile';
+}
+function setCuspFile(slot,file) {
+  if(file&&!DRAWING.test(file.name))throw new Error('Choose an SVG or DXF');
+  if(slot==='cusps')cuspPicked=file;else {cuspProfilePicked=file;$('cuspWidth').value=file?1:.55;$('cuspHeight').value=file?1:.55;}
+  updateCuspLabels();if(file)libraryRemember(file);
+  setStatus('Tracery input updated. Generate 3D to rebuild.');
+  refit('Tracery input updated.');
+}
+$('cuspPick').onclick=()=>$('cuspFile').click();
+$('cuspProfilePick').onclick=()=>$('cuspProfileFile').click();
+$('cuspFile').onchange=(e)=>{if(e.target.files[0])setCuspFile('cusps',e.target.files[0]);e.target.value='';};
+$('cuspProfileFile').onchange=(e)=>{if(e.target.files[0])setCuspFile('cuspProfile',e.target.files[0]);e.target.value='';};
+$('cuspClear').onclick=()=>setCuspFile('cusps',null);
+$('cuspProfileClear').onclick=()=>setCuspFile('cuspProfile',null);
+$('cuspLibrary').onclick=()=>openPicker('cusps');
+$('cuspProfileLibrary').onclick=()=>openPicker('cuspProfile');
+$('workflowMode').onchange=()=>{setWorkflow($('workflowMode').value);refit('Workflow updated.');};
+for (const id of ['cuspWidth','cuspHeight','cuspZ','roundEnds','endAngle','endSide','frameOnly']) $(id).onchange=()=>{updateWorkflowProgress();refit('Tracery shape updated.');};
+$('startGothic').onclick=async()=>{await newWorkflow('gothic');showScreen('model');showModelStep('inputs');};
+$('gothicExample').onclick=async()=>{
+  try{
+    const get=async(name)=>{const r=await fetch('/api/gothic-example/'+name);if(!r.ok)throw new Error('Could not load gothic reference');return new File([await r.blob()],name);};
+    const [frame,cusps,profile,cuspProfile]=await Promise.all(['frame.dxf','cusps.dxf','frame-profile.svg','cusp-profile.svg'].map(get));
+    await setBoundary(null);await setProfile(profile);cuspPicked=cusps;cuspProfilePicked=cuspProfile;
+    $('profileScale').value=1;$('cuspWidth').value=1;$('cuspHeight').value=1;$('cuspZ').value=0;$('roundEnds').checked=true;$('endAngle').value=90;$('endSide').value=1;
+    setWorkflow('gothic');updateCuspLabels();$('projectName').value='Gothic reference';
+    await pickFile(frame,false);$('scale').value=1;showModelStep('shape');await generate(null);
+  }catch(e){setStatus(e.message,true);}
+};
+filamentManager=initFilaments({changed:()=>rangeChanged(),layerHeight:()=>Number($('layerHeight').value)||.2});
+$('startFilaments').onclick=() => filamentManager.open();
+$('modelFilaments').onclick=() => filamentManager.open();
+setupWorkflowPanels();
 </script>
 </body>
 </html>

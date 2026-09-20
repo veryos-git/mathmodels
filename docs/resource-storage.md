@@ -1,21 +1,21 @@
 # Resources and model projects
 
 Open **Resource library** from Start. Resources are reusable 2D inputs with
-three roles: **pattern**, **boundary**, and **profile**. Choose the category
+three roles: **subject**, **boundary**, and **profile**. Choose the category
 before adding an SVG/DXF. Each resource can be renamed, duplicated, deleted,
 or updated. All resources have drawing thumbnails, including DXF boundaries and
 profiles, in both the library and the corresponding model input picker. DXF
 previews are cached beside their drawing revision and regenerated when the
 drawing changes.
 
-For an image, use the existing Trace editor and **Save pattern**. The save
+For an image, use the existing Trace editor and **Save subject**. The save
 re-runs the trace and stores the original image, current painted image, trace
 settings, and resulting SVG together. **Edit image / trace** reopens that work;
-**Save pattern** updates the same resource. **Reset edits** returns to the
+**Save subject** updates the same resource. **Reset edits** returns to the
 original image. Use Duplicate in the library to make a separate variant.
 Paint edits are preserved as an image, not an editable history of brush strokes.
 
-**Create model** uses a pattern as a model input. Select a boundary or profile
+**Create model** uses a subject as a model input. Select a boundary or profile
 with **Use in model**, or use the model's input pickers. Save the model with
 the existing project controls. Project snapshots contain their actual inputs,
 settings, face painting, and optional resource ID/revision references. Updating
@@ -55,7 +55,7 @@ not implemented.
 ## Existing work
 
 **Import saved project resources** reads existing projects without modifying
-them. It imports subjects, stacked drawings, boundaries and sweep profiles.
+them. It imports subjects, layered subjects, boundaries and sweep profiles.
 Traced subjects retain their source image and settings. Older projects only
 stored the edited image; their pre-edit original cannot be recovered, so the
 available source is used as the reset baseline. Repeating the import skips
@@ -80,5 +80,5 @@ resource. The original library file stays available.
 
 Run `deno task check` and `deno task test` to check the server and storage.
 
-The deferred cusp/layer geometry, revolved endings, filament calibration and
-special tracing of filled black regions have not been added.
+The additional cusp profiles, revolved endings, filament calibration and
+black-area outline preservation are described in the [workflow guide](workflows.md).

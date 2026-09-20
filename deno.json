@@ -14,6 +14,7 @@
       ]
     },
     "check": "deno check server.ts tools/setup.ts",
-    "test": "deno test --allow-read=/tmp --allow-write=/tmp storage/"
+    "test": "deno test --allow-read=/tmp --allow-write=/tmp storage/",
+    "test:geometry": ".venv/bin/python -m unittest discover -s tools -p test_*.py"
   }
 }
