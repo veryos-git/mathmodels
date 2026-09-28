@@ -4,6 +4,10 @@ The model sidebar has four focused panels: **Inputs**, **Shape**, **Paint**,
 and **Export**. The preview and project Save button remain visible. Frame-only
 projects omit Paint. Switching panels does not discard work.
 
+For the measured Onshape tracery example, open **Inputs → Sweep profiles &
+cusp paths → Load Onshape Spitzbogen example**. See the
+[construction and STEP comparison](spitzbogen.md) for dimensions and validation.
+
 ## Image → reusable subject → stained glass
 
 1. Start with **Trace a photo**. Clean up the original with the pen and eraser.
@@ -26,6 +30,43 @@ projects omit Paint. Switching panels does not discard work.
 Starting a new image or vector project from Start clears the previous Gothic
 sweep/cusp inputs. Replacing a subject through a model's library picker retains
 its boundary, supporting quick variations for the same lantern frame.
+
+## CNC slices for stacked sheets
+
+After generating the model, open **Export** and click **Add slice**. Enter its
+height above the model base in millimetres. Every added slice receives a
+random color and a matching horizontal plane in the 3D preview; editing the
+height moves that plane immediately. Use **Show plane** to hide individual
+planes when inspecting several slices. Heights must be below the model top.
+
+Click a slice's **Download SVG**, or **Download all slice SVGs** for the list.
+SVG cutting outlines use the same color as their preview planes. Your browser
+may ask to allow multiple downloads. Slice heights, colors and plane visibility
+are saved with the project. Removing a slice removes its preview plane too.
+
+The height selects a
+horizontal cross-section through the complete model, including painted
+thicknesses, frames and holes. Overlapping solids are fused before slicing
+so their internal boundaries do not become cutting lines. For swept frames
+that cannot be fused as 3D solids, the exporter combines their closed planar
+cross-sections instead. An actual gap in the slice outline still produces an error.
+
+The SVG uses millimetres, closed paths and the full model's XY bounds for
+every slice. Import at 100% scale in your CNC software, retain the shared
+canvas when aligning layers, and apply cutter compensation there. No
+alignment holes or cutter offsets are added automatically.
+
+For 3 mm sheets, export at 1.5, 4.5, 7.5 mm and so on, below the model top.
+Each file represents one plane; stacked sheets approximate slopes with steps.
+At an exact horizontal step, the cross-section uses the material above the
+plane. Heights outside the model or in an empty gap produce an error.
+
+The CLI also supports `--slice-height MM` with an SVG output filename.
+
+Gothic tracery starts with **keep walls inside the silhouette** unchecked.
+Enabling it shows a warning because confinement moves and trims sweep paths
+and can distort arches and cusp joins. Saved projects retain their chosen
+setting and show the same warning if it is enabled.
 
 ## Filament calibration
 

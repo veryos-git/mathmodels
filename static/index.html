@@ -111,6 +111,13 @@
   #download { background: #16a34a; }
   #exportZip { background: #0d9488; }
   #export3mf { background: #7c3aed; }
+  #sliceList { display: grid; gap: 10px; margin-top: 10px; }
+  .slice-row { border: 1px solid #3a4049; border-left: 4px solid var(--slice-color); border-radius: 6px; padding: 10px; }
+  .slice-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .slice-heading .check { margin-left: auto; font-size: 11px; }
+  .slice-chip { width: 12px; height: 12px; border-radius: 50%; background: var(--slice-color); }
+  .slice-error, #gothicConfineWarning { color: #fbbf24; font-size: 12px; margin: 6px 0; }
+  #sliceList .slice-height { width: 100%; }
   #status { margin-top: 12px; font-size: 12px; color: #9aa3af; white-space: pre-wrap;
             word-break: break-word; }
   #status.error { color: #f87171; }
@@ -647,6 +654,7 @@
     </div>
   <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the subject — instead of the frame standing half a wall width outside it">
     <input type="checkbox" id="confineWalls" checked> keep walls inside the silhouette</label>
+  <p id="gothicConfineWarning" role="status" hidden>Gothic tracery does not work well with this option enabled: it moves and trims the sweep paths, which can distort arches and cusp joins. Leave it off to preserve the drawn geometry.</p>
   <div class="seed-row" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
     <button class="ghost" id="profilePick">sweep profile…</button>
     <span class="muted" id="profileName">off — flat walls</span>
@@ -680,6 +688,7 @@
     <p class="muted">Without cusp paths, endings apply to open main-frame paths. Closed paths and cusp connections to the main frame are left joined. Switch axis side if the roll faces the wrong way.</p>
     <label class="check" title="Print the frame without faces. With a boundary, connection ribs are generated where the subject would otherwise float, so the frame prints as one piece"><input id="frameOnly" type="checkbox"> Frame only (no faces)</label>
     <button id="gothicExample" class="ghost">Load reference gothic example</button>
+    <button id="spitzbogenExample" class="ghost">Load Onshape Spitzbogen example</button>
   </details>
   <div class="row">
     <div><label for="wallOverlap" title="How far each face reaches into the wall around it, so the two fuse when printed">wall overlap (mm)</label>
@@ -777,6 +786,14 @@
     <button id="exportBambu" hidden>Download .3mf (BambuStudio)</button>
     <button id="export3mf" hidden>Download .3mf (Snapmaker Orca)</button>
     <div class="muted">Choose colour variations before downloading. Includes single hue, frame only, black frame + one hue, and the flat silhouette plate.</div>
+    <hr>
+    <strong>CNC slices</strong>
+    <p id="sliceRange" class="muted"></p>
+    <button id="addSlice">Add slice</button>
+    <div id="sliceList"></div>
+    <button id="exportSlices" hidden>Download all slice SVGs</button>
+    <p class="muted">Each slice has its own color. Edit its height to move the matching plane in the 3D preview. Turn off other planes to inspect one slice.</p>
+    <div class="muted">Horizontal cross-section, full size in mm, with holes and closed cutting outlines. All slices share the same canvas for alignment. For 3 mm sheets, sample at 1.5, 4.5, 7.5 mm… below the model top. Apply cutter compensation in your CNC software.</div>
   </fieldset>
 
   <div id="status"></div>
@@ -931,6 +948,7 @@
 <script type="module">
 import { remapPaint } from './region-paint.js';
 import { initFilaments } from './filaments.js';
+import { initSlicePreview } from './slice-preview.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
@@ -1283,6 +1301,11 @@ let holeMode = false;
 
 /** The base layer's model — the palette range lives on every layer alike. */
 const baseModel = () => layers[0]?.model ?? null;
+const slicePreview = initSlicePreview({ THREE, scene, modelGroup: group,
+  list: $('sliceList'), addButton: $('addSlice'), exportButton: $('exportSlices'),
+  rangeLabel: $('sliceRange'), exportSlices: exportSliceEntries,
+  reportError: error => setStatus(String(error.message ?? error), true),
+});
 
 /** A fresh layer entry with its own scene group. */
 function newLayer(file = null) {
@@ -1367,6 +1390,7 @@ function disposeLayer(l) {
 /** Geometry of every layer gone, ahead of a rebuild. */
 function disposeModels() {
   for (const l of layers) disposeLayer(l);
+  slicePreview.syncModel();
   selected = hovered = null;
   $('faceCard').hidden = true;
 }
@@ -1381,6 +1405,8 @@ function dropLayer(li) {
 /** Back to a blank single layer — a new base drawing replaces everything. */
 function resetLayers() {
   while (layers.length) dropLayer(0);
+  slicePreview.clear();
+  slicePreview.syncModel();
   layers.push(newLayer());
   picked = null;
   drawing = null;
@@ -1886,6 +1912,7 @@ function drawFaceCard(sel, event) {
 }
 
 function updateReadout() {
+  slicePreview.syncModel();
   if (!baseModel()) return;
   const totals = layers.flatMap((l) => l.stacks.map(totalHeight));
   // A drawing can hold no closed faces at all, and so nothing to measure.
@@ -3852,6 +3879,7 @@ for (const [id, note] of Object.entries(REFIT_FIELDS)) {
 // Confining the walls changes both the outlines and what the drawing measures
 // once printed, so the scale is re-fitted along with them.
 $('confineWalls').onchange = () => {
+  updateGothicConfineWarning();
   if (drawing) fitToYSize();
   refit($('confineWalls').checked
     ? `the walls now stay inside the outline — ${finishedSize()}`
@@ -3989,6 +4017,7 @@ async function buildProject() {
     version: stacked ? 2 : 1,
     saved: new Date().toISOString(),
     workflow: $('workflowMode').value,
+    slices: slicePreview.snapshot(),
     filaments: filamentManager?.snapshot(),
     tracery: {
       cusps: cuspPicked ? {name:cuspPicked.name,data:await fileBase64(cuspPicked),resource:cuspPicked.resource??null} : null,
@@ -4168,6 +4197,7 @@ async function applyProject(project) {
   // before confining existed straddles the outline, exactly as it did, and
   // must not inherit the box from whatever was on screen before it.
   $('confineWalls').checked = !!project.frame?.confined;
+  updateGothicConfineWarning();
   callbackCode = typeof project.callback === 'string' ? project.callback : null;
   // A project saved with fewer rows keeps every hue it has, at the same index,
   // so its face stacks still point at the colours they were painted with. Any
@@ -4221,6 +4251,7 @@ async function applyProject(project) {
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
   await pickFile(Object.assign(new File([bytes], project.drawing.name || 'drawing.dxf'), { resource: project.drawing.resource ?? null }), false);
+  slicePreview.restore(project.slices);
   if (profilePicked) profilePicked.resource = project.profile?.resource ?? null;
   if (boundaryPicked) boundaryPicked.resource = project.boundary?.resource ?? null;
   restoreTrace(project);
@@ -4815,6 +4846,32 @@ async function requestBuild(url, form, button) {
 const baseName = () => $('projectName').value.trim()
   .replace(/[^A-Za-z0-9 ._-]+/g, '-').replace(/^[-.\s]+|[-.\s]+$/g, '')
   || picked.name.replace(DRAWING, '');
+
+async function exportSliceEntries(entries) {
+  if (!baseModel()) throw new Error('Generate the model first.');
+  // Freeze geometry/settings and the filename for the complete batch.
+  const form = buildForm(), name = baseName();
+  let saved = 0;
+  for (const { id, height, color } of entries) {
+    setStatus(`exporting slice ${id} at ${height} mm (${saved + 1}/${entries.length})…`);
+    form.set('sliceHeight', String(height));
+    const res = await fetch('/api/slice', { method: 'POST', body: form });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      throw new Error(`Slice ${id} at ${height} mm: ${error.error ?? res.statusText}`
+        + (saved ? `\n${saved} earlier slice(s) downloaded successfully.` : ''));
+    }
+    const svg = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
+    if (svg.querySelector('parsererror')) throw new Error('The server returned an invalid SVG.');
+    for (const node of svg.querySelectorAll('[stroke]')) {
+      if (node.getAttribute('stroke') !== 'none') node.setAttribute('stroke', color);
+    }
+    saveBlob(new XMLSerializer().serializeToString(svg), 'image/svg+xml', `${name}-slice-${id}-${height}mm.svg`);
+    saved++;
+  }
+  setStatus(`saved ${saved} slice SVG${saved === 1 ? '' : 's'}`
+    + (saved > 1 ? '\nYour browser may ask to allow multiple downloads.' : ''));
+}
 
 $('download').onclick = async () => {
   if (!baseModel()) return;
@@ -5768,7 +5825,7 @@ function setupWorkflowPanels() {
   }
   const sweeps=document.createElement('fieldset'); sweeps.id='sweepInputs';
   const legend=document.createElement('legend');legend.textContent='Sweep profiles & cusp paths';sweeps.append(legend);
-  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('cuspInputs'),$('gothicExample')])sweeps.append(node);
+  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('cuspInputs'),$('gothicExample'),$('spitzbogenExample')])sweeps.append(node);
   const sweepDetails=document.createElement('details');sweepDetails.id='sweepDetails';
   const sweepSummary=document.createElement('summary');sweepSummary.textContent='Sweep profiles & cusp paths';sweepDetails.append(sweepSummary,sweeps);
   $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
@@ -5798,15 +5855,19 @@ function setWorkflow(mode, defaults=true) {
   $('workflowHint').textContent=gothic?'Main frame → profile → finer cusp paths → rounded endings → export':'Pattern → fitting boundary → thickness & filament → paint → export';
   $('gothicOptions').open=gothic;
   if ($('sweepDetails')) $('sweepDetails').open=gothic||!!profilePicked;
-  if(defaults){$('frameOnly').checked=gothic;if(gothic)$('blackFrame').checked=true;}
+  if(defaults){$('frameOnly').checked=gothic;if(gothic){$('blackFrame').checked=true;$('confineWalls').checked=false;}}
+  updateGothicConfineWarning();
   updateWorkflowProgress();
+}
+function updateGothicConfineWarning() {
+  $('gothicConfineWarning').hidden = $('workflowMode').value !== 'gothic' || !$('confineWalls').checked;
 }
 async function newWorkflow(mode) {
   resetLayers();picked=null;clearTrace();
   cuspPicked=cuspProfilePicked=null;
   await setProfile(null);await setBoundary(null);
   $('projectName').value='';$('roundEnds').checked=false;
-  $('confineWalls').checked=true;
+  $('confineWalls').checked=mode!=='gothic';
   $('dropName').textContent='Choose a main-frame drawing';$('dropHint').textContent='Upload SVG / DXF, or choose a library resource';
   $('saveToServer').disabled=true;$('paintBox').hidden=true;$('exportBox').hidden=true;
   setWorkflow(mode);updateCuspLabels();setStatus('Choose inputs to begin.');
@@ -5842,6 +5903,30 @@ $('gothicExample').onclick=async()=>{
     setWorkflow('gothic');updateCuspLabels();$('projectName').value='Gothic reference';
     await pickFile(frame,false);$('scale').value=1;showModelStep('shape');await generate(null);
   }catch(e){setStatus(e.message,true);}
+};
+$('spitzbogenExample').onclick=async()=>{
+  try {
+    const get=async(name)=>{
+      const response=await fetch('/api/spitzbogen-example/'+name);
+      if(!response.ok)throw new Error('Could not load Spitzbogen example');
+      return new File([await response.blob()], 'spitzbogen-'+name);
+    };
+    const [frame,profile]=await Promise.all(['frame.dxf','profile.svg'].map(get));
+    await newWorkflow('gothic');
+    // Match the CAD centreline paths and profile at their original size.
+    // Confinement would move those paths inward and change the reference.
+    $('confineWalls').checked=false;
+    $('profileScale').value=1;
+    $('sagitta').value=0.002;
+    $('effect').value='none';
+    await setProfile(profile);
+    await pickFile(frame,false);
+    $('scale').value=1;
+    $('projectName').value='Spitzbogen Onshape reference';
+    showYSize();
+    showModelStep('shape');
+    await generate(null);
+  } catch(e) { setStatus(e.message,true); }
 };
 filamentManager=initFilaments({changed:()=>rangeChanged(),layerHeight:()=>Number($('layerHeight').value)||.2});
 $('startFilaments').onclick=() => filamentManager.open();

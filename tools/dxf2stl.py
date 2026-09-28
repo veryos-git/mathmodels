@@ -41,7 +41,7 @@ drawing is centred on the base drawing and sits on the frame top of the one
 below; colour groups are shared, so split and 3MF exports merge the layers.
 """
 
-from gothic import solid_union, revolved_ending
+from gothic import solid_union, revolved_ending, stepped_profile_sweep, path_frames
 import argparse
 import base64
 import itertools
@@ -63,7 +63,7 @@ from ezdxf.path import make_path
 from shapely import STRtree
 from shapely.affinity import scale as aff_scale
 from shapely.affinity import translate
-from shapely.geometry import LinearRing, LineString, Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import nearest_points, polygonize, unary_union
 from shapely.prepared import prep
 
@@ -461,7 +461,7 @@ def plan_regions(curves, wall_width, wall_overlap=0.0, clip=None):
 # a closed cross-section (its own DXF/SVG drawing) is swept along the curves.
 # The profile drawing's x axis runs across the path, its y axis is the height.
 
-MITER_LIMIT = 2.0
+MITER_LIMIT = 4.0
 
 def closed_faces(path, sagitta, what):
     """Every area a drawing's lines enclose, rebuilt from loose entities.
@@ -497,14 +497,15 @@ def load_profile(path, sagitta):
     return translate(profile, xoff=-(minx + maxx) / 2.0, yoff=-miny)
 
 
-def chain_curves(curves, min_dot=-1.0):
+def chain_curves(curves, min_dot=-0.95):
     """Curves joined end-to-end into the longest possible polylines.
 
     Entities rarely arrive as one polyline per visual stroke, and a swept
     joint only comes out right where the sweep runs straight through it.
     Where several segments meet, the straightest continuation is the real
     path — pairing them up arbitrarily turns the chain back on itself and
-    the sweep folds into garbage there.
+    the sweep folds into garbage there. Near-reversing tangents are separate
+    capped sweeps, as at the bottom cusp of a pair of pointed arches.
     """
     segs = []
     seen = set()
@@ -584,6 +585,16 @@ def sweep_profile(profile, chains):
     stroke join — so the apex of a pointed arch comes to a real point.
     Past MITER_LIMIT the mitre is clipped to a bevel, or a cusp would spike.
     """
+    # CAD sketches often contain collinear intermediate vertices. Earcut
+    # removes them from caps; leaving them in the sides creates T-junctions
+    # and prevents these otherwise closed sweeps from being solid-unioned.
+    profile = profile.simplify(0, preserve_topology=True)
+    try:
+        stepped = stepped_profile_sweep(profile, chains, MITER_LIMIT)
+    except (ValueError, RuntimeError) as error:
+        raise ConvertError(f"Could not build the stepped profile sweep: {error}") from error
+    if stepped is not None:
+        return stepped
     ring = list(profile.exterior.coords)[:-1]
     cap_v, cap_f = trimesh.creation.triangulate_polygon(profile)
     meshes = []
@@ -593,33 +604,7 @@ def sweep_profile(profile, chains):
         n = len(pts)
         if n < 2:
             continue
-        # A closed loop swept backwards mirrors an asymmetric profile.
-        if closed and not LinearRing(pts + [pts[0]]).is_ccw:
-            pts = pts[::-1]
-        P = np.array(pts)
-
-        # Per-segment left normals first; the vertex frames derive from them.
-        nseg = n if closed else n - 1
-        D = np.array([P[(i + 1) % n] - P[i] for i in range(nseg)])
-        U = D / np.maximum(np.hypot(D[:, 0], D[:, 1])[:, None], 1e-12)
-        SN = np.stack([-U[:, 1], U[:, 0]], axis=1)
-
-        N = np.zeros((n, 2))
-        for i in range(n):
-            if not closed and i == 0:
-                N[i] = SN[0]
-                continue
-            if not closed and i == n - 1:
-                N[i] = SN[-1]
-                continue
-            s = SN[i - 1] + SN[i % nseg]
-            L = np.hypot(*s)
-            if L < 1e-6:
-                # A hairpin doubles back on itself; hold the incoming normal
-                # instead of averaging two opposites into nothing.
-                N[i] = SN[i - 1]
-                continue
-            N[i] = s / L * min(2.0 / L, MITER_LIMIT)
+        P, N, closed = path_frames(chain, MITER_LIMIT)
 
         k = len(ring)
         verts = np.array([
@@ -633,8 +618,8 @@ def sweep_profile(profile, chains):
                 j2 = (j + 1) % k
                 faces.append((a * k + j, b * k + j, b * k + j2))
                 faces.append((a * k + j, b * k + j2, a * k + j2))
-        meshes.append(trimesh.Trimesh(vertices=verts, faces=np.array(faces),
-                                      process=False))
+        pieces = [trimesh.Trimesh(vertices=verts, faces=np.array(faces),
+                                 process=False)]
 
         if not closed:
             for ring_i, flip in ((0, True), (n - 1, False)):
@@ -646,8 +631,20 @@ def sweep_profile(profile, chains):
                                       process=False)
                 if flip:
                     cap.invert()
-                meshes.append(cap)
-    return trimesh.util.concatenate(meshes)
+                pieces.append(cap)
+        # Close and orient each independent sweep before fusing the network.
+        # Repairing only after concatenation can weld crossing paths together
+        # into non-manifold edges and mixes up cap and side orientations.
+        mesh = trimesh.util.concatenate(pieces)
+        mesh.merge_vertices()
+        mesh.update_faces(mesh.nondegenerate_faces())
+        mesh.remove_unreferenced_vertices()
+        mesh.fix_normals(multibody=True)
+        meshes.append(mesh)
+    try:
+        return solid_union(meshes)
+    except (ValueError, RuntimeError) as error:
+        raise ConvertError(f"Could not build the profile sweep: {error}") from error
 
 
 # ------------------------------------------------------------- boundary crop
@@ -2046,6 +2043,8 @@ def positive(name, value):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--slice-height", type=float, metavar="MM",
+                    help="export an SVG cross-section this far above the model base")
     ap.add_argument("input")
     ap.add_argument("output", nargs="?")
     ap.add_argument("--inspect", action="store_true",
@@ -2425,6 +2424,17 @@ def main():
         return
 
     meshes, n_walls, n_regions, n_layers = build_meshes(layers, wall_stack)
+
+    if args.slice_height is not None:
+        from slice_svg import slice_svg
+        try:
+            svg, stats = slice_svg(meshes, args.slice_height)
+        except ValueError as exc:
+            raise ConvertError(str(exc)) from exc
+        with open(args.output, "w", encoding="utf-8") as fp:
+            fp.write(svg)
+        json.dump(stats, sys.stdout)
+        return
 
     solid = trimesh.util.concatenate(meshes)
     solid.export(args.output)

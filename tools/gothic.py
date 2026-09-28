@@ -3,6 +3,77 @@ import math
 import numpy as np
 import trimesh
 import manifold3d
+from shapely import make_valid, set_precision
+from shapely.geometry import LineString, Polygon
+from shapely.ops import unary_union
+
+
+def path_frames(chain, miter_limit=4.0):
+    """Planar, Z-up sweep frames with mitred corners and square open ends."""
+    closed = chain[0] == chain[-1]
+    points = np.asarray(chain[:-1] if closed else chain, dtype=float)
+    if closed and not Polygon(points).exterior.is_ccw:
+        points = points[::-1]
+    delta = np.roll(points, -1, axis=0) - points if closed else np.diff(points, axis=0)
+    unit = delta / np.maximum(np.linalg.norm(delta, axis=1)[:, None], 1e-12)
+    segment_normals = np.column_stack((-unit[:, 1], unit[:, 0]))
+    normals = np.zeros_like(points)
+    for i in range(len(points)):
+        if not closed and i in (0, len(points)-1):
+            normals[i] = segment_normals[0 if i == 0 else -1]
+            continue
+        vector = segment_normals[i-1] + segment_normals[i % len(segment_normals)]
+        length = np.linalg.norm(vector)
+        normals[i] = (segment_normals[i-1] if length < 1e-6 else
+                      vector / length * min(2 / length, miter_limit))
+    return points, normals, closed
+
+
+def stepped_profile_sweep(profile, chains, miter_limit=4.0):
+    """Exact height bands for rectilinear mouldings, or None for other profiles.
+
+    A stepped sweep is a stack of planar ribbons. Union each band's ribbons
+    before extrusion so tight turns and overlapping paths cannot create
+    self-intersecting 3D shells. The profile, not a fixed slicing increment,
+    determines every band height and lateral interval.
+    """
+    coords = np.asarray(profile.exterior.coords)
+    edges = np.diff(coords, axis=0)
+    if profile.interiors or np.any(np.all(np.abs(edges) > 1e-9, axis=1)):
+        return None
+    frames = [path_frames(c, miter_limit) for c in chains if len(c) >= 2]
+    levels = sorted(set(coords[:, 1]))
+    solids = []
+    for bottom, top in zip(levels, levels[1:]):
+        cross = profile.intersection(LineString([
+            (profile.bounds[0]-1, (bottom+top)/2),
+            (profile.bounds[2]+1, (bottom+top)/2)]))
+        intervals = [cross] if cross.geom_type == 'LineString' else list(cross.geoms)
+        ribbons = []
+        for interval in intervals:
+            left, _, right, _ = interval.bounds
+            for points, normals, closed in frames:
+                a, b = points + left*normals, points + right*normals
+                for i in range(len(points) if closed else len(points)-1):
+                    j = (i+1) % len(points)
+                    ribbon = make_valid(Polygon([a[i], a[j], b[j], b[i]]))
+                    if ribbon.geom_type == 'Polygon':
+                        ribbons.append(ribbon)
+                    elif hasattr(ribbon, 'geoms'):
+                        ribbons.extend(p for p in ribbon.geoms if p.geom_type == 'Polygon')
+        # Tangent paths can leave microscopic slivers. Resolve them before
+        # triangulation at a precision which survives float32 STL vertices.
+        magnitude = max(1.0, max(abs(v) for ribbon in ribbons for v in ribbon.bounds))
+        precision = max(1e-6, magnitude * 2**-22)
+        footprint = set_precision(unary_union(ribbons), precision).simplify(precision / 4)
+        polygons = [footprint] if footprint.geom_type == 'Polygon' else list(footprint.geoms)
+        for polygon in polygons:
+            if polygon.area <= 1e-10:
+                continue
+            mesh = trimesh.creation.extrude_polygon(polygon, top-bottom)
+            mesh.apply_translation([0, 0, bottom])
+            solids.append(mesh)
+    return solid_union(solids)
 
 
 def solid_union(meshes):

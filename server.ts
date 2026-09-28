@@ -352,10 +352,16 @@ async function layerSpecs(
 }
 
 /** POST /api/convert — the DXF plus settings in, an STL out. */
-function handleConvert(req: Request): Promise<Response> {
+function handleConvert(req: Request, slice = false): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, file, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
-    const output = `${dir}/output.stl`;
+    const height = form.get("sliceHeight");
+    if (slice && (typeof height !== "string" || height.trim() === "" ||
+      !Number.isFinite(Number(height)) || Number(height) < 0)) {
+      throw new HttpError(400, "Slice height must be a finite, non-negative number");
+    }
+    const extension = slice ? "svg" : "stl";
+    const output = `${dir}/output.${extension}`;
     const args = [
       paths[0],
       output,
@@ -368,15 +374,16 @@ function handleConvert(req: Request): Promise<Response> {
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await layerSpecs(form, dir, paths),
+      ...(slice ? ["--slice-height", String(height)] : []),
     ];
 
     const stats = await runScript(args);
     const stl = await Deno.readFile(output);
     return new Response(stl, {
       headers: {
-        "content-type": "application/sla",
+        "content-type": slice ? "image/svg+xml" : "application/sla",
         "content-disposition":
-          `attachment; filename="${file.name.replace(DRAWING, "")}.stl"`,
+          `attachment; filename="${file.name.replace(DRAWING, "")}.${extension}"`,
         "x-stats": encodeURIComponent(JSON.stringify(stats)),
       },
     });
@@ -1181,6 +1188,7 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);
     if (url.pathname === "/api/convert" && req.method === "POST") return await handleConvert(req);
+    if (url.pathname === "/api/slice" && req.method === "POST") return await handleConvert(req, true);
     if (url.pathname === "/api/export" && req.method === "POST") return await handleExport(req);
     if (url.pathname === "/api/export3mf" && req.method === "POST") {
       return await handleExport3mf(req);
@@ -1225,6 +1233,11 @@ Deno.serve({ port: PORT }, async (req) => {
     }
 
     if (req.method === "GET") {
+      if (url.pathname.startsWith("/api/spitzbogen-example/")) {
+        const name = url.pathname.slice("/api/spitzbogen-example/".length);
+        if (!["frame.dxf", "profile.svg"].includes(name)) throw new HttpError(404, "Unknown Spitzbogen reference");
+        return new Response(await Deno.readFile(`examples/spitzbogen/${name}`), {headers:{"content-type":name.endsWith(".svg")?"image/svg+xml":"application/dxf"}});
+      }
       if (url.pathname.startsWith("/api/gothic-example/")) {
         const name = url.pathname.slice("/api/gothic-example/".length);
         if (!["frame.dxf", "cusps.dxf", "frame-profile.svg", "cusp-profile.svg"].includes(name)) throw new HttpError(404, "Unknown gothic reference");
