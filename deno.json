@@ -1,20 +1,20 @@
 {
   "tasks": {
-    "setup": "deno run --allow-read=. --allow-write=.venv --allow-run=python3,.venv/bin/python tools/setup.ts",
+    "setup": "deno run --allow-read=. --allow-write=.venv --allow-run=py,python,python3,.venv/bin/python,.venv/Scripts/python.exe tools/setup.ts",
     "start": {
-      "command": "deno run --env-file=.env --allow-net --allow-read --allow-write=/tmp,projects,library --allow-run=.venv/bin/python --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
+      "command": "deno run --env-file=.env --allow-net --allow-read --allow-write=.tmp,projects,library --allow-run=.venv/bin/python,.venv/Scripts/python.exe --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
       "dependencies": [
         "setup"
       ]
     },
     "dev": {
-      "command": "deno run --watch --env-file=.env --allow-net --allow-read --allow-write=/tmp,projects,library --allow-run=.venv/bin/python --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
+      "command": "deno run --watch --env-file=.env --allow-net --allow-read --allow-write=.tmp,projects,library --allow-run=.venv/bin/python,.venv/Scripts/python.exe --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
       "dependencies": [
         "setup"
       ]
     },
-    "check": "deno check server.ts tools/setup.ts",
-    "test": "deno test --allow-read=/tmp --allow-write=/tmp storage/",
-    "test:geometry": ".venv/bin/python -m unittest discover -s tools -p test_*.py"
+    "check": "deno check server.ts tools/setup.ts tools/python_test.ts tools/setup_test.ts",
+    "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts",
+    "test:geometry": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/python.ts -m unittest discover -s tools -p test_*.py"
   }
 }

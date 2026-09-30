@@ -4,5 +4,6 @@
 
 # Generated Python environment and bytecode
 .venv/
+.tmp/
 __pycache__/
 *.pyc

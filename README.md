@@ -73,12 +73,21 @@ width is cosmetic — the relief reads the traced lines, not the stroke.
 deno task start          # http://localhost:8788
 ```
 
-That's the whole setup. The first run creates `.venv` and installs the Python
-packages from `requirements.txt` (a few seconds); later runs skip straight to
-the server. Editing `requirements.txt` re-installs on the next start.
+Run this from the project folder in Windows PowerShell or Command Prompt,
+macOS Terminal, or a Linux shell. The first run creates `.venv` and installs
+the Python packages from `requirements.txt` (internet access required); later
+runs reuse the environment. Editing `requirements.txt` re-installs on the next
+start. No manual virtual-environment activation is needed.
 
-You need Deno and Python 3 with the `venv` module — on Debian/Ubuntu that's
-`sudo apt install python3-venv`.
+Install **Deno 2** and **Python 3.12 or newer** first. On Windows, install Python
+from [python.org](https://www.python.org/downloads/windows/) with the Python
+launcher or **Add Python to PATH** enabled, then reopen your terminal. Setup
+tries `py -3`, `python`, then `python3`, and the app uses
+`.venv/Scripts/python.exe`. On macOS/Linux it uses `.venv/bin/python`; on
+Debian/Ubuntu also install the `python3-venv` package.
+
+Temporary conversion files are created under `.tmp` in the project folder
+and removed after each request.
 
 `deno task dev` restarts on file changes, `deno task check` type-checks, and
 `deno task setup` prepares `.venv` without starting the server.

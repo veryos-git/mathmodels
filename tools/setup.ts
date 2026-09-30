@@ -1,8 +1,7 @@
 /// Makes sure .venv exists and matches requirements.txt.
 /// Runs before `deno task start`; a no-op once everything is in place.
 
-const VENV = ".venv";
-const PYTHON = `${VENV}/bin/python`;
+import { findPython, PYTHON, supportsPython, VENV } from "./python.ts";
 const REQUIREMENTS = "requirements.txt";
 const STAMP = `${VENV}/.requirements-sha256`;
 
@@ -16,14 +15,46 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function sha256(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /** Run a command with its output attached to our terminal. */
 async function run(cmd: string, args: string[]): Promise<boolean> {
-  const child = new Deno.Command(cmd, { args, stdout: "inherit", stderr: "inherit" }).spawn();
+  const child = new Deno.Command(cmd, {
+    args,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).spawn();
   return (await child.status).success;
+}
+
+/** A requirements stamp alone cannot detect an incomplete/copied environment. */
+async function requirementsInstalled(requirements: string): Promise<boolean> {
+  const pins = requirements.split(/\r?\n/)
+    .map((line) => line.split("#")[0].trim())
+    .filter(Boolean)
+    .map((line) => line.match(/^([\w.-]+)==([\w.+-]+)$/));
+  if (pins.some((pin) => !pin)) return false;
+  const result = await new Deno.Command(PYTHON, {
+    args: [
+      "-c",
+      "import importlib.metadata as m, json, sys\n" +
+      "try:\n" +
+      "    ok = all(m.version(name) == version for name, version in json.loads(sys.argv[1]))\n" +
+      "except m.PackageNotFoundError:\n" +
+      "    ok = False\n" +
+      "sys.exit(0 if ok else 1)",
+      JSON.stringify(pins.map((pin) => [pin![1], pin![2]])),
+    ],
+    stdout: "null",
+    stderr: "null",
+  }).output();
+  return result.success;
 }
 
 function die(message: string): never {
@@ -36,28 +67,53 @@ const wanted = await Deno.readTextFile(REQUIREMENTS).catch(() =>
 );
 const wantedHash = await sha256(wanted);
 
-// Fast path: the venv is present and was built from these exact requirements.
-if (await exists(PYTHON)) {
+// A copied or broken venv must be rebuilt with the local platform's Python.
+let usable = await exists(PYTHON) &&
+  await supportsPython({ command: PYTHON, args: [] });
+// Fast path: the venv works and was built from these exact requirements.
+if (usable) {
   const stamp = await Deno.readTextFile(STAMP).catch(() => "");
-  if (stamp.trim() === wantedHash) Deno.exit(0);
+  if (stamp.trim() === wantedHash && await requirementsInstalled(wanted)) {
+    Deno.exit(0);
+  }
 }
 
-if (!(await exists(PYTHON))) {
+// An interrupted install can leave Python working but pip itself broken.
+if (usable) {
+  usable = (await new Deno.Command(PYTHON, {
+    args: ["-m", "pip", "--version"],
+    stdout: "null",
+    stderr: "null",
+  }).output()).success;
+}
+
+if (!usable) {
+  const python = await findPython().catch((error) => die(error.message));
   console.log("setting up the Python environment in .venv …");
   // --clear rebuilds in place, so a half-built venv left by an interrupted
   // run gets replaced rather than shadowing the new one.
-  if (!(await run("python3", ["-m", "venv", "--clear", VENV]))) {
+  if (
+    !(await run(python.command, [
+      ...python.args,
+      "-m",
+      "venv",
+      "--clear",
+      VENV,
+    ]))
+  ) {
     die(
       "could not create .venv.\n" +
-        "  Python 3 with the venv module is required. On Debian/Ubuntu:\n" +
+        "  Python 3.12+ with the venv module is required. On Debian/Ubuntu:\n" +
         "    sudo apt install python3-venv",
     );
   }
 } else {
-  console.log("requirements.txt changed — updating .venv …");
+  console.log("updating Python dependencies in .venv …");
 }
 
-if (!(await run(PYTHON, ["-m", "pip", "install", "--quiet", "-r", REQUIREMENTS]))) {
+if (
+  !(await run(PYTHON, ["-m", "pip", "install", "--quiet", "-r", REQUIREMENTS]))
+) {
   die("pip could not install the requirements (see the output above)");
 }
 

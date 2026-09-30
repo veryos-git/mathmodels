@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "1f66ccb3-a2e0-4e81-8be4-b4040e9c5c19",
+  "name": "Screenshot from 2026-09-30 21-53-16",
+  "kind": "subject",
+  "created": "2026-09-30T20:12:58.170Z",
+  "updated": "2026-09-30T20:12:58.170Z",
+  "revision": "e4ff2161-2502-47f1-949a-675355a3c3c4",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/e4ff2161-2502-47f1-949a-675355a3c3c4/drawing.svg"
+    },
+    "original": {
+      "name": "Screenshot from 2026-09-30 21-53-16.png",
+      "path": "revisions/e4ff2161-2502-47f1-949a-675355a3c3c4/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/e4ff2161-2502-47f1-949a-675355a3c3c4/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 143,
+    "strokeWidth": 2,
+    "simplify": 2.5,
+    "smoothing": 0.7,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

@@ -1,11 +1,12 @@
 import { FilamentStore } from "./storage/filaments.ts";
 import { importProjectResources } from "./storage/import_projects.ts";
 import { ResourceStore, atomicWrite } from "./storage/resources.ts";
+import { PYTHON } from "./tools/python.ts";
 /// Deno web server: upload a DXF or SVG, get back a relief STL.
 /// The heavy lifting is done by tools/dxf2stl.py (ezdxf + svgelements +
 /// shapely + trimesh).
 
-const PYTHON = ".venv/bin/python";
+const TEMP_DIR = ".tmp";
 const SCRIPT = "tools/dxf2stl.py";
 const TRACE_SCRIPT = "tools/trace.py";
 const EXAMPLE = "reverse_engeneering/gothic_tracery_simple/sketch.dxf";
@@ -176,7 +177,8 @@ function numericFlags(form: FormData, fields: Record<string, string>): string[] 
 }
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await Deno.makeTempDir({ prefix: "dxf2stl-" });
+  await Deno.mkdir(TEMP_DIR, { recursive: true });
+  const dir = await Deno.makeTempDir({ dir: TEMP_DIR, prefix: "dxf2stl-" });
   try {
     return await fn(dir);
   } finally {

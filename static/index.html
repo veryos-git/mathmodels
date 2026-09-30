@@ -451,6 +451,7 @@
   <header class="screen-bar">
     <button class="ghost" id="traceBack">← Back</button>
     <span class="title">Trace <span class="muted" id="traceName"></span></span>
+    <button class="ghost" id="traceDownload" disabled>Download SVG</button>
     <button class="ghost" id="savePattern">Save subject…</button>
     <button id="traceUse" disabled>Create 3D model →</button>
   </header>
@@ -3205,6 +3206,7 @@ let traceReturn = 'start';   // where "Back" from the trace screen returns
 
 /** Fill the trace screen from traceState (the screen itself is shown via showScreen). */
 function populateTrace() {
+  $('traceDownload').disabled = !traceState.svg;
   $('traceName').textContent = traceState.name ? `· ${traceState.name}` : '';
   loadEditCanvas();
   $('traceSvg').innerHTML = traceState.svg;
@@ -3487,6 +3489,7 @@ function clearTrace() {
   traceState.id = null;
   traceState.name = '';
   traceState.svg = '';
+  $('traceDownload').disabled = true;
   traceState.edited = false;
   if (editObjectUrl) { URL.revokeObjectURL(editObjectUrl); editObjectUrl = null; }
   $('traceEdit').width = $('traceEdit').height = 0;   // blank until a source loads
@@ -3532,6 +3535,7 @@ async function runTrace() {
     if (seq !== traceState.seq) return;   // a newer trace superseded this one
     traceState.params = params;
     traceState.svg = data.svg;
+    $('traceDownload').disabled = !data.svg;
     $('traceSvg').innerHTML = data.svg;
     traceApplyView();
     traceShowStats(data.stats);
@@ -3612,6 +3616,11 @@ for (const el of [$('skeletonize'), $('invert')]) el.addEventListener('change', 
 document.querySelectorAll('input[name="traceMode"]').forEach((r) =>
   r.addEventListener('change', onTraceParamChange));
 
+$('traceDownload').onclick = () => {
+  if (!traceState.svg) return;
+  const name = (traceState.name || 'trace').replace(/\.[^.]+$/, '') + '.svg';
+  saveBlob(traceState.svg, 'image/svg+xml', name);
+};
 $('traceUse').onclick = useTrace;
 $('blackAreas').onchange = onTraceParamChange;
 $('blackMinWidth').onchange = onTraceParamChange;
