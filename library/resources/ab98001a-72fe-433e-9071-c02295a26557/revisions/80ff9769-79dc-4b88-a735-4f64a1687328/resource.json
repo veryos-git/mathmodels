@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "ab98001a-72fe-433e-9071-c02295a26557",
+  "name": "halloween",
+  "kind": "subject",
+  "created": "2026-10-04T21:15:04.973Z",
+  "updated": "2026-10-04T21:15:04.973Z",
+  "revision": "80ff9769-79dc-4b88-a735-4f64a1687328",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/80ff9769-79dc-4b88-a735-4f64a1687328/drawing.svg"
+    },
+    "original": {
+      "name": "f436efe1-acb2-4911-a22f-119efef0dd0e.png",
+      "path": "revisions/80ff9769-79dc-4b88-a735-4f64a1687328/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/80ff9769-79dc-4b88-a735-4f64a1687328/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 131,
+    "strokeWidth": 2,
+    "simplify": 2.5,
+    "smoothing": 0.25,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 2
+  }
+}
