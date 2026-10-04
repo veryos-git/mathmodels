@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "fe9d4756-a2f4-4f35-a9a7-2bb814a01b6d",
+  "name": "crowcorner",
+  "kind": "subject",
+  "created": "2026-10-04T12:42:39.934Z",
+  "updated": "2026-10-04T12:42:39.934Z",
+  "revision": "5fc7ece4-9866-4113-9e57-e5ac56aa7f0a",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/5fc7ece4-9866-4113-9e57-e5ac56aa7f0a/drawing.svg"
+    },
+    "original": {
+      "name": "WhatsApp Image 2026-10-04 at 14.40.03.jpeg",
+      "path": "revisions/5fc7ece4-9866-4113-9e57-e5ac56aa7f0a/original.jpeg"
+    },
+    "edited": {
+      "name": "WhatsApp Image 2026-10-04 at 14.40.03.jpeg",
+      "path": "revisions/5fc7ece4-9866-4113-9e57-e5ac56aa7f0a/edited.jpeg"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "outline",
+    "threshold": 128,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}
