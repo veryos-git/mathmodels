@@ -25,6 +25,7 @@ const traces = new Map<string, { bytes: Uint8Array; name: string; ext: string }>
 const DEFAULT_TRACE_PARAMS = {
   traceMode: "centerline", // "centerline" | "outline"
   threshold: 128, // 0-255
+  closeGaps: 0, // closing radius, px; 0 preserves intentional narrow gaps
   strokeWidth: 2, // px, preview only — the relief reads outlines
   simplify: 1.5, // RDP tolerance, px
   smoothing: 0.5, // 0-1

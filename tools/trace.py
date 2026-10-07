@@ -3,8 +3,8 @@
 
 Usage: trace.py --params <params.json> <input-image>
 
-Reads the source image, binarizes it (optional invert / speck removal /
-skeletonization), traces it to polylines — either the *centerline* skeleton of
+Reads the source image, binarizes it (optional invert / gap closing / speck
+removal / skeletonization), traces it to polylines — either the *centerline* skeleton of
 the strokes or the *outline* of the filled regions — then reduces the points
 and optionally smooths them to cubic Béziers. The final SVG is written to
 stdout; a one-line stats JSON (paths / nodes) goes to stderr.
@@ -15,6 +15,7 @@ the relief builder with no conversion step.
 """
 import argparse
 import json
+import math
 import re
 import sys
 
@@ -30,7 +31,7 @@ CMD_RE = re.compile(r"([ML])\s*([-\d.]+)\s+([-\d.]+)")
 # ------------------------------------------------------------- preprocessing
 
 def preprocess(img: np.ndarray, p: dict) -> np.ndarray:
-    """Grayscale -> denoise -> threshold -> despeckle -> (optionally) skeleton."""
+    """Grayscale -> denoise -> threshold -> close gaps -> despeckle -> skeleton."""
     if img.ndim == 3:
         if img.shape[2] == 4:
             alpha = img[:, :, 3:4].astype(float) / 255
@@ -42,6 +43,13 @@ def preprocess(img: np.ndarray, p: dict) -> np.ndarray:
     # Default assumption: dark lines on light paper -> lines become white (255).
     flag = cv2.THRESH_BINARY_INV if not p.get("invert", False) else cv2.THRESH_BINARY
     _, binary = cv2.threshold(img, int(p.get("threshold", 128)), 255, flag)
+
+    # Repair faint breaks before removing specks or thinning. Keep this opt-in:
+    # closing can also join intentional narrow gaps between neighbouring lines.
+    radius = max(0, min(4, int(p.get("closeGaps", 0))))
+    if radius:
+        kernel = np.ones((2 * radius + 1, 2 * radius + 1), dtype=np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
     # Remove small specks (connected components below min_area).
     min_area = int(p.get("minArea", 0))
@@ -67,73 +75,107 @@ def preprocess(img: np.ndarray, p: dict) -> np.ndarray:
 def skeleton_paths(skel: np.ndarray) -> list:
     """Trace a 1px skeleton into polylines.
 
-    Junction/endpoint pixels (degree != 2) are clustered into nodes; each
-    maximal chain of degree-2 pixels between nodes becomes one path, so
-    connected linework stays connected. Returns pixel coords as (x, y).
+    Collapse each junction to one shared endpoint, without emitting its internal
+    pixel edges. Only use a diagonal when there is no orthogonal connection;
+    otherwise a three-pixel corner would become a triangular loop. Degree-2
+    chains and genuine closed loops each become one path. Returns (x, y).
     """
     pts = set(map(tuple, np.argwhere(skel)))  # (y, x)
     if not pts:
         return []
 
     def nbrs(p):
-        return [(p[0] + dy, p[1] + dx) for dy, dx in DIRS8 if (p[0] + dy, p[1] + dx) in pts]
+        y, x = p
+        return [
+            (y + dy, x + dx) for dy, dx in DIRS8
+            if (y + dy, x + dx) in pts
+            and not (dy and dx and ((y + dy, x) in pts or (y, x + dx) in pts))
+        ]
 
-    deg = {p: len(nbrs(p)) for p in pts}
-
-    # Cluster special pixels (endpoints deg==1, junctions deg>=3, isolated deg==0).
-    cluster = {}
-    cid = 0
-    for p in pts:
-        if deg[p] == 2 or p in cluster:
+    # Stable iteration also makes repeated traces produce identical SVGs.
+    adjacent = {p: nbrs(p) for p in sorted(pts)}
+    nodes = {}
+    groups = []
+    for p in adjacent:
+        if len(adjacent[p]) <= 2 or p in nodes:
             continue
-        stack = [p]
-        cluster[p] = cid
-        while stack:
-            cur = stack.pop()
-            for n in nbrs(cur):
-                if deg[n] != 2 and n not in cluster:
-                    cluster[n] = cid
-                    stack.append(n)
-        cid += 1
-
-    clusters = {}
-    for p, c in cluster.items():
-        clusters.setdefault(c, []).append(p)
+        cid = len(groups)
+        group = [p]
+        nodes[p] = cid
+        for cur in group:
+            for n in adjacent[cur]:
+                if len(adjacent[n]) > 2 and n not in nodes:
+                    nodes[n] = cid
+                    group.append(n)
+        groups.append(group)
+    # Endpoints are separate nodes, even when directly adjacent to a junction.
+    for p in adjacent:
+        if len(adjacent[p]) < 2:
+            nodes[p] = len(groups)
+            groups.append([p])
+    centres = [tuple(np.mean(group, axis=0)) for group in groups]
 
     visited = set()  # frozenset({a, b}) per edge
 
     def walk(start, first):
-        path = [start, first]
+        path = [start]
         visited.add(frozenset((start, first)))
         prev, cur = start, first
-        while cur not in cluster:  # walking through degree-2 chain pixels
-            nxts = [n for n in nbrs(cur) if n != prev and frozenset((cur, n)) not in visited]
-            if not nxts:
+        while True:
+            path.append(cur)
+            if cur in nodes or cur == start:
+                break
+            nxts = [n for n in adjacent[cur] if n != prev]
+            if not nxts or frozenset((cur, nxts[0])) in visited:
                 break
             nxt = nxts[0]
             visited.add(frozenset((cur, nxt)))
-            path.append(nxt)
             prev, cur = cur, nxt
+        if path[0] in nodes:
+            path[0] = centres[nodes[path[0]]]
+        if path[-1] in nodes:
+            path[-1] = centres[nodes[path[-1]]]
         return path
 
     paths = []
-    # Chains hanging off node clusters (endpoints and junctions).
-    for pixels in clusters.values():
-        for p in pixels:
-            for n in nbrs(p):
-                if frozenset((p, n)) not in visited:
-                    paths.append(walk(p, n))
+    for p, cid in nodes.items():
+        for n in adjacent[p]:
+            if nodes.get(n) != cid and frozenset((p, n)) not in visited:
+                paths.append(walk(p, n))
     # Pure closed loops (every pixel has degree 2).
-    for p in pts:
-        if p in cluster:
+    for p in adjacent:
+        if p in nodes:
             continue
-        for n in nbrs(p):
+        for n in adjacent[p]:
             if frozenset((p, n)) not in visited:
-                path = walk(p, n)
-                path.append(p)  # close the loop
-                paths.append(path)
+                paths.append(walk(p, n))
 
     return [[(x, y) for (y, x) in path] for path in paths]
+
+
+def black_regions(binary: np.ndarray, diameter: int) -> np.ndarray:
+    """Keep broad filled features, without cutting small thick corners out of lines."""
+    diameter = max(3, min(201, diameter))
+    # Odd kernels have a centred anchor; an even opening shifts the result and
+    # can put preserved pixels outside the original stroke.
+    size = diameter if diameter % 2 else diameter + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+    _, source_labels, source_stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    keep = np.zeros(n, dtype=np.uint8)
+    # Map each opened component back to its original connected stroke/spot.
+    sources = np.zeros(n, dtype=np.int32)
+    sources[labels.ravel()] = source_labels.ravel()
+    for i in range(1, n):
+        area = stats[i, cv2.CC_STAT_AREA]
+        source_area = source_stats[sources[i], cv2.CC_STAT_AREA]
+        # A disk also fits at sharp turns and intersections. Small remnants of
+        # a much larger line are not filled spots. Still keep small standalone
+        # eyes/dots when the opening covers most of the original component.
+        if area >= 2 * diameter * diameter or area >= 0.5 * source_area:
+            keep[i] = 255
+    return keep[labels]
 
 
 def outline_paths(binary: np.ndarray) -> list:
@@ -155,7 +197,17 @@ def rdp(points: list, epsilon: float, closed: bool) -> list:
     if epsilon <= 0 or len(points) < 3:
         return points
     arr = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
-    approx = cv2.approxPolyDP(arr, epsilon, closed).reshape(-1, 2)
+    if closed:
+        # Closed approxPolyDP may move/drop the starting point. That point can
+        # be a shared junction, so simplify two open arcs with fixed endpoints.
+        split = int(np.argmax(np.sum((arr[:, 0] - arr[0, 0]) ** 2, axis=1)))
+        if split == 0:
+            return points
+        first = cv2.approxPolyDP(arr[:split + 1], epsilon, False).reshape(-1, 2)
+        second = cv2.approxPolyDP(arr[split:], epsilon, False).reshape(-1, 2)
+        approx = np.concatenate((first[:-1], second[:-1]))
+    else:
+        approx = cv2.approxPolyDP(arr, epsilon, False).reshape(-1, 2)
     if len(approx) < (3 if closed else 2):
         return points
     pts = [(float(x), float(y)) for x, y in approx]
@@ -165,7 +217,13 @@ def rdp(points: list, epsilon: float, closed: bool) -> list:
 
 
 def catmull_rom_beziers(pts: list, scale: float, closed: bool) -> list:
-    """Convert a polyline to cubic Bézier segments through every point."""
+    """Cubic smoothing with bounded tangents at unevenly spaced points.
+
+    RDP can leave a tiny corner segment between two long edges. Unbounded
+    Catmull–Rom handles then overshoot and form a new loop. Limit each shared
+    tangent to a third of its shorter adjacent edge, and keep sharp reversals
+    as corners. Both sides of a vertex still use the same tangent.
+    """
     n = len(pts)
     p = pts[:-1] if closed else pts  # unique points
     m = len(p)
@@ -175,12 +233,28 @@ def catmull_rom_beziers(pts: list, scale: float, closed: bool) -> list:
     def get(i):
         return p[i % m] if closed else p[min(max(i, 0), m - 1)]
 
+    def tangent(i):
+        prev, cur, nxt = get(i - 1), get(i), get(i + 1)
+        incoming = (cur[0] - prev[0], cur[1] - prev[1])
+        outgoing = (nxt[0] - cur[0], nxt[1] - cur[1])
+        dx, dy = (nxt[0] - prev[0]) * scale / 6, (nxt[1] - prev[1]) * scale / 6
+        if any(dx * v[0] + dy * v[1] < 0 for v in (incoming, outgoing)):
+            return (0.0, 0.0)
+        lengths = [length for v in (incoming, outgoing) if (length := math.hypot(*v)) > 0]
+        limit = scale * min(lengths) / 3 if lengths else 0
+        length = math.hypot(dx, dy)
+        if length > limit:
+            dx, dy = dx * limit / length, dy * limit / length
+        return dx, dy
+
+    tangents = [tangent(i) for i in range(m)]
     segs = []
     seg_count = m if closed else m - 1
     for i in range(seg_count):
-        p0, p1, p2, p3 = get(i - 1), get(i), get(i + 1), get(i + 2)
-        c1 = (p1[0] + (p2[0] - p0[0]) * scale / 6.0, p1[1] + (p2[1] - p0[1]) * scale / 6.0)
-        c2 = (p2[0] - (p3[0] - p1[0]) * scale / 6.0, p2[1] - (p3[1] - p1[1]) * scale / 6.0)
+        p1, p2 = get(i), get(i + 1)
+        t1, t2 = tangents[i], tangents[(i + 1) % m]
+        c1 = (p1[0] + t1[0], p1[1] + t1[1])
+        c2 = (p2[0] - t2[0], p2[1] - t2[1])
         segs.append(("C", (c1, c2, p2)))
     return segs
 
@@ -270,9 +344,7 @@ def main() -> None:
     height, width = raw.shape
     blobs = np.zeros_like(raw)
     if p.get("blackAreas", "none") == "outline" and p.get("traceMode", "centerline") == "centerline":
-        diameter = max(3, min(201, int(p.get("blackMinWidth", 8))))
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (diameter, diameter))
-        blobs = cv2.morphologyEx(raw, cv2.MORPH_OPEN, kernel)
+        blobs = black_regions(raw, int(p.get("blackMinWidth", 8)))
     if p.get("traceMode", "centerline") == "centerline":
         from skimage.morphology import skeletonize as sk_skeletonize
         lines = cv2.bitwise_and(raw, cv2.bitwise_not(blobs))

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "98f86527-f940-43b3-8226-f4ee308e13e4",
+  "name": "oak_leaves",
+  "kind": "subject",
+  "created": "2026-10-07T17:36:27.443Z",
+  "updated": "2026-10-07T19:35:24.947Z",
+  "revision": "e4b5f6bd-bd42-43ef-bbff-8d2b35db3891",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/e4b5f6bd-bd42-43ef-bbff-8d2b35db3891/drawing.svg"
+    },
+    "original": {
+      "name": "Fünf klare Eichenblätter in Linienkunst.png",
+      "path": "revisions/e4b5f6bd-bd42-43ef-bbff-8d2b35db3891/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/e4b5f6bd-bd42-43ef-bbff-8d2b35db3891/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 10,
+    "traceMode": "centerline",
+    "threshold": 46,
+    "closeGaps": 0,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

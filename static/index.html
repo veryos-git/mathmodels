@@ -219,13 +219,23 @@
   .segmented button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
   #traceViewport { flex: 1; position: relative; background: #101216;
               border: 1px solid #2a2e35; border-radius: 10px; overflow: hidden;
-              min-height: 0; margin-bottom: 10px; }
+              min-height: 0; margin-bottom: 10px; touch-action: none; cursor: grab; }
   /* The edited raster and the traced SVG share one stage. The stage is sized
      to the image's "contain" fit, then translated/scaled by the mouse wheel,
      so both layers zoom in lock-step about the cursor. */
   #traceStage { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   #traceEdit { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-              cursor: crosshair; touch-action: none; }
+              touch-action: none; }
+  #traceThreshold, #traceMirrorPreview, #traceGuides { position: absolute; inset: 0;
+              width: 100%; height: 100%; pointer-events: none; }
+  #traceThreshold { image-rendering: pixelated; }
+  #traceGuides { overflow: hidden; }
+  #editTools, .edit-actions, #traceViewSwitch { flex-wrap: wrap; }
+  #mirrorControls { margin: 10px 0; padding: 8px; border: 1px solid #374151; border-radius: 6px; }
+  #mirrorHint, #tracePreviewHint { font-size: 12px; color: #9aa3af; margin: 6px 0; }
+  .trace-navigation { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .trace-navigation button { width: auto; margin: 0; padding: 4px 10px; }
+  #traceZoomVal { min-width: 48px; text-align: center; font-size: 12px; }
   #traceSvg { position: absolute; inset: 0; pointer-events: none; }
   #traceSvg svg { width: 100%; height: 100%; }
   #editColor { width: 100%; height: 26px; padding: 0; border: 1px solid #2a2e35;
@@ -459,8 +469,20 @@
     <aside>
       <div class="group-title">Edit image</div>
       <div class="segmented" id="editTools">
-        <button data-tool="pen" class="active" title="Draw on the image">✏️ pen</button>
+        <button data-tool="pan" class="active" title="Drag to move the view">✋ pan</button>
+        <button data-tool="pen" title="Draw on the image">✏️ pen</button>
         <button data-tool="eraser" title="Erase back to white">🧽 eraser</button>
+        <button data-tool="mirror" title="Reflect pixels across a line defined by two points">mirror</button>
+      </div>
+      <div id="mirrorControls" hidden>
+        <label for="mirrorMode">Mirror operation</label>
+        <select id="mirrorMode"><option value="copy">Copy one side across the line</option><option value="flip">Flip the whole image</option></select>
+        <p id="mirrorHint" role="status">Click two points to define the mirror line.</p>
+        <div class="segmented edit-actions">
+          <button id="mirrorApply" disabled>Apply mirror</button>
+          <button id="mirrorCancel">Clear line</button>
+        </div>
+        <div class="muted">Keeps the image size; content outside the edges is clipped.</div>
       </div>
       <div class="slider-row">
         <label for="editColor">pen colour</label>
@@ -472,8 +494,12 @@
         <input id="editSize" type="range" min="1" max="60" step="1" value="10">
         <span class="val" id="editSizeVal">10</span>
       </div>
-      <button class="ghost" id="editReset" title="Undo all edits — back to the uploaded image">↺ reset image</button>
-      <div class="muted" id="editHint">draw on the Original/Overlay view — dark lines are traced, white is left out</div>
+      <div class="segmented edit-actions">
+        <button id="editUndo" disabled title="Undo (Ctrl/Cmd+Z)">↶ undo</button>
+        <button id="editRedo" disabled title="Redo (Ctrl/Cmd+Shift+Z)">↷ redo</button>
+        <button id="editReset" title="Restore the uploaded image">↺ reset image</button>
+      </div>
+      <div class="muted" id="editHint">Drag with Pan, Space + drag, or the middle mouse button. Scroll to zoom. Pen and eraser work in Original, Threshold and Overlay.</div>
 
       <div class="group-title">Trace mode</div>
       <div class="radio-row">
@@ -481,7 +507,7 @@
           centerline</label>
         <label class="radio"><input type="radio" name="traceMode" value="outline"> outline</label>
       </div>
-      <div class="muted" id="traceModeHint">centerline → line art (walls) · outline → closed shapes (paintable regions)</div>
+      <div class="muted" id="traceModeHint">centerline → one path along each drawn line, including closed leaf shapes · outline → edges of filled shapes</div>
 
       <label for="blackAreas">Large black areas</label>
       <select id="blackAreas"><option value="outline">Keep their outlines (eyes and spots)</option><option value="none">Skeletonize everything</option></select>
@@ -493,6 +519,12 @@
         <input id="threshold" type="range" min="0" max="255" step="1" value="128">
         <span class="val" id="thresholdVal">128</span>
       </div>
+      <div class="slider-row">
+        <label for="closeGaps">close gaps</label>
+        <input id="closeGaps" type="range" min="0" max="4" step="1" value="0">
+        <span class="val" id="closeGapsVal">0</span>
+      </div>
+      <div class="muted">Gap-closing radius in pixels. Start with 1 for faint breaks; 0 keeps the original gaps. Higher values can join nearby lines.</div>
       <div class="slider-row">
         <label for="simplify">simplify</label>
         <input id="simplify" type="range" min="0" max="8" step="0.1" value="1.5">
@@ -515,15 +547,26 @@
     </aside>
     <main>
       <div class="segmented" id="traceViewSwitch">
-        <button data-view="svg" class="active">SVG</button>
+        <button data-view="threshold" class="active">Threshold</button>
+        <button data-view="svg">SVG</button>
         <button data-view="original">Original</button>
         <button data-view="overlay">Overlay</button>
         <span class="muted" id="traceStats"></span>
       </div>
+      <div class="trace-navigation" aria-label="Image navigation">
+        <button class="ghost" id="traceZoomOut" aria-label="Zoom out">−</button>
+        <span id="traceZoomVal">100%</span>
+        <button class="ghost" id="traceZoomIn" aria-label="Zoom in">+</button>
+        <button class="ghost" id="traceFit">Fit image</button>
+      </div>
+      <p id="tracePreviewHint" role="status">Black pixels will be traced. Preview includes noise and speck removal, before skeletonizing.</p>
       <div id="traceViewport">
         <div id="traceStage">
           <canvas id="traceEdit"></canvas>
+          <canvas id="traceMirrorPreview" hidden></canvas>
+          <canvas id="traceThreshold"></canvas>
           <div id="traceSvg"></div>
+          <svg id="traceGuides" aria-hidden="true"></svg>
         </div>
         <div id="traceContextMenu" hidden>
           <div class="menu-head"><span>brush size</span><span class="menu-size-val" id="menuSizeVal"></span></div>
@@ -950,6 +993,7 @@
 import { remapPaint } from './region-paint.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
+import { ImageHistory, lineSide, mirrorImage } from './image-editor.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
@@ -3115,6 +3159,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 const DEFAULT_TRACE_PARAMS = {
   traceMode: 'centerline',
   threshold: 128,
+  closeGaps: 0,
   strokeWidth: 2,   // preview only — the relief reads outlines, not stroke width
   simplify: 1.5,
   smoothing: 0.5,
@@ -3135,18 +3180,19 @@ const traceState = {
   committedSource: null, // image that produced the model drawing
   committedParams: null, // the params that produced the committed SVG
   params: { ...DEFAULT_TRACE_PARAMS },
-  view: 'svg',
+  view: 'threshold',
   seq: 0,
   edited: false,       // the canvas has pen/eraser marks on it
 };
 
-const TRACE_PARAM_CONTROLS = ['threshold', 'simplify', 'smoothing'];
+const TRACE_PARAM_CONTROLS = ['threshold', 'closeGaps', 'simplify', 'smoothing'];
 
 function gatherTraceParams() {
   return {
     blackAreas: $('blackAreas').value, blackMinWidth: +$('blackMinWidth').value,
     traceMode: document.querySelector('input[name="traceMode"]:checked').value,
     threshold: +$('threshold').value,
+    closeGaps: +$('closeGaps').value,
     strokeWidth: DEFAULT_TRACE_PARAMS.strokeWidth,
     simplify: +$('simplify').value,
     smoothing: +$('smoothing').value,
@@ -3160,7 +3206,7 @@ function applyTraceParams(p) {
   $('blackAreas').value = p.blackAreas ?? 'none';
   $('blackMinWidth').value = p.blackMinWidth ?? 8;
   document.querySelector(`input[name="traceMode"][value="${p.traceMode}"]`).checked = true;
-  for (const key of TRACE_PARAM_CONTROLS) $(key).value = p[key];
+  for (const key of TRACE_PARAM_CONTROLS) $(key).value = p[key] ?? DEFAULT_TRACE_PARAMS[key];
   $('skeletonize').checked = !!p.skeletonize;
   $('invert').checked = !!p.invert;
   $('despeckle').checked = p.minArea > 0;
@@ -3177,12 +3223,21 @@ function traceUpdateLabels() {
 
 function traceApplyView() {
   const v = traceState.view;
+  $('traceViewSwitch').querySelectorAll('button').forEach((button) =>
+    button.classList.toggle('active', button.dataset.view === v));
   $('traceEdit').style.display = v === 'svg' ? 'none' : 'block';
-  $('traceSvg').style.display = v === 'original' ? 'none' : 'block';
+  $('traceThreshold').hidden = v !== 'threshold';
+  $('traceMirrorPreview').hidden = !mirrorPreview || v === 'threshold' || v === 'svg';
+  $('traceGuides').style.display = editTool === 'mirror' && v !== 'svg' ? 'block' : 'none';
+  $('traceSvg').style.display = v === 'svg' || v === 'overlay' ? 'block' : 'none';
   $('traceSvg').style.opacity = v === 'overlay' ? Number($('traceOverlay').value) : 1;
+  $('traceOverlay').disabled = v !== 'overlay';
+  // Reserve this line in every view so switching layers does not move the image.
+  $('tracePreviewHint').style.visibility = v === 'threshold' ? 'visible' : 'hidden';
   // White "paper" behind the traced lines when the SVG is shown alone; in
   // overlay mode the lines float over the photo, so the background stays clear.
   $('traceSvg').style.background = v === 'svg' ? '#fff' : 'transparent';
+  updateEditCursor();
 }
 
 const traceShowStats = (s) => {
@@ -3216,10 +3271,164 @@ function populateTrace() {
 
 /* --------------------------------------------------------- image editing */
 
-let editTool = 'pen';
+let editTool = 'pan';
 let stroking = false;
 let lastPoint = null;
 let editObjectUrl = null;    // the object URL the editor image was loaded from
+let editLoaded = false;
+let spacePanning = false;
+let editPointer = null;
+let panStart = null;
+const editHistory = new ImageHistory();
+let mirrorPoints = [], mirrorSourcePoint = null, mirrorPreview = null;
+let previewWorker = null, previewRequest = 0, previewFrame = 0, previewDirty = true, previewBusy = false;
+const THRESHOLD_HINT = 'Black pixels will be traced. Preview includes noise removal, gap closing and speck removal, before skeletonizing.';
+
+function canvasPixels() {
+  const canvas = $('traceEdit');
+  return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+}
+
+// Cache the denoised source in a worker. Slider changes only threshold that
+// cache; full-resolution processing never blocks pointer navigation.
+function requestThresholdPreview(pixelsChanged = false) {
+  previewDirty ||= pixelsChanged;
+  const id = ++previewRequest;
+  cancelAnimationFrame(previewFrame);
+  if (!editLoaded) return;
+  previewFrame = requestAnimationFrame(() => {
+    if (previewBusy) return; // The worker will request the latest state when it finishes.
+    try {
+      if (!previewWorker) {
+        previewWorker = new Worker('./threshold-worker.js', { type: 'module' });
+        previewWorker.onmessage = ({ data }) => {
+          previewBusy = false;
+          if (!editLoaded) return;
+          if (data.id !== previewRequest) { requestThresholdPreview(); return; }
+          if (data.error) { $('tracePreviewHint').textContent = data.error; return; }
+          const canvas = $('traceThreshold'), { width, height, data: pixels } = data.image;
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
+          $('tracePreviewHint').textContent = mirrorPreview ? 'Mirror preview · ' + THRESHOLD_HINT : THRESHOLD_HINT;
+        };
+        previewWorker.onerror = () => {
+          $('tracePreviewHint').textContent = 'Threshold preview could not load. Reload the page to retry.';
+          previewWorker.terminate(); previewWorker = null; previewDirty = true; previewBusy = false;
+        };
+      }
+      const image = previewDirty ? mirrorPreview ?? canvasPixels() : null;
+      previewWorker.postMessage({ id, image, params: gatherTraceParams() });
+      previewBusy = true;
+      previewDirty = false;
+    } catch (error) {
+      previewDirty = true;
+      $('tracePreviewHint').textContent = 'Preview failed: ' + error.message;
+    }
+  });
+}
+
+function updateEditHistory() {
+  $('editUndo').disabled = !editLoaded || !editHistory.undoStack.length;
+  $('editRedo').disabled = !editLoaded || !editHistory.redoStack.length;
+}
+
+function imageEdited() {
+  traceState.edited = true;
+  traceState.id = null;
+  requestThresholdPreview(true);
+  updateEditHistory();
+  scheduleTrace();
+}
+
+function restoreEdit(direction) {
+  if (!editLoaded || stroking) return;
+  const image = editHistory[direction](canvasPixels());
+  if (!image) return;
+  clearMirror();
+  $('traceEdit').width = image.width; $('traceEdit').height = image.height;
+  $('traceEdit').getContext('2d').putImageData(image, 0, 0);
+  applyTraceTransform();
+  imageEdited();
+}
+
+function clearMirror() {
+  mirrorPoints = []; mirrorSourcePoint = null; mirrorPreview = null;
+  $('mirrorApply').disabled = true;
+  $('mirrorHint').textContent = 'Click two points to define the mirror line.';
+  drawMirrorGuides();
+  traceApplyView();
+  requestThresholdPreview(true);
+}
+
+function drawMirrorGuides() {
+  const svg = $('traceGuides'), canvas = $('traceEdit');
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', `0 0 ${canvas.width || 1} ${canvas.height || 1}`);
+  const radius = 5 / (traceFit().fit * traceView.zoom);
+  const add = (tag, attrs) => {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    svg.append(element);
+  };
+  if (mirrorPoints.length === 2) {
+    const [a, b] = mirrorPoints, dx = b[0] - a[0], dy = b[1] - a[1];
+    const scale = 2 * Math.hypot(canvas.width, canvas.height) / Math.hypot(dx, dy);
+    add('line', { x1: a[0] - dx * scale, y1: a[1] - dy * scale,
+      x2: b[0] + dx * scale, y2: b[1] + dy * scale,
+      stroke: '#38bdf8', 'stroke-width': 2, 'stroke-dasharray': '7 4', 'vector-effect': 'non-scaling-stroke' });
+  }
+  for (const [x, y] of mirrorPoints) add('circle', { cx: x, cy: y, r: radius,
+    fill: '#38bdf8', stroke: '#fff', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+  if (mirrorSourcePoint) add('circle', { cx: mirrorSourcePoint[0], cy: mirrorSourcePoint[1], r: radius * 1.5,
+    fill: '#22c55e', stroke: '#fff', 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke' });
+}
+
+function updateMirrorPreview() {
+  mirrorPreview = null;
+  if (mirrorPoints.length === 2 && ($('mirrorMode').value === 'flip' || mirrorSourcePoint)) {
+    const [a, b] = mirrorPoints;
+    const side = $('mirrorMode').value === 'flip' ? null : Math.sign(lineSide(mirrorSourcePoint, a, b));
+    mirrorPreview = mirrorImage(canvasPixels(), a, b, side);
+    const canvas = $('traceMirrorPreview');
+    canvas.width = mirrorPreview.width; canvas.height = mirrorPreview.height;
+    canvas.getContext('2d').putImageData(new ImageData(mirrorPreview.data, canvas.width, canvas.height), 0, 0);
+    $('mirrorHint').textContent = 'Preview ready. Apply mirror to keep it, or clear the line to start again.';
+  } else if (mirrorPoints.length === 2) {
+    $('mirrorHint').textContent = 'Click the side to keep and copy across the line.';
+  }
+  $('mirrorApply').disabled = !mirrorPreview;
+  drawMirrorGuides(); traceApplyView(); requestThresholdPreview(true);
+}
+
+function addMirrorPoint(point) {
+  if (mirrorPoints.length === 1 && Math.hypot(point[0] - mirrorPoints[0][0], point[1] - mirrorPoints[0][1]) < 1) {
+    $('mirrorHint').textContent = 'Choose a second point at least one pixel away.';
+    return;
+  }
+  if (mirrorPoints.length < 2) {
+    mirrorPoints.push(point);
+    $('mirrorHint').textContent = 'Click the second point of the mirror line.';
+  } else if ($('mirrorMode').value === 'copy') {
+    if (Math.abs(lineSide(point, ...mirrorPoints)) < 1e-6) {
+      $('mirrorHint').textContent = 'Click beside the line to choose the side to copy.';
+      return;
+    }
+    mirrorSourcePoint = point;
+  }
+  updateMirrorPreview();
+}
+
+$('mirrorMode').onchange = updateMirrorPreview;
+$('mirrorCancel').onclick = clearMirror;
+$('mirrorApply').onclick = () => {
+  if (!mirrorPreview || !editLoaded) return;
+  editHistory.remember(canvasPixels());
+  $('traceEdit').getContext('2d').putImageData(
+    new ImageData(mirrorPreview.data, mirrorPreview.width, mirrorPreview.height), 0, 0);
+  clearMirror(); imageEdited();
+};
+$('editUndo').onclick = () => restoreEdit('undo');
+$('editRedo').onclick = () => restoreEdit('redo');
 
 // Zoom of the trace stage. tx/ty hold the stage translate (base letterbox plus
 // any recentring); zoom is the uniform scale. The wheel zooms about the cursor
@@ -3251,6 +3460,8 @@ function applyTraceTransform() {
   stage.style.width = `${c.width * fit}px`;
   stage.style.height = `${c.height * fit}px`;
   stage.style.transform = `translate(${traceView.tx}px, ${traceView.ty}px) scale(${traceView.zoom})`;
+  $('traceZoomVal').textContent = `${Math.round(traceView.zoom * 100)}%`;
+  drawMirrorGuides();
 }
 
 /** Reset the zoom to fit, centring the image in the viewport. */
@@ -3264,23 +3475,37 @@ function traceResetView() {
 
 /** Draw the current source image onto the editor canvas at natural size. */
 let editCanvasReady = Promise.resolve();
-function loadEditCanvas() {
+function loadEditCanvas({ reset = false } = {}) {
   const canvas = $('traceEdit');
-  if (!traceState.source) { canvas.width = canvas.height = 0; return; }
-  if (traceState.edited && canvas.width) return;
-  const url = URL.createObjectURL(traceState.source);
+  if (!traceState.source) { canvas.width = canvas.height = 0; editLoaded = false; return; }
+  if (!reset && traceState.edited && canvas.width) return;
+  const url = URL.createObjectURL(reset ? traceState.original ?? traceState.source : traceState.source);
   if (editObjectUrl) URL.revokeObjectURL(editObjectUrl);
   editObjectUrl = url;
+  editLoaded = false;
+  updateEditHistory();
   const img = new Image();
   editCanvasReady = new Promise((resolve, reject) => {
-    img.onerror = () => reject(new Error('Could not load source image'));
+    img.onerror = () => {
+      if (editObjectUrl !== url) { resolve(); return; }
+      editLoaded = reset && canvas.width > 0;
+      updateEditHistory();
+      reject(new Error('Could not load source image'));
+    };
     img.onload = () => {
+      if (editObjectUrl !== url) { resolve(); return; }
+      if (reset) editHistory.remember(canvasPixels());
+      else editHistory.clear();
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
+      editLoaded = true;
+      clearMirror();
+      updateEditHistory();
+      if (reset) imageEdited();
       traceResetView();
       resolve();
     };
@@ -3289,9 +3514,12 @@ function loadEditCanvas() {
   img.src = url;
 }
 
-/** The raster to trace: the edited canvas, or the untouched source file. */
-function currentTraceFile() {
-  if (traceState.edited) {
+/** The image pixels to trace, with display-only previews excluded. */
+async function currentTraceFile() {
+  await editCanvasReady;
+  if (editLoaded) {
+    // Trace the same white-composited pixels as the preview (including image
+    // orientation and transparency), without baking in the threshold layer.
     return new Promise((resolve, reject) => {
       $('traceEdit').toBlob(
         (blob) => blob
@@ -3301,18 +3529,17 @@ function currentTraceFile() {
       );
     });
   }
-  return Promise.resolve(traceState.source);
+  return traceState.source;
 }
 
 /** Map a pointer event to canvas pixel coordinates (stage transform, zoomed). */
 function toCanvasPoint(e) {
-  const canvas = $('traceEdit');
   const r = $('traceViewport').getBoundingClientRect();
   const { fit } = traceFit();
   // Undo translate+scale first, then the "contain" fit, to reach image pixels.
-  const cx = (e.clientX - r.left - traceView.tx) / traceView.zoom;
-  const cy = (e.clientY - r.top - traceView.ty) / traceView.zoom;
-  return [clamp(cx / fit, 0, canvas.width), clamp(cy / fit, 0, canvas.height)];
+  const cx = (e.clientX - r.left - $('traceViewport').clientLeft - traceView.tx) / traceView.zoom;
+  const cy = (e.clientY - r.top - $('traceViewport').clientTop - traceView.ty) / traceView.zoom;
+  return [cx / fit, cy / fit];
 }
 
 function drawStrokeTo(p) {
@@ -3322,52 +3549,84 @@ function drawStrokeTo(p) {
   ctx.globalCompositeOperation = 'source-over';
   ctx.strokeStyle = editTool === 'eraser' ? '#ffffff' : $('editColor').value;
   ctx.beginPath();
-  ctx.moveTo(lastPoint[0], lastPoint[1]);
-  ctx.lineTo(p[0], p[1]);
-  ctx.stroke();
+  if (p[0] === lastPoint[0] && p[1] === lastPoint[1]) {
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.arc(p[0], p[1], ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.moveTo(lastPoint[0], lastPoint[1]);
+    ctx.lineTo(p[0], p[1]);
+    ctx.stroke();
+  }
   lastPoint = p;
+  requestThresholdPreview(true);
 }
 
 function finishStroke() {
   if (!stroking) return;
   stroking = false;
   lastPoint = null;
-  traceState.edited = true;
-  traceState.id = null;            // the image changed — re-upload next trace
-  scheduleTrace();
+  imageEdited();
 }
 
-const editCanvas = $('traceEdit');
-editCanvas.addEventListener('pointerdown', (e) => {
-  if (!traceState.source || e.button !== 0) return;
-  if (eyedropping) { pickColorAt(e); return; }
-  stroking = true;
-  lastPoint = toCanvasPoint(e);
-  editCanvas.setPointerCapture(e.pointerId);
-  drawStrokeTo(lastPoint);   // a tap leaves a dot
+const editViewport = $('traceViewport');
+editViewport.addEventListener('pointerdown', (e) => {
+  if (!editLoaded || editPointer !== null || ![0, 1].includes(e.button) || e.target.closest('#traceContextMenu')) return;
+  e.preventDefault();
+  if (e.button === 1 || spacePanning || editTool === 'pan' || traceState.view === 'svg') {
+    panStart = { x: e.clientX, y: e.clientY, tx: traceView.tx, ty: traceView.ty };
+  } else {
+    const point = toCanvasPoint(e), canvas = $('traceEdit');
+    if (point[0] < 0 || point[1] < 0 || point[0] >= canvas.width || point[1] >= canvas.height) return;
+    if (eyedropping) { pickColorAt(e); return; }
+    if (editTool === 'mirror') { addMirrorPoint(point); return; }
+    editHistory.remember(canvasPixels());
+    // Invalidate an in-flight SVG as soon as the first pixel changes.
+    invalidateTrace();
+    stroking = true;
+    lastPoint = point;
+    drawStrokeTo(lastPoint);   // a tap leaves a dot
+  }
+  editPointer = e.pointerId;
+  editViewport.setPointerCapture(e.pointerId);
+  updateEditCursor();
 });
-editCanvas.addEventListener('pointermove', (e) => {
+editViewport.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== editPointer) return;
+  if (panStart) {
+    traceView.tx = panStart.tx + e.clientX - panStart.x;
+    traceView.ty = panStart.ty + e.clientY - panStart.y;
+    applyTraceTransform();
+  }
   if (stroking) drawStrokeTo(toCanvasPoint(e));
 });
-editCanvas.addEventListener('pointerup', (e) => {
-  if (!stroking) return;
-  editCanvas.releasePointerCapture(e.pointerId);
+function endEditPointer(e) {
+  if (e && e.pointerId !== editPointer) return;
+  const pointer = editPointer;
+  editPointer = null; panStart = null;
   finishStroke();
-});
-editCanvas.addEventListener('pointercancel', finishStroke);
+  if (pointer !== null && editViewport.hasPointerCapture(pointer)) editViewport.releasePointerCapture(pointer);
+  updateEditCursor();
+}
+for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  editViewport.addEventListener(event, endEditPointer);
+}
 
 function resetEdit() {
-  traceState.source = traceState.original ?? traceState.source;
-  traceState.edited = false;
-  loadEditCanvas();
-  traceState.id = null;
-  scheduleTrace();
+  if (!editLoaded || stroking) return;
+  invalidateTrace();
+  loadEditCanvas({ reset: true });
 }
 
 function setEditTool(tool) {
+  endEditPointer();
+  if (editTool === 'mirror' && tool !== 'mirror') clearMirror();
   editTool = tool;
   $('editTools').querySelectorAll('button')
     .forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
+  $('mirrorControls').hidden = tool !== 'mirror';
+  if (tool !== 'pan' && traceState.view === 'svg') traceState.view = 'original';
+  traceApplyView();
 }
 
 $('editTools').querySelectorAll('button').forEach((btn) => {
@@ -3378,12 +3637,9 @@ $('editSize').oninput = () => { $('editSizeVal').textContent = $('editSize').val
 $('editReset').onclick = resetEdit;
 
 /* Zoom the trace viewport with the wheel, anchored at the cursor. */
-$('traceViewport').addEventListener('wheel', (e) => {
-  if (!traceState.source) return;
-  e.preventDefault();
-  const r = $('traceViewport').getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const next = clamp(traceView.zoom * Math.exp(-e.deltaY * 0.0015), TRACE_ZOOM_MIN, TRACE_ZOOM_MAX);
+function zoomTrace(factor, mx = editViewport.clientWidth / 2, my = editViewport.clientHeight / 2) {
+  if (!editLoaded || stroking || panStart) return;
+  const next = clamp(traceView.zoom * factor, TRACE_ZOOM_MIN, TRACE_ZOOM_MAX);
   if (next === traceView.zoom) return;
   const cx = (mx - traceView.tx) / traceView.zoom;   // image point under the cursor
   const cy = (my - traceView.ty) / traceView.zoom;
@@ -3391,7 +3647,18 @@ $('traceViewport').addEventListener('wheel', (e) => {
   traceView.tx = mx - cx * next;                     // keep that point under the cursor
   traceView.ty = my - cy * next;
   applyTraceTransform();
+}
+$('traceViewport').addEventListener('wheel', (e) => {
+  if (!traceState.source || e.target.closest('#traceContextMenu')) return;
+  e.preventDefault();
+  const r = editViewport.getBoundingClientRect();
+  const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? editViewport.clientHeight : 1);
+  zoomTrace(Math.exp(-delta * 0.0015), e.clientX - r.left - editViewport.clientLeft,
+    e.clientY - r.top - editViewport.clientTop);
 }, { passive: false });
+$('traceZoomIn').onclick = () => zoomTrace(1.25);
+$('traceZoomOut').onclick = () => zoomTrace(1 / 1.25);
+$('traceFit').onclick = traceResetView;
 
 // Keep the stage fit in sync when the viewport is resized or first shown.
 new ResizeObserver(() => {
@@ -3464,32 +3731,61 @@ const PICKER_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
 
 function setEyedropping(on) {
   eyedropping = on;
-  $('traceEdit').style.cursor = on ? PICKER_CURSOR : 'crosshair';
+  updateEditCursor();
+}
+
+function updateEditCursor() {
+  $('traceViewport').style.cursor = panStart ? 'grabbing'
+    : spacePanning || editTool === 'pan' || traceState.view === 'svg' ? 'grab'
+    : eyedropping ? PICKER_CURSOR : 'crosshair';
 }
 
 function pickColorAt(e) {
   const [x, y] = toCanvasPoint(e);
   const d = $('traceEdit').getContext('2d')
-    .getImageData(Math.round(x), Math.round(y), 1, 1).data;
+    .getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
   const hex = `#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
   $('editColor').value = hex;
   $('editColorVal').textContent = hex;
 }
 
-window.addEventListener('keydown', (e) => { if (e.key === 'Control') setEyedropping(true); });
-window.addEventListener('keyup', (e) => { if (e.key === 'Control') setEyedropping(false); });
-window.addEventListener('blur', () => setEyedropping(false));
+window.addEventListener('keydown', (e) => {
+  if (currentScreen !== 'trace' || e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (e.key === 'Control') setEyedropping(true);
+  if (e.code === 'Space') { e.preventDefault(); spacePanning = true; updateEditCursor(); }
+  if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    restoreEdit(e.shiftKey || e.key.toLowerCase() === 'y' ? 'redo' : 'undo');
+  }
+  if (e.key === 'Escape') { endEditPointer(); clearMirror(); }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'Control') setEyedropping(false);
+  if (e.code === 'Space') { spacePanning = false; updateEditCursor(); }
+});
+window.addEventListener('blur', () => { spacePanning = false; setEyedropping(false); endEditPointer(); });
 
 function clearTrace() {
+  endEditPointer();
+  editLoaded = false;
+  editHistory.clear(); updateEditHistory();
+  previewRequest++;
+  cancelAnimationFrame(previewFrame);
+  previewWorker?.terminate(); previewWorker = null; previewDirty = true; previewBusy = false;
+  clearMirror();
+  $('traceThreshold').width = $('traceThreshold').height = 0;
+  $('traceMirrorPreview').width = $('traceMirrorPreview').height = 0;
   traceState.original = traceState.resource = null;
   traceState.committedParams = traceState.committedSource = null;
   traceState.seq++;
+  traceController?.abort();
   clearTimeout(traceTimer);
   traceState.source = traceState.svgFile = null;
   traceState.id = null;
   traceState.name = '';
   traceState.svg = '';
   $('traceDownload').disabled = true;
+  $('traceUse').disabled = true;
   traceState.edited = false;
   if (editObjectUrl) { URL.revokeObjectURL(editObjectUrl); editObjectUrl = null; }
   $('traceEdit').width = $('traceEdit').height = 0;   // blank until a source loads
@@ -3498,37 +3794,56 @@ function clearTrace() {
   $('modelTrace').hidden = true;
 }
 
-async function uploadTraceSource() {
+async function uploadTraceSource(signal) {
   const form = new FormData();
   form.append('image', await currentTraceFile());
-  const res = await fetch('/api/trace/upload', { method: 'POST', body: form });
+  const res = await fetch('/api/trace/upload', { method: 'POST', body: form, signal });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? res.statusText);
   return data.id;
 }
 
 let traceTimer = null;
-function scheduleTrace() {
+let traceController = null;
+function invalidateTrace() {
+  traceState.seq++;
+  traceController?.abort();
   clearTimeout(traceTimer);
+  $('traceDownload').disabled = true;
+  $('traceUse').disabled = true;
+}
+function scheduleTrace() {
+  invalidateTrace();
+  traceState.params = gatherTraceParams();
+  if (!traceState.source) return;
+  traceError('updating SVG…');
   traceTimer = setTimeout(runTrace, 400);
 }
 
 async function runTrace() {
   if (!traceState.source) return;
+  clearTimeout(traceTimer);
+  traceController?.abort();
+  traceController = new AbortController();
+  const { signal } = traceController;
   const seq = ++traceState.seq;
+  const params = gatherTraceParams();
+  traceError('tracing SVG…');
   try {
-    // An edited image changes between strokes, so it is re-uploaded each time;
-    // an untouched image is stable and its server id is reused.
-    let id = traceState.edited ? null : traceState.id;
+    await editCanvasReady;
+    if (seq !== traceState.seq) return;
+    // Pixel edits invalidate the upload id. Parameter changes reuse it.
+    let id = traceState.id;
     if (!id) {
-      id = await uploadTraceSource();
-      if (!traceState.edited) traceState.id = id;
+      id = await uploadTraceSource(signal);
+      if (seq !== traceState.seq) return;
+      traceState.id = id;
     }
-    const params = gatherTraceParams();
     const res = await fetch('/api/trace', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id, params }),
+      signal,
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
@@ -3542,7 +3857,7 @@ async function runTrace() {
     $('traceUse').disabled = false;
     return true;
   } catch (err) {
-    traceError('trace failed: ' + (err.message ?? err));
+    if (seq === traceState.seq && !signal.aborted) traceError('trace failed: ' + (err.message ?? err));
   }
 }
 
@@ -3550,12 +3865,12 @@ async function startTrace(file, ret = 'start') {
   if (ret === 'start') await newWorkflow('glass');
   clearTrace();
   traceReturn = ret;
-  setEditTool('pen');                 // the pen is the default editing tool
+  setEditTool('pan');
   traceState.original = file;
   traceState.source = file;
   traceState.name = file.name.replace(/\.[^.]+$/, '');
   traceState.params = { ...DEFAULT_TRACE_PARAMS };
-  traceState.view = 'svg';
+  traceState.view = 'threshold';
   $('traceUse').disabled = true;
   $('traceSvg').innerHTML = '';
   populateTrace();
@@ -3602,15 +3917,20 @@ $('traceViewSwitch').querySelectorAll('button').forEach((btn) => {
 });
 $('traceOverlay').oninput = () => { traceUpdateLabels(); traceApplyView(); };
 
-function onTraceParamChange() {
+function onTraceParamChange(event) {
   traceUpdateLabels();
+  requestThresholdPreview();
+  if (['threshold', 'closeGaps', 'invert', 'despeckle', 'minArea'].includes(event?.target?.id)) {
+    traceState.view = 'threshold';
+    traceApplyView();
+  }
   scheduleTrace();
 }
 for (const key of TRACE_PARAM_CONTROLS) $(key).addEventListener('input', onTraceParamChange);
 $('minArea').addEventListener('input', onTraceParamChange);
-$('despeckle').addEventListener('change', () => {
+$('despeckle').addEventListener('change', (event) => {
   $('minArea').disabled = !$('despeckle').checked;
-  onTraceParamChange();
+  onTraceParamChange(event);
 });
 for (const el of [$('skeletonize'), $('invert')]) el.addEventListener('change', onTraceParamChange);
 document.querySelectorAll('input[name="traceMode"]').forEach((r) =>

@@ -42,10 +42,32 @@ The app is three full-screen steps, each using the whole window:
   deletes it. **Example sketch** loads the bundled gothic window.
 
 **Trace** — full screen, used only when you start from a photo. The left side
-holds the trace settings (centerline vs outline, threshold, simplify,
+holds the trace settings (centerline vs outline, threshold, close gaps, simplify,
 smoothing, skeletonize, invert, speck removal); the right side is a large live
-preview with **SVG · Original · Overlay** views. **Create 3D model** hands the
+preview with **Threshold · SVG · Original · Overlay** views. **Create 3D model** hands the
 traced SVG to the builder.
+
+**Threshold** updates locally while you adjust the threshold, invert, speck
+removal or gap-closing radius, without waiting for SVG generation. Black pixels
+are the foreground that will be traced, including the tracer's noise removal,
+gap closing and speck removal, before skeletonizing and vector simplification.
+The uploaded image and paint colours stay intact when switching views.
+
+Drag with **pan** to move the view, or hold **Space** / use the middle mouse
+button with any tool. Scroll to zoom around the pointer; **+**, **−** and
+**Fit image** also control the view. **Pen** and **eraser** edit the image in
+Original, Threshold or Overlay. **Undo/redo** (Ctrl/Cmd+Z and
+Ctrl/Cmd+Shift+Z) work for strokes, mirrors and resetting the image; history
+keeps up to 20 edits within a 64 MB budget, with at least one undo for a large
+image. Navigation never changes the saved pixels.
+
+Choose **mirror**, then click two distinct points to define a mirror line.
+With **Copy one side**, click the side to keep and copy across the line;
+**Flip the whole image** reflects both sides. Inspect the preview, then
+**Apply mirror**, or **Clear line** / Escape to discard it. The image size
+stays fixed: content beyond its edges is clipped and uncovered pixels become
+white. Applied edits are included when tracing, saving a subject or creating
+a model.
 
 **3D model** — the relief builder: walls, sizes, palette, painting, holes,
 boundary, and export. A **← Start** button returns to the landing screen. When
@@ -58,14 +80,25 @@ From the 3D step the flow is unchanged: tune the wall sizes and *y size*,
 
 Two trace modes matter for what you get downstream:
 
-- **centerline** (the default) turns line art into thin open strokes — in the
-  relief those become **walls** but enclose no faces to paint.
+- **centerline** (the default) follows the middle of each drawn stroke. Open
+  strokes become **walls**; connected closed strokes also enclose **paintable faces**.
 - **outline** follows the edges of filled shapes — closed loops that become
   **paintable faces**.
 
-So a drawing of enclosed shapes (flower petals, window panes) traces as
-*outline*; a loose pencil sketch traces as *centerline*. The trace's stroke
+Use *centerline* for drawn outlines (leaves, flower petals, window panes) and
+pencil sketches. Use *outline* for filled silhouettes; tracing the outline of
+a pencil stroke follows both of its edges. The trace's stroke
 width is cosmetic — the relief reads the traced lines, not the stroke.
+
+Centerline tracing shares a single endpoint at each junction and omits redundant
+diagonal pixel edges, avoiding tiny loops and disconnected junctions. Large black
+area preservation ignores small thick corners in otherwise thin linework while
+keeping filled eyes and spots. Simplification retains junction endpoints, and
+smoothing limits its curve handles around short corner segments to avoid overshoot.
+**Close gaps** is optional: start at **1 px** for
+faint breaks and inspect the Threshold view. It applies a square morphological
+closing before speck removal and skeletonization; **0** (the default) leaves gaps
+unchanged. Higher radii can merge intentional spaces between neighbouring lines.
 
 ## Running it
 
@@ -91,6 +124,8 @@ and removed after each request.
 
 `deno task dev` restarts on file changes, `deno task check` type-checks, and
 `deno task setup` prepares `.venv` without starting the server.
+`deno task test:editor` checks threshold previews against the Python tracer,
+arbitrary mirror lines, clipping and undo/redo (requires the prepared `.venv`).
 
 Open the page and pick a starting point on the **Start** screen (trace a photo,
 open a drawing or a project, or use the example). Tune the sizes in the 3D
@@ -737,9 +772,9 @@ The converter runs standalone:
 ```
 
 `trace.json` holds the trace settings — `traceMode` (`centerline` or
-`outline`), `threshold`, `strokeWidth`, `simplify`, `smoothing`, `skeletonize`,
-`invert` and `minArea`. The SVG comes out on stdout; a stats line (`paths`,
-`nodes`) on stderr.
+`outline`), `threshold`, `closeGaps` (closing radius 0–4 px, default 0),
+`strokeWidth`, `simplify`, `smoothing`, `skeletonize`, `invert` and `minArea`.
+The SVG comes out on stdout; a stats line (`paths`, `nodes`) on stderr.
 
 A face is a stack of layers, bottom first, each with a thickness `t` and a
 colour group `g`; `--heights` is the shorthand for a stack one layer deep.

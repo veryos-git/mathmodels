@@ -15,6 +15,7 @@
     },
     "check": "deno check server.ts tools/setup.ts tools/python_test.ts tools/setup_test.ts",
     "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts",
+    "test:editor": "deno run --allow-read --allow-env --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_image_editor.mjs",
     "test:geometry": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/python.ts -m unittest discover -s tools -p test_*.py"
   }
 }

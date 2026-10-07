@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "dd04b50a-4a75-4cdd-aab0-08fc299f0e88",
+  "name": "fledermause",
+  "kind": "subject",
+  "created": "2026-10-05T20:56:41.241Z",
+  "updated": "2026-10-05T20:56:41.241Z",
+  "revision": "194c812c-a4e7-4b3b-96c5-1b69d8035418",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/194c812c-a4e7-4b3b-96c5-1b69d8035418/drawing.svg"
+    },
+    "original": {
+      "name": "WhatsApp Image 2026-10-04 at 23.03.45.jpeg",
+      "path": "revisions/194c812c-a4e7-4b3b-96c5-1b69d8035418/original.jpeg"
+    },
+    "edited": {
+      "name": "WhatsApp Image 2026-10-04 at 23.03.45.jpeg",
+      "path": "revisions/194c812c-a4e7-4b3b-96c5-1b69d8035418/edited.jpeg"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 2,
+    "traceMode": "centerline",
+    "threshold": 204,
+    "strokeWidth": 2,
+    "simplify": 0.3,
+    "smoothing": 0.2,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 500
+  }
+}
