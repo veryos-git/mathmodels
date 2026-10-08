@@ -1,4 +1,40 @@
 /** Pixel operations shared by the image editor, its preview worker and tests. */
+export const DEFAULT_IMAGE_ADJUSTMENTS = Object.freeze({
+  contrast: 0, lights: 0, shadows: 0, blackPoint: 0, whitePoint: 255,
+});
+
+/** Input levels, contrast about middle gray, then smooth shadow/highlight curves.
+ * Always read from the unadjusted source so moving a slider never compounds it.
+ * A shared RGB lookup table preserves neutral grays and leaves alpha untouched.
+ */
+export function adjustImage({ data, width, height }, adjustments = {}) {
+  const value = (key, min, max) => {
+    const n = adjustments[key] ?? DEFAULT_IMAGE_ADJUSTMENTS[key];
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : DEFAULT_IMAGE_ADJUSTMENTS[key];
+  };
+  const black = value('blackPoint', 0, 254);
+  const white = Math.max(black + 1, value('whitePoint', 1, 255));
+  const contrast = 2 ** (value('contrast', -100, 100) / 50);
+  const shadows = value('shadows', -100, 100) / 100;
+  const lights = value('lights', -100, 100) / 100;
+  const curve = new Uint8ClampedArray(256);
+  for (let i = 0; i < curve.length; i++) {
+    const level = Math.max(0, Math.min(1, (i - black) / (white - black)));
+    const x = contrast === 1 ? level : Math.max(0, Math.min(1, (level - .5) * contrast + .5));
+    // Smooth, monotonic curves with more influence on dark or light tones.
+    // Both endpoints of the tonal curve stay fixed.
+    curve[i] = Math.round(255 * (x + x * (1 - x) * (shadows * (1 - x) + lights * x)));
+  }
+  const output = new Uint8ClampedArray(data.length);
+  for (let p = 0; p < data.length; p += 4) {
+    output[p] = curve[data[p]];
+    output[p + 1] = curve[data[p + 1]];
+    output[p + 2] = curve[data[p + 2]];
+    output[p + 3] = data[p + 3];
+  }
+  return { data: output, width, height };
+}
+
 export function denoiseImage({ data, width, height }) {
   const gray = new Uint8Array(width * height);
   for (let i = 0; i < gray.length; i++) {

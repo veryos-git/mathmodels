@@ -57,9 +57,19 @@ Drag with **pan** to move the view, or hold **Space** / use the middle mouse
 button with any tool. Scroll to zoom around the pointer; **+**, **−** and
 **Fit image** also control the view. **Pen** and **eraser** edit the image in
 Original, Threshold or Overlay. **Undo/redo** (Ctrl/Cmd+Z and
-Ctrl/Cmd+Shift+Z) work for strokes, mirrors and resetting the image; history
+Ctrl/Cmd+Shift+Z) work for strokes, adjustments, mirrors and resetting the image; history
 keeps up to 20 edits within a 64 MB budget, with at least one undo for a large
 image. Navigation never changes the saved pixels.
+
+Choose **adjust** for **contrast**, **lights**, **shadows**, **black point** and
+**white point**. Contrast, lights and shadows start at 0; positive values
+increase contrast or brighten the selected tones, negative values soften contrast
+or darken them. Raise the black point (default 0) to deepen blacks; lower the
+white point (default 255) to brighten whites. The two points cannot cross.
+Inspect the live **Original** or **Threshold** preview, then **Apply adjustments**
+to keep the result as one undoable edit and update the SVG. **Reset**, Escape or
+switching tools discards unapplied adjustments. Applied adjustments are included
+in saved subjects and projects; **reset image** restores the uploaded original.
 
 Choose **mirror**, then click two distinct points to define a mirror line.
 With **Copy one side**, click the side to keep and copy across the line;
@@ -125,7 +135,8 @@ and removed after each request.
 `deno task dev` restarts on file changes, `deno task check` type-checks, and
 `deno task setup` prepares `.venv` without starting the server.
 `deno task test:editor` checks threshold previews against the Python tracer,
-arbitrary mirror lines, clipping and undo/redo (requires the prepared `.venv`).
+tone adjustments and preview caching, arbitrary mirror lines, clipping and
+undo/redo (requires the prepared `.venv`).
 
 Open the page and pick a starting point on the **Start** screen (trace a photo,
 open a drawing or a project, or use the example). Tune the sizes in the 3D

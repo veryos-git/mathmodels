@@ -79,3 +79,9 @@ smoothing:  0.5, 1.0, 1.5
 But don't brute-force every possible combination. Use the image-derived estimates to constrain the search. A few dozen traces should usually be enough.
 And importantly, your scoring function can explicitly detect the failure you showed in the previous image. A clean leaf outline should not suddenly contain a 3–10 px circular component at what should be a connection. Give configurations producing those artifacts a large penalty.
 If you paste the JavaScript/Python function in your webapp that currently takes threshold, simplify, smoothing, min_area, etc. and produces the trace, I can show you how to put an autoParameters(image) layer in front of your existing pipeline.
+
+
+---
+image editor functions
+please add proper but simple and crucial image editor features such as 
+contrast , lights, shadows, blackpoint , whitepoint

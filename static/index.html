@@ -226,12 +226,14 @@
   #traceStage { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   #traceEdit { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
               touch-action: none; }
-  #traceThreshold, #traceMirrorPreview, #traceGuides { position: absolute; inset: 0;
+  #traceThreshold, #traceMirrorPreview, #traceAdjustmentPreview, #traceGuides { position: absolute; inset: 0;
               width: 100%; height: 100%; pointer-events: none; }
   #traceThreshold { image-rendering: pixelated; }
   #traceGuides { overflow: hidden; }
   #editTools, .edit-actions, #traceViewSwitch { flex-wrap: wrap; }
-  #mirrorControls { margin: 10px 0; padding: 8px; border: 1px solid #374151; border-radius: 6px; }
+  #mirrorControls, #adjustmentControls { margin: 10px 0; padding: 8px; border: 1px solid #374151; border-radius: 6px; }
+  #adjustmentControls .slider-row { grid-template-columns: 76px minmax(0, 1fr) 30px; }
+  #adjustmentHint { font-size: 12px; color: #9aa3af; margin: 6px 0; }
   #mirrorHint, #tracePreviewHint { font-size: 12px; color: #9aa3af; margin: 6px 0; }
   .trace-navigation { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .trace-navigation button { width: auto; margin: 0; padding: 4px 10px; }
@@ -472,7 +474,41 @@
         <button data-tool="pan" class="active" title="Drag to move the view">✋ pan</button>
         <button data-tool="pen" title="Draw on the image">✏️ pen</button>
         <button data-tool="eraser" title="Erase back to white">🧽 eraser</button>
+        <button data-tool="adjust" title="Adjust contrast, lights, shadows and black/white points">adjust</button>
         <button data-tool="mirror" title="Reflect pixels across a line defined by two points">mirror</button>
+      </div>
+      <div id="adjustmentControls" hidden>
+        <div class="slider-row">
+          <label for="editContrast" title="Increase or soften the difference between light and dark">contrast</label>
+          <input id="editContrast" type="range" min="-100" max="100" step="1" value="0">
+          <output class="val" id="editContrastVal" for="editContrast">0</output>
+        </div>
+        <div class="slider-row">
+          <label for="editLights" title="Brighten or darken the lighter tones">lights</label>
+          <input id="editLights" type="range" min="-100" max="100" step="1" value="0">
+          <output class="val" id="editLightsVal" for="editLights">0</output>
+        </div>
+        <div class="slider-row">
+          <label for="editShadows" title="Lift or deepen the darker tones">shadows</label>
+          <input id="editShadows" type="range" min="-100" max="100" step="1" value="0">
+          <output class="val" id="editShadowsVal" for="editShadows">0</output>
+        </div>
+        <div class="slider-row">
+          <label for="editBlackPoint" title="Input level mapped to pure black; raise it to deepen blacks">black point</label>
+          <input id="editBlackPoint" type="range" min="0" max="254" step="1" value="0">
+          <output class="val" id="editBlackPointVal" for="editBlackPoint">0</output>
+        </div>
+        <div class="slider-row">
+          <label for="editWhitePoint" title="Input level mapped to pure white; lower it to brighten whites">white point</label>
+          <input id="editWhitePoint" type="range" min="1" max="255" step="1" value="255">
+          <output class="val" id="editWhitePointVal" for="editWhitePoint">255</output>
+        </div>
+        <p id="adjustmentHint" role="status">Preview in Original or Threshold. Apply to keep your changes.</p>
+        <div class="segmented edit-actions">
+          <button id="adjustmentApply" disabled>Apply adjustments</button>
+          <button id="adjustmentReset" disabled>Reset</button>
+        </div>
+        <div class="muted">Positive lights/shadows brighten; negative values darken. Switching tools or Escape discards the preview.</div>
       </div>
       <div id="mirrorControls" hidden>
         <label for="mirrorMode">Mirror operation</label>
@@ -567,6 +603,7 @@
         <div id="traceStage">
           <canvas id="traceEdit"></canvas>
           <canvas id="traceMirrorPreview" hidden></canvas>
+          <canvas id="traceAdjustmentPreview" hidden></canvas>
           <canvas id="traceThreshold"></canvas>
           <div id="traceSvg"></div>
           <svg id="traceGuides" aria-hidden="true"></svg>
@@ -996,7 +1033,7 @@
 import { remapPaint } from './region-paint.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
-import { ImageHistory, lineSide, mirrorImage } from './image-editor.js';
+import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lineSide, mirrorImage } from './image-editor.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
@@ -3185,7 +3222,7 @@ const traceState = {
   params: { ...DEFAULT_TRACE_PARAMS },
   view: 'threshold',
   seq: 0,
-  edited: false,       // the canvas has pen/eraser marks on it
+  edited: false,       // the canvas has committed pixel edits
 };
 
 const TRACE_PARAM_CONTROLS = ['blackMinWidth', 'threshold', 'closeGaps', 'simplify', 'smoothing'];
@@ -3230,6 +3267,7 @@ function traceApplyView() {
   $('traceEdit').style.display = v === 'svg' ? 'none' : 'block';
   $('traceThreshold').hidden = v !== 'threshold';
   $('traceMirrorPreview').hidden = !mirrorPreview || v === 'threshold' || v === 'svg';
+  $('traceAdjustmentPreview').hidden = !adjustmentPreview || v === 'threshold' || v === 'svg';
   $('traceGuides').style.display = editTool === 'mirror' && v !== 'svg' ? 'block' : 'none';
   $('traceSvg').style.display = v === 'svg' || v === 'overlay' ? 'block' : 'none';
   $('traceSvg').style.opacity = v === 'overlay' ? Number($('traceOverlay').value) : 1;
@@ -3283,6 +3321,12 @@ let editPointer = null;
 let panStart = null;
 const editHistory = new ImageHistory();
 let mirrorPoints = [], mirrorSourcePoint = null, mirrorPreview = null;
+let adjustmentPreview = null;
+const ADJUSTMENT_CONTROLS = {
+  contrast: 'editContrast', lights: 'editLights', shadows: 'editShadows',
+  blackPoint: 'editBlackPoint', whitePoint: 'editWhitePoint',
+};
+const ADJUSTMENT_HINT = 'Preview in Original or Threshold. Apply to keep your changes.';
 let previewWorker = null, previewRequest = 0, previewFrame = 0, previewDirty = true, previewBusy = false;
 const THRESHOLD_HINT = 'Black pixels will be traced. Preview includes noise removal, gap closing and speck removal, before skeletonizing.';
 
@@ -3291,8 +3335,8 @@ function canvasPixels() {
   return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
 }
 
-// Cache the denoised source in a worker. Slider changes only threshold that
-// cache; full-resolution processing never blocks pointer navigation.
+// Cache source pixels and denoising in a worker. Tone changes rebuild the
+// cache; trace sliders reuse it. Full-resolution work stays off the UI thread.
 function requestThresholdPreview(pixelsChanged = false) {
   previewDirty ||= pixelsChanged;
   const id = ++previewRequest;
@@ -3307,19 +3351,33 @@ function requestThresholdPreview(pixelsChanged = false) {
           previewBusy = false;
           if (!editLoaded) return;
           if (data.id !== previewRequest) { requestThresholdPreview(); return; }
-          if (data.error) { $('tracePreviewHint').textContent = data.error; return; }
+          if (data.error) {
+            $('tracePreviewHint').textContent = data.error;
+            if (editTool === 'adjust') $('adjustmentHint').textContent = 'Preview failed: ' + data.error;
+            return;
+          }
+          adjustmentPreview = data.adjusted;
+          if (adjustmentPreview) {
+            const canvas = $('traceAdjustmentPreview');
+            canvas.width = adjustmentPreview.width; canvas.height = adjustmentPreview.height;
+            canvas.getContext('2d').putImageData(new ImageData(adjustmentPreview.data, canvas.width, canvas.height), 0, 0);
+          }
+          $('adjustmentApply').disabled = !adjustmentPreview;
+          $('adjustmentHint').textContent = adjustmentPreview ? 'Preview ready. Apply to include these changes in tracing and saving.' : ADJUSTMENT_HINT;
+          traceApplyView();
           const canvas = $('traceThreshold'), { width, height, data: pixels } = data.image;
           canvas.width = width; canvas.height = height;
           canvas.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
-          $('tracePreviewHint').textContent = mirrorPreview ? 'Mirror preview · ' + THRESHOLD_HINT : THRESHOLD_HINT;
+          $('tracePreviewHint').textContent = (adjustmentPreview ? 'Adjustment preview · ' : mirrorPreview ? 'Mirror preview · ' : '') + THRESHOLD_HINT;
         };
         previewWorker.onerror = () => {
           $('tracePreviewHint').textContent = 'Threshold preview could not load. Reload the page to retry.';
+          if (editTool === 'adjust') $('adjustmentHint').textContent = 'Adjustment preview could not load. Reload the page to retry.';
           previewWorker.terminate(); previewWorker = null; previewDirty = true; previewBusy = false;
         };
       }
       const image = previewDirty ? mirrorPreview ?? canvasPixels() : null;
-      previewWorker.postMessage({ id, image, params: gatherTraceParams() });
+      previewWorker.postMessage({ id, image, params: gatherTraceParams(), adjustments: gatherImageAdjustments() });
       previewBusy = true;
       previewDirty = false;
     } catch (error) {
@@ -3344,6 +3402,7 @@ function imageEdited() {
 
 function restoreEdit(direction) {
   if (!editLoaded || stroking) return;
+  clearAdjustments();
   const image = editHistory[direction](canvasPixels());
   if (!image) return;
   clearMirror();
@@ -3352,6 +3411,50 @@ function restoreEdit(direction) {
   applyTraceTransform();
   imageEdited();
 }
+
+function gatherImageAdjustments() {
+  const adjustments = Object.fromEntries(Object.entries(ADJUSTMENT_CONTROLS)
+    .map(([key, id]) => [key, +$(id).value]));
+  return Object.keys(adjustments).some((key) => adjustments[key] !== DEFAULT_IMAGE_ADJUSTMENTS[key])
+    ? adjustments : null;
+}
+
+function clearAdjustments() {
+  adjustmentPreview = null;
+  for (const [key, id] of Object.entries(ADJUSTMENT_CONTROLS)) {
+    $(id).value = DEFAULT_IMAGE_ADJUSTMENTS[key];
+    $(id + 'Val').textContent = $(id).value;
+  }
+  $('adjustmentApply').disabled = $('adjustmentReset').disabled = true;
+  $('adjustmentHint').textContent = ADJUSTMENT_HINT;
+  $('traceAdjustmentPreview').width = $('traceAdjustmentPreview').height = 0;
+  traceApplyView();
+  requestThresholdPreview();
+}
+
+for (const id of Object.values(ADJUSTMENT_CONTROLS)) {
+  $(id).addEventListener('input', () => {
+    // Keep at least one input level between black and white, even at extremes.
+    if (id === 'editBlackPoint') $(id).value = Math.min(+$(id).value, +$('editWhitePoint').value - 1);
+    if (id === 'editWhitePoint') $(id).value = Math.max(+$(id).value, +$('editBlackPoint').value + 1);
+    $(id + 'Val').textContent = $(id).value;
+    $('adjustmentApply').disabled = true; // Only commit the latest worker result.
+    $('adjustmentReset').disabled = !gatherImageAdjustments();
+    $('adjustmentHint').textContent = 'Updating preview…';
+    if (traceState.view === 'svg') traceState.view = 'original';
+    traceApplyView();
+    requestThresholdPreview();
+  });
+}
+$('adjustmentReset').onclick = clearAdjustments;
+$('adjustmentApply').onclick = () => {
+  if (!editLoaded || !adjustmentPreview || $('adjustmentApply').disabled) return;
+  editHistory.remember(canvasPixels());
+  $('traceEdit').getContext('2d').putImageData(
+    new ImageData(adjustmentPreview.data, adjustmentPreview.width, adjustmentPreview.height), 0, 0);
+  clearAdjustments();
+  imageEdited();
+};
 
 function clearMirror() {
   mirrorPoints = []; mirrorSourcePoint = null; mirrorPreview = null;
@@ -3505,6 +3608,7 @@ function loadEditCanvas({ reset = false } = {}) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
       editLoaded = true;
+      clearAdjustments();
       clearMirror();
       updateEditHistory();
       if (reset) imageEdited();
@@ -3575,7 +3679,7 @@ const editViewport = $('traceViewport');
 editViewport.addEventListener('pointerdown', (e) => {
   if (!editLoaded || editPointer !== null || ![0, 1].includes(e.button) || e.target.closest('#traceContextMenu')) return;
   e.preventDefault();
-  if (e.button === 1 || spacePanning || editTool === 'pan' || traceState.view === 'svg') {
+  if (e.button === 1 || spacePanning || editTool === 'pan' || editTool === 'adjust' || traceState.view === 'svg') {
     panStart = { x: e.clientX, y: e.clientY, tx: traceView.tx, ty: traceView.ty };
   } else {
     const point = toCanvasPoint(e), canvas = $('traceEdit');
@@ -3622,11 +3726,14 @@ function resetEdit() {
 
 function setEditTool(tool) {
   endEditPointer();
+  if (editTool === 'adjust' && tool !== 'adjust') clearAdjustments();
   if (editTool === 'mirror' && tool !== 'mirror') clearMirror();
   editTool = tool;
   $('editTools').querySelectorAll('button')
     .forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
   $('mirrorControls').hidden = tool !== 'mirror';
+  $('adjustmentControls').hidden = tool !== 'adjust';
+  if (tool === 'adjust') traceState.view = 'original';
   if (tool !== 'pan' && traceState.view === 'svg') traceState.view = 'original';
   traceApplyView();
 }
@@ -3738,7 +3845,7 @@ function setEyedropping(on) {
 
 function updateEditCursor() {
   $('traceViewport').style.cursor = panStart ? 'grabbing'
-    : spacePanning || editTool === 'pan' || traceState.view === 'svg' ? 'grab'
+    : spacePanning || editTool === 'pan' || editTool === 'adjust' || traceState.view === 'svg' ? 'grab'
     : eyedropping ? PICKER_CURSOR : 'crosshair';
 }
 
@@ -3752,14 +3859,15 @@ function pickColorAt(e) {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (currentScreen !== 'trace' || e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (currentScreen !== 'trace') return;
+  if (e.key === 'Escape') { endEditPointer(); clearMirror(); clearAdjustments(); return; }
+  if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
   if (e.key === 'Control') setEyedropping(true);
   if (e.code === 'Space') { e.preventDefault(); spacePanning = true; updateEditCursor(); }
   if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
     e.preventDefault();
     restoreEdit(e.shiftKey || e.key.toLowerCase() === 'y' ? 'redo' : 'undo');
   }
-  if (e.key === 'Escape') { endEditPointer(); clearMirror(); }
 });
 window.addEventListener('keyup', (e) => {
   if (e.key === 'Control') setEyedropping(false);
@@ -3774,6 +3882,7 @@ function clearTrace() {
   previewRequest++;
   cancelAnimationFrame(previewFrame);
   previewWorker?.terminate(); previewWorker = null; previewDirty = true; previewBusy = false;
+  clearAdjustments();
   clearMirror();
   $('traceThreshold').width = $('traceThreshold').height = 0;
   $('traceMirrorPreview').width = $('traceMirrorPreview').height = 0;

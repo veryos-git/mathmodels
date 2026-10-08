@@ -3,12 +3,70 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const source = readFileSync(new URL('../static/image-editor.js', import.meta.url), 'utf8');
-const { denoiseImage, thresholdImage, mirrorImage, lineSide, ImageHistory } =
+const { adjustImage, DEFAULT_IMAGE_ADJUSTMENTS, denoiseImage, thresholdImage, mirrorImage, lineSide, ImageHistory } =
   await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const image = (rows) => ({ width: rows[0].length, height: rows.length,
   data: new Uint8ClampedArray(rows.flatMap(row => row.flatMap(value => [value, value, value, 255]))) });
 const rows = ({ data, width, height }) => Array.from({ length: height }, (_, y) =>
   Array.from({ length: width }, (_, x) => data[(y * width + x) * 4]));
+
+const ramp = image([Array.from({ length: 256 }, (_, i) => i)]);
+assert.deepEqual(adjustImage(ramp), ramp, 'neutral adjustments preserve every level exactly');
+const sample = image([[0, 32, 64, 128, 192, 224, 255]]);
+const adjustedRows = (params) => rows(adjustImage(sample, params))[0];
+const contrastUp = adjustedRows({ contrast: 50 }), contrastDown = adjustedRows({ contrast: -50 });
+assert.ok(contrastUp[2] < 64 && contrastUp[4] > 192, 'contrast separates dark and light tones');
+assert.ok(contrastDown[2] > 64 && contrastDown[4] < 192, 'negative contrast softens tones');
+for (const key of ['lights', 'shadows']) {
+  const up = adjustedRows({ [key]: 100 }), down = adjustedRows({ [key]: -100 });
+  assert.equal(up[0], 0); assert.equal(up[6], 255);
+  assert.equal(down[0], 0); assert.equal(down[6], 255);
+  assert.ok(up.slice(1, -1).every((v, i) => v > rows(sample)[0][i + 1]));
+  assert.ok(down.slice(1, -1).every((v, i) => v < rows(sample)[0][i + 1]));
+  assert.ok(key === 'shadows' ? up[2] - 64 > up[4] - 192 : up[4] - 192 > up[2] - 64,
+    `${key} primarily affects its intended tones`);
+}
+assert.deepEqual(rows(adjustImage(image([[0, 32, 128, 224, 255]]), { blackPoint: 32, whitePoint: 224 })),
+  [[0, 0, 128, 255, 255]], 'input levels clip and rescale the full tonal range');
+for (const blackPoint of [0, 64, 254]) for (const whitePoint of [1, 192, 255]) {
+  for (const contrast of [-100, 0, 100]) for (const lights of [-100, 0, 100]) for (const shadows of [-100, 0, 100]) {
+    const values = rows(adjustImage(ramp, { blackPoint, whitePoint, contrast, lights, shadows }))[0];
+    assert.ok(values.every((v, i) => i === 0 || v >= values[i - 1]),
+      'extreme and crossed settings must not reverse tone order');
+  }
+}
+assert.deepEqual(adjustImage(ramp, { contrast: NaN, lights: Infinity, whitePoint: NaN }), ramp,
+  'nonfinite settings fall back to neutral values');
+const rgba = { width: 2, height: 1, data: new Uint8ClampedArray([32, 128, 224, 128, 16, 64, 200, 0]) };
+const rgbaBefore = rgba.data.slice();
+assert.deepEqual([...adjustImage(rgba, { blackPoint: 32, whitePoint: 224 }).data],
+  [0, 128, 255, 128, 0, 43, 223, 0], 'adjust RGB independently while preserving alpha');
+assert.deepEqual(rgba.data, rgbaBefore, 'preview never mutates the source');
+
+// Run the actual worker handler, including transfer detachment, to check that
+// slider updates use the cached original rather than compounding adjustments.
+let reply;
+const workerSelf = { postMessage(message, transfer) { reply = structuredClone(message, { transfer }); } };
+const workerSource = readFileSync(new URL('../static/threshold-worker.js', import.meta.url), 'utf8').replace(/^import .*;\n/, '');
+new Function('self', 'adjustImage', 'denoiseImage', 'thresholdImage', workerSource)(workerSelf, adjustImage, denoiseImage, thresholdImage);
+function previewRequest(image, adjustments = null, params = {}) {
+  workerSelf.onmessage({ data: { id: 1, image, adjustments, params } });
+  assert.ok(!reply.error, reply.error);
+  return reply;
+}
+assert.equal(previewRequest(sample).adjusted, null);
+const firstPreview = previewRequest(null, { contrast: 50 });
+assert.deepEqual(firstPreview.adjusted, adjustImage(sample, { contrast: 50 }));
+assert.deepEqual(previewRequest(null, { contrast: 50 }).adjusted, firstPreview.adjusted,
+  'transferring a preview must not detach cached pixels');
+assert.deepEqual(previewRequest(null, { shadows: 80 }).adjusted, adjustImage(sample, { shadows: 80 }),
+  'a new slider value always starts from the original source');
+assert.deepEqual(previewRequest(null).image, thresholdImage(denoiseImage(sample), sample.width, sample.height),
+  'reset restores thresholding of the original');
+const applied = adjustImage(sample, { blackPoint: 60, whitePoint: 180 });
+assert.deepEqual(previewRequest(applied).image, thresholdImage(denoiseImage(applied), applied.width, applied.height),
+  'applying adjustments invalidates the cached source');
+assert.deepEqual(previewRequest(null, DEFAULT_IMAGE_ADJUSTMENTS).adjusted, applied);
 
 // Match the real Python preprocessing, including median border handling,
 // colored/transparent input, threshold equality, inversion and 8-way specks.
@@ -93,4 +151,4 @@ shortHistory.remember(a); shortHistory.remember(b); shortHistory.remember(c);
 assert.equal(shortHistory.undo(a), c);
 assert.equal(shortHistory.undo(c), b);
 assert.equal(shortHistory.undo(b), null, 'history also respects its step limit');
-console.log(`Image editor checks passed: ${fixtures.length} Python preview comparisons, mirroring and undo/redo.`);
+console.log(`Image editor checks passed: tone adjustments, worker caching, ${fixtures.length} Python preview comparisons, mirroring and undo/redo.`);
