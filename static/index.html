@@ -512,7 +512,10 @@
       <label for="blackAreas">Large black areas</label>
       <select id="blackAreas"><option value="outline">Keep their outlines (eyes and spots)</option><option value="none">Skeletonize everything</option></select>
       <label for="blackMinWidth">Minimum dark feature width (pixels)</label>
-      <input id="blackMinWidth" type="number" min="3" max="201" step="1" value="8">
+      <div class="slider-row" style="grid-template-columns: 1fr 34px">
+        <input id="blackMinWidth" type="range" min="3" max="201" step="1" value="8">
+        <span class="val" id="blackMinWidthVal">8</span>
+      </div>
       <div class="muted">Choose a width larger than the normal pen lines. Preserved areas become closed faces you can paint black.</div>
       <div class="slider-row">
         <label for="threshold">threshold</label>
@@ -3185,7 +3188,7 @@ const traceState = {
   edited: false,       // the canvas has pen/eraser marks on it
 };
 
-const TRACE_PARAM_CONTROLS = ['threshold', 'closeGaps', 'simplify', 'smoothing'];
+const TRACE_PARAM_CONTROLS = ['blackMinWidth', 'threshold', 'closeGaps', 'simplify', 'smoothing'];
 
 function gatherTraceParams() {
   return {
@@ -3204,7 +3207,6 @@ function gatherTraceParams() {
 
 function applyTraceParams(p) {
   $('blackAreas').value = p.blackAreas ?? 'none';
-  $('blackMinWidth').value = p.blackMinWidth ?? 8;
   document.querySelector(`input[name="traceMode"][value="${p.traceMode}"]`).checked = true;
   for (const key of TRACE_PARAM_CONTROLS) $(key).value = p[key] ?? DEFAULT_TRACE_PARAMS[key];
   $('skeletonize').checked = !!p.skeletonize;
@@ -3943,7 +3945,6 @@ $('traceDownload').onclick = () => {
 };
 $('traceUse').onclick = useTrace;
 $('blackAreas').onchange = onTraceParamChange;
-$('blackMinWidth').onchange = onTraceParamChange;
 
 /* -------------------------------------------------- start screen + nav */
 
