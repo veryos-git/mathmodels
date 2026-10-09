@@ -86,6 +86,9 @@ or with the **templates** tool, drag to move it, drag a corner to resize, and
 use the green handle to rotate. The position, dimensions and rotation can also
 be entered directly; **keep proportions** controls resizing. **Delete template**
 or Delete/Backspace removes the selected layer, and undo/redo covers template edits.
+Moving, resizing or rotating a template past an edge automatically extends the
+image with white space to contain it. The other content stays aligned, and undo
+restores the previous image size. The larger canvas is kept in traces and saves.
 
 White template backgrounds let the image show through. Original and Threshold
 views preview the combined result; SVG generation temporarily composites the

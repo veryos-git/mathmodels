@@ -212,7 +212,7 @@ assert.deepEqual(previewRequest(null, null, {}, null).image, thresholdImage(deno
   'deleting the last template removes its pixels from the preview cache');
 
 const templateSource = readFileSync(new URL('../static/lineart-templates.js', import.meta.url), 'utf8');
-const { LineArtTemplates, templatePoint, templateLocalPoint, templateHandles, hitTemplate, transformTemplate } =
+const { LineArtTemplates, templatePoint, templateLocalPoint, templateHandles, templateCanvasBounds, hitTemplate, transformTemplate } =
   await import(`data:text/javascript;base64,${Buffer.from(templateSource).toString('base64')}`);
 const layer = { id: 'a', x: 100, y: 70, width: 40, height: 20, rotation: 90 };
 const near = (actual, expected) => actual.forEach((v, i) => assert.ok(Math.abs(v - expected[i]) < 1e-8));
@@ -229,6 +229,22 @@ const rotated = transformTemplate(layer, { kind: 'rotate', start: [110, 70] }, [
 assert.equal(rotated.rotation, 180);
 const moved = transformTemplate(layer, { kind: 'move', start: [110, 70] }, [115, 85]);
 near([moved.x, moved.y], [105, 85]);
+const extent = (changes = {}) => ({ x: 50, y: 40, width: 40, height: 20, rotation: 0, ...changes });
+assert.deepEqual(templateCanvasBounds(100, 80, []), { width: 100, height: 80, offsetX: 0, offsetY: 0 });
+assert.deepEqual(templateCanvasBounds(100, 80, [extent()]), { width: 100, height: 80, offsetX: 0, offsetY: 0 });
+assert.deepEqual(templateCanvasBounds(100, 80, [extent({ x: 0 })]), { width: 120, height: 80, offsetX: 20, offsetY: 0 });
+assert.deepEqual(templateCanvasBounds(100, 80, [extent({ x: 120 })]), { width: 140, height: 80, offsetX: 0, offsetY: 0 });
+assert.deepEqual(templateCanvasBounds(100, 80, [extent({ y: -20 })]), { width: 100, height: 110, offsetX: 0, offsetY: 30 });
+assert.deepEqual(templateCanvasBounds(100, 80, [extent({ y: 100 })]), { width: 100, height: 110, offsetX: 0, offsetY: 0 });
+assert.deepEqual(templateCanvasBounds(100, 80, [extent({ x: 0, y: 0 }), extent({ x: 120, y: 100 })]),
+  { width: 160, height: 120, offsetX: 20, offsetY: 10 }, 'all templates contribute to the expanded bounds');
+assert.deepEqual(templateCanvasBounds(100, 80, [extent({ x: 0, y: 0, width: 20, height: 20, rotation: 45 })]),
+  { width: 115, height: 95, offsetX: 15, offsetY: 15 }, 'rotated corners round outwards to avoid cropping');
+assert.deepEqual(templateCanvasBounds(20, 40, [extent({ x: 10, y: 20, rotation: 90 })]),
+  { width: 20, height: 40, offsetX: 0, offsetY: 0 }, 'exact quarter turns do not add spurious padding');
+const sourceBounds = extent({ x: -20, rotation: 37 }), untouchedBounds = { ...sourceBounds };
+templateCanvasBounds(100, 80, [sourceBounds]);
+assert.deepEqual(sourceBounds, untouchedBounds, 'bounds calculation does not alter template placement');
 const templates = new LineArtTemplates(), src = 'data:image/png;base64,dGVzdA==';
 templates.assets.set(src, { naturalWidth: 40, naturalHeight: 20 });
 templates.restore([{ ...layer, src, name: 'test' }]);

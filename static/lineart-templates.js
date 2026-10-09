@@ -21,6 +21,23 @@ export function templateHandles(layer, gap) {
   ];
 }
 
+/** Outward-rounded image bounds containing every rotated template corner. */
+export function templateCanvasBounds(width, height, layers) {
+  let left = 0, top = 0, right = width, bottom = height;
+  for (const layer of layers) {
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const [x, y] = templatePoint(layer, sx * layer.width / 2, sy * layer.height / 2);
+      left = Math.min(left, x); top = Math.min(top, y);
+      right = Math.max(right, x); bottom = Math.max(bottom, y);
+    }
+  }
+  // Quarter turns can produce tiny rounding errors at exact pixel edges.
+  const offsetX = Math.max(0, -Math.floor(left + 1e-9));
+  const offsetY = Math.max(0, -Math.floor(top + 1e-9));
+  return { width: Math.ceil(right - 1e-9) + offsetX,
+    height: Math.ceil(bottom - 1e-9) + offsetY, offsetX, offsetY };
+}
+
 export function hitTemplate(layers, selected, point, radius) {
   const active = layers.find(layer => layer.id === selected);
   if (active) for (const handle of templateHandles(active, radius * 4)) {

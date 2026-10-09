@@ -10,3 +10,10 @@ each line art template can be transformed and deleted.
 
 line art templates can be added via button. library can be searched (thumbnails shown)
 
+
+problem : not enought space
+possible solutions: 
+if a template is placed outside of the image , the image should be extended so far that the template is not cropped 
+or 
+the image size can be extended 
+
