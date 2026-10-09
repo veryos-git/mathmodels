@@ -1,17 +1,18 @@
-import { adjustImage, denoiseImage, thresholdImage } from './image-editor.js';
+import { adjustImage, compositeLineArt, denoiseImage, thresholdImage } from './image-editor.js';
 
-let source, adjusted, gray, width, height, adjustmentKey;
-self.onmessage = ({ data: { id, image, params, adjustments = null } }) => {
+let source, overlay, adjusted, gray, width, height, adjustmentKey;
+self.onmessage = ({ data: { id, image, params, adjustments = null, templates } }) => {
   try {
     if (image) {
       ({ width, height } = image);
       source = image;
     }
+    if (templates !== undefined) overlay = templates;
     if (!source) return;
     const key = JSON.stringify(adjustments);
-    if (image || key !== adjustmentKey) {
+    if (image || templates !== undefined || key !== adjustmentKey) {
       adjusted = adjustments ? adjustImage(source, adjustments) : null;
-      gray = denoiseImage(adjusted ?? source);
+      gray = denoiseImage(compositeLineArt(adjusted ?? source, overlay));
       adjustmentKey = key;
     }
     const result = thresholdImage(gray, width, height, params);

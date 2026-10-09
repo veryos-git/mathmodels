@@ -137,9 +137,29 @@ export function lineSide([x, y], a, b) {
   return (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
 }
 
+/** Multiply line art over the image, keeping white paper from hiding it.
+ * Match canvas source-over/multiply, including partially transparent pixels. */
+export function compositeLineArt(image, overlay) {
+  if (!overlay) return image;
+  if (image.width !== overlay.width || image.height !== overlay.height) throw new Error('Template preview dimensions do not match the image.');
+  const data = new Uint8ClampedArray(image.data);
+  for (let p = 0; p < data.length; p += 4) {
+    const sa = overlay.data[p + 3] / 255;
+    if (!sa) continue;
+    const da = data[p + 3] / 255, alpha = sa + da * (1 - sa);
+    for (let c = 0; c < 3; c++) {
+      const s = overlay.data[p + c] / 255, d = data[p + c] / 255;
+      data[p + c] = 255 * (s * sa * (1 - da) + d * da * (1 - sa) + s * d * sa * da) / alpha;
+    }
+    data[p + 3] = alpha * 255;
+  }
+  return { data, width: image.width, height: image.height };
+}
+
 /** Reflect pixel centres in an arbitrary line; null side flips the whole image.
  * Otherwise preserve the selected half and copy it onto the opposite half.
- * The canvas size stays fixed; reflected samples outside it become white.
+ * Extend the canvas to contain the original bounds and all reflected content.
+ * offsetX/offsetY locate the original origin in the expanded image.
  */
 export function mirrorImage({ data, width, height }, a, b, sourceSide = null) {
   const dx = b[0] - a[0], dy = b[1] - a[1], length2 = dx * dx + dy * dy;
@@ -147,23 +167,37 @@ export function mirrorImage({ data, width, height }, a, b, sourceSide = null) {
   if (sourceSide !== null && sourceSide !== -1 && sourceSide !== 1) {
     throw new Error('Choose a side of the mirror line to copy.');
   }
-  const output = new Uint8ClampedArray(data);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const side = dx * (y + .5 - a[1]) - dy * (x + .5 - a[0]);
-      if (sourceSide !== null && side * sourceSide >= 0) continue;
-      const sx = Math.floor(x + .5 + 2 * dy * side / length2);
-      const sy = Math.floor(y + .5 - 2 * dx * side / length2);
-      const dst = (y * width + x) * 4;
-      if (sx < 0 || sy < 0 || sx >= width || sy >= height) {
-        output.fill(255, dst, dst + 4);
-      } else {
+  let minX = 0, minY = 0, maxX = width, maxY = height;
+  for (const [x, y] of [[0, 0], [width, 0], [width, height], [0, height]]) {
+    const side = lineSide([x, y], a, b);
+    if (sourceSide !== null && side * sourceSide < 0) continue;
+    const rx = x + 2 * dy * side / length2, ry = y - 2 * dx * side / length2;
+    minX = Math.min(minX, rx); maxX = Math.max(maxX, rx);
+    minY = Math.min(minY, ry); maxY = Math.max(maxY, ry);
+  }
+  // In copy mode, the other vertices of the selected half lie on the mirror
+  // line: their reflections stay within the original bounds already included.
+  // Ignore floating-point noise at integer edges when rounding outwards.
+  minX = Math.floor(minX + 1e-9); minY = Math.floor(minY + 1e-9);
+  const outWidth = Math.ceil(maxX - 1e-9) - minX;
+  const outHeight = Math.ceil(maxY - 1e-9) - minY;
+  const output = new Uint8ClampedArray(outWidth * outHeight * 4).fill(255);
+  for (let y = 0; y < outHeight; y++) {
+    for (let x = 0; x < outWidth; x++) {
+      const px = x + minX + .5, py = y + minY + .5;
+      const side = dx * (py - a[1]) - dy * (px - a[0]);
+      const keep = sourceSide !== null && side * sourceSide >= 0;
+      const sx = Math.floor(keep ? px : px + 2 * dy * side / length2);
+      const sy = Math.floor(keep ? py : py - 2 * dx * side / length2);
+      const dst = (y * outWidth + x) * 4;
+      if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
         const src = (sy * width + sx) * 4;
         for (let c = 0; c < 4; c++) output[dst + c] = data[src + c];
       }
     }
   }
-  return { data: output, width, height };
+  return { data: output, width: outWidth, height: outHeight,
+    offsetX: Math.max(0, -minX), offsetY: Math.max(0, -minY) };
 }
 
 /** Bounded full-image undo history. Call remember before a committed edit. */

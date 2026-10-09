@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "40802e16-d8c4-490d-aa0f-bc0fcb3d12e6",
+  "name": "spiral",
+  "kind": "subject",
+  "created": "2026-10-09T22:44:08.547Z",
+  "updated": "2026-10-09T22:44:08.547Z",
+  "revision": "17c73bc2-579f-4525-8b09-284ec80f87ee",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/17c73bc2-579f-4525-8b09-284ec80f87ee/drawing.svg"
+    },
+    "original": {
+      "name": "Screenshot_2026-10-10_00-43-51.png",
+      "path": "revisions/17c73bc2-579f-4525-8b09-284ec80f87ee/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/17c73bc2-579f-4525-8b09-284ec80f87ee/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 128,
+    "closeGaps": 0,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

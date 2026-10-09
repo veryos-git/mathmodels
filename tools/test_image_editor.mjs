@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const source = readFileSync(new URL('../static/image-editor.js', import.meta.url), 'utf8');
-const { adjustImage, DEFAULT_IMAGE_ADJUSTMENTS, denoiseImage, thresholdImage, mirrorImage, lineSide, ImageHistory } =
+const { adjustImage, compositeLineArt, DEFAULT_IMAGE_ADJUSTMENTS, denoiseImage, thresholdImage, mirrorImage, lineSide, ImageHistory } =
   await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const image = (rows) => ({ width: rows[0].length, height: rows.length,
   data: new Uint8ClampedArray(rows.flatMap(row => row.flatMap(value => [value, value, value, 255]))) });
@@ -48,9 +48,9 @@ assert.deepEqual(rgba.data, rgbaBefore, 'preview never mutates the source');
 let reply;
 const workerSelf = { postMessage(message, transfer) { reply = structuredClone(message, { transfer }); } };
 const workerSource = readFileSync(new URL('../static/threshold-worker.js', import.meta.url), 'utf8').replace(/^import .*;\n/, '');
-new Function('self', 'adjustImage', 'denoiseImage', 'thresholdImage', workerSource)(workerSelf, adjustImage, denoiseImage, thresholdImage);
-function previewRequest(image, adjustments = null, params = {}) {
-  workerSelf.onmessage({ data: { id: 1, image, adjustments, params } });
+new Function('self', 'adjustImage', 'compositeLineArt', 'denoiseImage', 'thresholdImage', workerSource)(workerSelf, adjustImage, compositeLineArt, denoiseImage, thresholdImage);
+function previewRequest(image, adjustments = null, params = {}, templates) {
+  workerSelf.onmessage({ data: { id: 1, image, adjustments, params, templates } });
   assert.ok(!reply.error, reply.error);
   return reply;
 }
@@ -118,19 +118,65 @@ const square = image([[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
 assert.deepEqual(rows(mirrorImage(square, [0, 0], [3, 3])), [[1, 4, 7], [2, 5, 8], [3, 6, 9]]);
 assert.deepEqual(rows(mirrorImage(square, [0, 0], [3, 3], 1)), [[1, 4, 7], [4, 5, 8], [7, 8, 9]]);
 assert.deepEqual(rows(mirrorImage(square, [0, 3], [3, 0])), [[9, 6, 3], [8, 5, 2], [7, 4, 1]]);
-// An off-centre axis clips reflected pixels and fills uncovered space white.
-assert.deepEqual(rows(mirrorImage(original, [1, 0], [1, 2])), [[20, 10, 255, 255], [60, 50, 255, 255]]);
-const tilted = mirrorImage(image([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]]), [0, 0], [4, 2]);
-assert.equal(rows(tilted)[0][3], 13); // (3.5, .5) reflects to (2.5, 2.5).
-assert.equal(rows(tilted)[2][0], 255);
+// Off-centre lines expand in every direction and preserve the original bounds.
+const bounds = ({ width, height, offsetX, offsetY }) => [width, height, offsetX, offsetY];
+const extended = mirrorImage(original, [1, 0], [1, 2]);
+assert.deepEqual(bounds(extended), [6, 2, 2, 0]);
+assert.deepEqual(rows(extended), [[40, 30, 20, 10, 255, 255], [80, 70, 60, 50, 255, 255]]);
+assert.deepEqual(rows(mirrorImage(original, [3, 0], [3, 2])),
+  [[255, 255, 40, 30, 20, 10], [255, 255, 80, 70, 60, 50]]);
+assert.deepEqual(rows(mirrorImage(original, [0, .5], [4, .5])),
+  [[50, 60, 70, 80], [10, 20, 30, 40], [255, 255, 255, 255]]);
+assert.deepEqual(rows(mirrorImage(original, [0, 1.5], [4, 1.5])),
+  [[255, 255, 255, 255], [50, 60, 70, 80], [10, 20, 30, 40]]);
+// Only the selected half contributes mirrored content and expanded bounds.
+assert.deepEqual(rows(mirrorImage(original, [1, 0], [1, 2], -1)),
+  [[40, 30, 20, 20, 30, 40], [80, 70, 60, 60, 70, 80]]);
+assert.deepEqual(bounds(mirrorImage(original, [1, 0], [1, 2], 1)), [4, 2, 0, 0]);
+assert.deepEqual(rows(mirrorImage(original, [1, 0], [1, 2], 1)),
+  [[10, 10, 255, 255], [50, 50, 255, 255]]);
+assert.deepEqual(rows(mirrorImage(original, [3, 0], [3, 2], 1)),
+  [[10, 20, 30, 30, 20, 10], [50, 60, 70, 70, 60, 50]]);
+assert.deepEqual(rows(mirrorImage(original, [0, .5], [4, .5], 1)),
+  [[50, 60, 70, 80], [10, 20, 30, 40], [50, 60, 70, 80]]);
+assert.deepEqual(rows(mirrorImage(original, [0, 1.5], [4, 1.5], -1)),
+  [[10, 20, 30, 40], [50, 60, 70, 80], [10, 20, 30, 40]]);
+assert.deepEqual(bounds(mirrorImage(original, [0, 0], [0, 2], -1)), [8, 2, 4, 0]);
+assert.deepEqual(rows(mirrorImage(original, [0, 0], [0, 2], -1)),
+  [[40, 30, 20, 10, 10, 20, 30, 40], [80, 70, 60, 50, 50, 60, 70, 80]]);
+assert.deepEqual(mirrorImage(original, [1, 0], [1, 2], -1), mirrorImage(original, [1, 2], [1, 0], 1),
+  'reversing the line and selected side preserves bounds and pixels');
+const rectangle = image([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]]);
+const tilted = mirrorImage(rectangle, [0, 0], [4, 2]);
+assert.deepEqual(bounds(tilted), [6, 6, 0, 2], 'slanted reflection rounds expanded edges outwards');
+assert.deepEqual(bounds(mirrorImage(rectangle, [0, 0], [4, 2], 1)), [6, 5, 0, 2],
+  'copying below a slanted line expands above and to the right');
+assert.deepEqual(bounds(mirrorImage(rectangle, [0, 0], [4, 2], -1)), [5, 4, 0, 0],
+  'copying above a slanted line only expands below');
+assert.equal(rows(tilted)[2][3], 13); // (3.5, .5) reflects to (2.5, 2.5).
+assert.equal(rows(tilted)[4][0], 255);
+assert.equal(rows(tilted)[0][2], 11, 'keep reflected content above the original');
+assert.equal(rows(tilted)[5][3], 5, 'keep reflected content below the original');
+assert.deepEqual(bounds(mirrorImage(original, [.2, .1], [2.6, 1.3])), [4, 6, 0, 2],
+  'fractional line coordinates do not add padding at exact integer bounds');
 assert.deepEqual([...original.data], before, 'mirror preview must not modify its source');
 assert.throws(() => mirrorImage(original, [1, 1], [1, 1]), /different points/);
 assert.throws(() => mirrorImage(original, [1, 0], [1, 1], 0), /Choose a side/);
 assert.equal(Math.sign(lineSide([0, 1], [2, 0], [2, 2])), 1);
 const colored = { width: 2, height: 1, data: new Uint8ClampedArray([255, 0, 0, 255, 0, 80, 240, 128]) };
 assert.deepEqual([...mirrorImage(colored, [1, 0], [1, 1]).data], [0, 80, 240, 128, 255, 0, 0, 255]);
+assert.deepEqual([...mirrorImage(colored, [0, 0], [0, 1], -1).data],
+  [0, 80, 240, 128, 255, 0, 0, 255, 255, 0, 0, 255, 0, 80, 240, 128],
+  'expansion preserves all RGBA channels');
+assert.deepEqual(previewRequest(extended).image,
+  thresholdImage(denoiseImage(extended), extended.width, extended.height),
+  'the threshold worker accepts expanded previews and invalidates its cached dimensions');
 
 const history = new ImageHistory(original.data.byteLength * 2);
+history.remember(original);
+assert.equal(history.undo(extended), original, 'undo restores the original dimensions and pixels');
+assert.equal(history.redo(original), extended, 'redo restores the expanded dimensions and pixels');
+history.clear();
 const a = image([[1]]), b = image([[2]]), c = image([[3]]);
 history.remember(a); history.remember(b);
 assert.equal(history.undo(c), b);
@@ -151,4 +197,47 @@ shortHistory.remember(a); shortHistory.remember(b); shortHistory.remember(c);
 assert.equal(shortHistory.undo(a), c);
 assert.equal(shortHistory.undo(c), b);
 assert.equal(shortHistory.undo(b), null, 'history also respects its step limit');
-console.log(`Image editor checks passed: tone adjustments, worker caching, ${fixtures.length} Python preview comparisons, mirroring and undo/redo.`);
+const base = image([[160, 100, 200, 80]]), ink = image([[255, 0, 0, 128]]);
+ink.data[2 * 4 + 3] = 128;
+assert.deepEqual(rows(compositeLineArt(base, ink)), [[160, 0, 100, 40]],
+  'white paper preserves the base, black draws over it, and alpha blends ink');
+assert.deepEqual(rows(base), [[160, 100, 200, 80]], 'template compositing never changes the painted image');
+assert.throws(() => compositeLineArt(base, original), /dimensions/);
+const withInk = previewRequest(base, { contrast: 50 }, {}, ink);
+assert.deepEqual(withInk.adjusted, adjustImage(base, { contrast: 50 }), 'applying tone adjustments must not bake in templates');
+assert.deepEqual(withInk.image, thresholdImage(denoiseImage(compositeLineArt(withInk.adjusted, ink)), 4, 1));
+assert.deepEqual(previewRequest(null).image, thresholdImage(denoiseImage(compositeLineArt(base, ink)), 4, 1),
+  'cached templates remain present when parameters change');
+assert.deepEqual(previewRequest(null, null, {}, null).image, thresholdImage(denoiseImage(base), 4, 1),
+  'deleting the last template removes its pixels from the preview cache');
+
+const templateSource = readFileSync(new URL('../static/lineart-templates.js', import.meta.url), 'utf8');
+const { LineArtTemplates, templatePoint, templateLocalPoint, templateHandles, hitTemplate, transformTemplate } =
+  await import(`data:text/javascript;base64,${Buffer.from(templateSource).toString('base64')}`);
+const layer = { id: 'a', x: 100, y: 70, width: 40, height: 20, rotation: 90 };
+const near = (actual, expected) => actual.forEach((v, i) => assert.ok(Math.abs(v - expected[i]) < 1e-8));
+near(templatePoint(layer, 20, 10), [90, 90]);
+near(templateLocalPoint(layer, [90, 90]), [20, 10]);
+assert.equal(hitTemplate([layer], null, [100, 70], 2).kind, 'move');
+assert.equal(hitTemplate([layer], null, [121, 70], 2), null, 'hit testing follows rotated bounds');
+assert.equal(hitTemplate([layer, { ...layer, id: 'b' }], null, [100, 70], 2).layer.id, 'b', 'topmost template wins');
+assert.equal(hitTemplate([layer], 'a', templateHandles(layer, 8)[4].point, 2).kind, 'rotate');
+const resized = transformTemplate(layer, { kind: 'resize', sx: 1, sy: 1 }, templatePoint(layer, 60, 30));
+near([resized.width, resized.height], [80, 40]);
+near(templatePoint(resized, -40, -20), templatePoint(layer, -20, -10));
+const rotated = transformTemplate(layer, { kind: 'rotate', start: [110, 70] }, [100, 80]);
+assert.equal(rotated.rotation, 180);
+const moved = transformTemplate(layer, { kind: 'move', start: [110, 70] }, [115, 85]);
+near([moved.x, moved.y], [105, 85]);
+const templates = new LineArtTemplates(), src = 'data:image/png;base64,dGVzdA==';
+templates.assets.set(src, { naturalWidth: 40, naturalHeight: 20 });
+templates.restore([{ ...layer, src, name: 'test' }]);
+const saved = templates.snapshot();
+templates.items[0].x = 999;
+assert.equal(saved[0].x, 100, 'saved template placements are independent snapshots');
+assert.ok(!('image' in saved[0]), 'saved templates contain portable data, not browser objects');
+templates.restore(JSON.parse(JSON.stringify(saved)));
+assert.equal(templates.items[0].x, 100);
+assert.throws(() => templates.restore([{ ...saved[0], width: -1 }]), /Invalid saved template/);
+await assert.rejects(() => templates.asset('https://example.com/image.svg'), /embedded SVG or PNG/);
+console.log(`Image editor checks passed: adjustments, templates, worker caching, ${fixtures.length} Python preview comparisons, mirroring and undo/redo.`);

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "22addb19-03ac-4a34-88d4-9106591e5ce5",
+  "name": "spinne2",
+  "kind": "subject",
+  "created": "2026-10-09T22:45:55.800Z",
+  "updated": "2026-10-09T22:46:04.924Z",
+  "revision": "92e1e0c3-453c-4032-bcb0-58e005593025",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/92e1e0c3-453c-4032-bcb0-58e005593025/drawing.svg"
+    },
+    "original": {
+      "name": "WhatsApp Image 2026-10-10 at 00.24.47.jpeg",
+      "path": "revisions/92e1e0c3-453c-4032-bcb0-58e005593025/original.jpeg"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/92e1e0c3-453c-4032-bcb0-58e005593025/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 128,
+    "closeGaps": 0,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10
+  }
+}

@@ -27,11 +27,13 @@ Deno.test("traced subject survives restart, rename and replacement with recovera
     const form = drawing();
     form.set("original", new File([new Uint8Array([1, 2, 3])], "scan.png"));
     form.set("edited", new File([new Uint8Array([4, 5, 6])], "edited.png"));
-    form.set("trace", JSON.stringify({ threshold: 123, invert: false }));
+    const templates = [{ id: "ink", name: "Ink.svg", src: "data:image/svg+xml;base64,PHN2Zy8+", x: 20, y: 30, width: 40, height: 50, rotation: 15 }];
+    form.set("trace", JSON.stringify({ threshold: 123, invert: false, templates }));
     const first = await store.save(form);
     const restart = new ResourceStore(store.root);
     const loaded = await restart.get(first.id);
     assert(loaded.trace?.threshold === 123);
+    assert(JSON.stringify(loaded.trace?.templates) === JSON.stringify(templates));
     assert(
       (await Deno.readFile(
         `${store.root}/${first.id}/${loaded.files.original!.path}`,
@@ -152,6 +154,7 @@ Deno.test("project import preserves trace images and roles and is repeatable", a
           source: embedded("edited.png", "edited"),
           original: embedded("original.png", "original"),
           params: { threshold: 99 },
+          templates: [{ id: "template", src: "data:image/png;base64,aW5r", x: 10, y: 20, width: 30, height: 40, rotation: 90 }],
         },
       }),
     );
@@ -161,6 +164,7 @@ Deno.test("project import preserves trace images and roles and is repeatable", a
     assert(new Set(records.map((r) => r.kind)).size === 3);
     const subject = records.find((r) => r.kind === "subject")!;
     assert(subject.trace?.threshold === 99);
+    assert((subject.trace?.templates as Array<{ rotation: number }>)[0].rotation === 90);
     assert(
       await Deno.readTextFile(
         `${store.root}/${subject.id}/${subject.files.original!.path}`,

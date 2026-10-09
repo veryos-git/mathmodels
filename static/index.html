@@ -230,6 +230,19 @@
               width: 100%; height: 100%; pointer-events: none; }
   #traceThreshold { image-rendering: pixelated; }
   #traceGuides { overflow: hidden; }
+  #traceTemplates, #traceTemplateGuides { position: absolute; inset: 0;
+              width: 100%; height: 100%; pointer-events: none; }
+  #traceTemplates { mix-blend-mode: multiply; }
+  #traceTemplateGuides { overflow: visible; }
+  #templateList { display: grid; gap: 4px; margin: 8px 0; }
+  #templateList button { display: flex; align-items: center; gap: 8px; margin: 0;
+              padding: 5px; text-align: left; background: #1d2127; border: 1px solid #374151; }
+  #templateList button.active { border-color: #38bdf8; }
+  #templateList img { width: 32px; height: 32px; object-fit: contain; background: white; }
+  #templateList span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #templateProperties { margin: 8px 0; }
+  #templateProperties label { margin-top: 4px; }
+  #templateStatus { margin: 6px 0; font-size: 12px; }
   #editTools, .edit-actions, #traceViewSwitch { flex-wrap: wrap; }
   #mirrorControls, #adjustmentControls { margin: 10px 0; padding: 8px; border: 1px solid #374151; border-radius: 6px; }
   #adjustmentControls .slider-row { grid-template-columns: 76px minmax(0, 1fr) 30px; }
@@ -343,7 +356,9 @@
   #libraryPicker[hidden], #libEditor[hidden] { display: none; }
   #libraryPickerBox { width: min(860px, 100%); height: min(620px, 100%); background: #14161a;
       border: 1px solid #2a2e35; border-radius: 10px; display: grid;
-      grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+      grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
+  .lib-pick-search { padding: 8px 14px; }
+  #libPickSearch { width: 100%; }
   #libraryPickerBox header, #libEditorBox header { display: flex; align-items: center; gap: 12px;
       padding: 10px 14px; border-bottom: 1px solid #2a2e35; }
   #libraryPickerBox header .muted, #libEditorBox header .muted { flex: 1; }
@@ -476,6 +491,7 @@
         <button data-tool="eraser" title="Erase back to white">🧽 eraser</button>
         <button data-tool="adjust" title="Adjust contrast, lights, shadows and black/white points">adjust</button>
         <button data-tool="mirror" title="Reflect pixels across a line defined by two points">mirror</button>
+        <button data-tool="template" title="Select, move, rotate or resize line-art templates">templates</button>
       </div>
       <div id="adjustmentControls" hidden>
         <div class="slider-row">
@@ -518,7 +534,7 @@
           <button id="mirrorApply" disabled>Apply mirror</button>
           <button id="mirrorCancel">Clear line</button>
         </div>
-        <div class="muted">Keeps the image size; content outside the edges is clipped.</div>
+        <div class="muted">Expands the image to include content beyond its original edges.</div>
       </div>
       <div class="slider-row">
         <label for="editColor">pen colour</label>
@@ -536,6 +552,26 @@
         <button id="editReset" title="Restore the uploaded image">↺ reset image</button>
       </div>
       <div class="muted" id="editHint">Drag with Pan, Space + drag, or the middle mouse button. Scroll to zoom. Pen and eraser work in Original, Threshold and Overlay.</div>
+
+      <div class="group-title" style="margin-top:14px">Line-art templates</div>
+      <div class="segmented edit-actions">
+        <button id="templateLibrary">+ Add template…</button>
+        <button id="templateUpload" class="ghost">Upload SVG / PNG…</button>
+      </div>
+      <input id="templateFile" type="file" accept=".svg,.png,image/svg+xml,image/png" multiple hidden>
+      <div id="templateList" aria-label="Template layers"></div>
+      <div id="templateProperties" hidden>
+        <div class="row">
+          <label>Center X <input id="templateX" type="number" step="1"></label>
+          <label>Center Y <input id="templateY" type="number" step="1"></label>
+          <label>Width <input id="templateWidth" type="number" min="1" step="1"></label>
+          <label>Height <input id="templateHeight" type="number" min="1" step="1"></label>
+          <label>Rotation (°) <input id="templateRotation" type="number" step="1"></label>
+        </div>
+        <label class="check"><input id="templateAspect" type="checkbox" checked> keep proportions</label>
+        <div class="segmented edit-actions"><button id="templateDelete" class="ghost">Delete template</button></div>
+      </div>
+      <p id="templateStatus" class="muted" role="status">Add line art from a file or the library. Templates stay editable.</p>
 
       <div class="group-title">Trace mode</div>
       <div class="radio-row">
@@ -604,9 +640,11 @@
           <canvas id="traceEdit"></canvas>
           <canvas id="traceMirrorPreview" hidden></canvas>
           <canvas id="traceAdjustmentPreview" hidden></canvas>
+          <canvas id="traceTemplates" hidden></canvas>
           <canvas id="traceThreshold"></canvas>
           <div id="traceSvg"></div>
           <svg id="traceGuides" aria-hidden="true"></svg>
+          <svg id="traceTemplateGuides" aria-hidden="true"></svg>
         </div>
         <div id="traceContextMenu" hidden>
           <div class="menu-head"><span>brush size</span><span class="menu-size-val" id="menuSizeVal"></span></div>
@@ -979,6 +1017,7 @@
       <button class="ghost" id="libPickManage" title="Open the library page to edit or delete entries">manage…</button>
       <button class="ghost" id="libPickClose" title="Close (Esc)">✕</button>
     </header>
+    <div class="lib-pick-search"><input id="libPickSearch" type="search" placeholder="Search library…" aria-label="Search library"></div>
     <div id="libPickGrid" class="project-grid muted">loading the library…</div>
     <input type="file" id="libPickFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
   </div>
@@ -1034,6 +1073,7 @@ import { remapPaint } from './region-paint.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
 import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lineSide, mirrorImage } from './image-editor.js';
+import { LineArtTemplates, TEMPLATE_FILE, templatePoint, templateHandles, hitTemplate, transformTemplate } from './lineart-templates.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
@@ -3218,6 +3258,7 @@ const traceState = {
   svg: '',             // the current traced SVG
   svgFile: null,       // the File built from svg when "Create 3D model" was pressed
   committedSource: null, // image that produced the model drawing
+  committedTemplates: null,
   committedParams: null, // the params that produced the committed SVG
   params: { ...DEFAULT_TRACE_PARAMS },
   view: 'threshold',
@@ -3268,6 +3309,8 @@ function traceApplyView() {
   $('traceThreshold').hidden = v !== 'threshold';
   $('traceMirrorPreview').hidden = !mirrorPreview || v === 'threshold' || v === 'svg';
   $('traceAdjustmentPreview').hidden = !adjustmentPreview || v === 'threshold' || v === 'svg';
+  $('traceTemplates').hidden = !lineArt.items.length || v === 'threshold' || v === 'svg';
+  $('traceTemplateGuides').style.display = editTool === 'template' && v !== 'svg' ? 'block' : 'none';
   $('traceGuides').style.display = editTool === 'mirror' && v !== 'svg' ? 'block' : 'none';
   $('traceSvg').style.display = v === 'svg' || v === 'overlay' ? 'block' : 'none';
   $('traceSvg').style.opacity = v === 'overlay' ? Number($('traceOverlay').value) : 1;
@@ -3320,6 +3363,8 @@ let spacePanning = false;
 let editPointer = null;
 let panStart = null;
 const editHistory = new ImageHistory();
+const lineArt = new LineArtTemplates();
+let templateGesture = null, templateSession = 0, templateRenderedBounds = '';
 let mirrorPoints = [], mirrorSourcePoint = null, mirrorPreview = null;
 let adjustmentPreview = null;
 const ADJUSTMENT_CONTROLS = {
@@ -3334,6 +3379,107 @@ function canvasPixels() {
   const canvas = $('traceEdit');
   return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
 }
+
+function editorSnapshot() {
+  const pixels = canvasPixels();
+  pixels.templates = lineArt.snapshot();
+  pixels.selectedTemplate = lineArt.selected;
+  return pixels;
+}
+
+function renderTemplates() {
+  const canvas = $('traceTemplates'), { width, height, offsetX, offsetY } = traceBounds();
+  canvas.width = width; canvas.height = height;
+  templateRenderedBounds = `${width},${height},${offsetX},${offsetY}`;
+  if (width && height) lineArt.draw(canvas.getContext('2d'), offsetX, offsetY);
+  drawTemplateGuides();
+}
+
+function drawTemplateGuides() {
+  const svg = $('traceTemplateGuides'), layer = lineArt.items.find(item => item.id === lineArt.selected);
+  const { width, height, offsetX, offsetY } = traceBounds();
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', `${-offsetX} ${-offsetY} ${width || 1} ${height || 1}`);
+  if (!layer) return;
+  const radius = 7 / (traceFit().fit * traceView.zoom);
+  const handles = templateHandles(layer, radius * 4);
+  const add = (tag, attrs) => {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    svg.append(element);
+  };
+  add('polygon', { points: handles.slice(0, 4).map(h => h.point.join(',')).join(' '),
+    fill: 'none', stroke: '#38bdf8', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+  const top = templatePoint(layer, 0, -layer.height / 2), rotate = handles[4].point;
+  add('line', { x1: top[0], y1: top[1], x2: rotate[0], y2: rotate[1],
+    stroke: '#38bdf8', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+  for (const handle of handles) add('circle', { cx: handle.point[0], cy: handle.point[1], r: radius,
+    fill: handle.kind === 'rotate' ? '#22c55e' : '#fff', stroke: '#0284c7',
+    'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+}
+
+function updateTemplateControls() {
+  const list = $('templateList'); list.replaceChildren();
+  for (const layer of lineArt.items) {
+    const button = document.createElement('button'); button.classList.toggle('active', layer.id === lineArt.selected);
+    button.setAttribute('aria-pressed', String(layer.id === lineArt.selected));
+    const img = document.createElement('img'); img.src = layer.src; img.alt = '';
+    const name = document.createElement('span'); name.textContent = layer.name;
+    button.append(img, name);
+    button.onclick = () => { lineArt.selected = layer.id; setEditTool('template'); updateTemplateControls(); drawTemplateGuides(); };
+    list.append(button);
+  }
+  const layer = lineArt.items.find(item => item.id === lineArt.selected);
+  $('templateProperties').hidden = !layer;
+  for (const [id, key] of Object.entries(TEMPLATE_FIELDS)) {
+    $(id).value = layer ? String(Math.round(layer[key] * 100) / 100) : '';
+  }
+  $('templateLibrary').disabled = $('templateUpload').disabled = !editLoaded;
+}
+
+const TEMPLATE_FIELDS = { templateX: 'x', templateY: 'y', templateWidth: 'width', templateHeight: 'height', templateRotation: 'rotation' };
+for (const [id, key] of Object.entries(TEMPLATE_FIELDS)) $(id).onchange = () => {
+  const layer = lineArt.items.find(item => item.id === lineArt.selected), value = $(id).valueAsNumber;
+  if (!layer || !Number.isFinite(value) || (['width', 'height'].includes(key) && value < 1)) { updateTemplateControls(); return; }
+  editHistory.remember(editorSnapshot());
+  if ($('templateAspect').checked && ['width', 'height'].includes(key)) {
+    const other = key === 'width' ? 'height' : 'width'; layer[other] *= value / layer[key];
+  }
+  layer[key] = value;
+  updateTemplateControls(); imageEdited();
+};
+
+async function addTemplateFile(file, session = templateSession) {
+  if (!editLoaded || session !== templateSession) return;
+  $('templateStatus').textContent = `Loading ${file.name}…`;
+  try {
+    const asset = await lineArt.read(file);
+    if (!editLoaded || session !== templateSession) return;
+    endEditPointer();
+    editHistory.remember(editorSnapshot());
+    lineArt.add(asset, $('traceEdit').width, $('traceEdit').height);
+    setEditTool('template');
+    updateTemplateControls(); imageEdited();
+    $('templateStatus').textContent = 'Drag to move, drag a corner to resize, or use the green handle to rotate. White stays transparent over the image.';
+  } catch (error) {
+    if (session === templateSession) $('templateStatus').textContent = 'Could not add template: ' + error.message;
+  }
+}
+
+function deleteTemplate() {
+  if (!lineArt.selected || !editLoaded) return;
+  editHistory.remember(editorSnapshot());
+  lineArt.items = lineArt.items.filter(layer => layer.id !== lineArt.selected);
+  lineArt.selected = lineArt.items.at(-1)?.id ?? null;
+  updateTemplateControls(); imageEdited();
+}
+$('templateDelete').onclick = deleteTemplate;
+$('templateLibrary').onclick = () => openPicker('template');
+$('templateUpload').onclick = () => $('templateFile').click();
+$('templateFile').onchange = async (event) => {
+  const files = [...event.target.files], session = templateSession; event.target.value = '';
+  for (const file of files) await addTemplateFile(file, session);
+};
 
 // Cache source pixels and denoising in a worker. Tone changes rebuild the
 // cache; trace sliders reuse it. Full-resolution work stays off the UI thread.
@@ -3377,7 +3523,10 @@ function requestThresholdPreview(pixelsChanged = false) {
         };
       }
       const image = previewDirty ? mirrorPreview ?? canvasPixels() : null;
-      previewWorker.postMessage({ id, image, params: gatherTraceParams(), adjustments: gatherImageAdjustments() });
+      const canvas = $('traceTemplates');
+      const templates = previewDirty ? lineArt.items.length
+        ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null : undefined;
+      previewWorker.postMessage({ id, image, templates, params: gatherTraceParams(), adjustments: gatherImageAdjustments() });
       previewBusy = true;
       previewDirty = false;
     } catch (error) {
@@ -3395,20 +3544,25 @@ function updateEditHistory() {
 function imageEdited() {
   traceState.edited = true;
   traceState.id = null;
+  renderTemplates(); traceApplyView();
   requestThresholdPreview(true);
   updateEditHistory();
   scheduleTrace();
 }
 
 function restoreEdit(direction) {
-  if (!editLoaded || stroking) return;
+  if (!editLoaded || stroking || templateGesture) return;
   clearAdjustments();
-  const image = editHistory[direction](canvasPixels());
+  const image = editHistory[direction](editorSnapshot());
   if (!image) return;
   clearMirror();
+  const resized = $('traceEdit').width !== image.width || $('traceEdit').height !== image.height;
   $('traceEdit').width = image.width; $('traceEdit').height = image.height;
   $('traceEdit').getContext('2d').putImageData(image, 0, 0);
-  applyTraceTransform();
+  lineArt.restore(image.templates ?? [], image.selectedTemplate);
+  updateTemplateControls();
+  if (resized) traceResetView();
+  else applyTraceTransform();
   imageEdited();
 }
 
@@ -3449,7 +3603,7 @@ for (const id of Object.values(ADJUSTMENT_CONTROLS)) {
 $('adjustmentReset').onclick = clearAdjustments;
 $('adjustmentApply').onclick = () => {
   if (!editLoaded || !adjustmentPreview || $('adjustmentApply').disabled) return;
-  editHistory.remember(canvasPixels());
+  editHistory.remember(editorSnapshot());
   $('traceEdit').getContext('2d').putImageData(
     new ImageData(adjustmentPreview.data, adjustmentPreview.width, adjustmentPreview.height), 0, 0);
   clearAdjustments();
@@ -3457,18 +3611,20 @@ $('adjustmentApply').onclick = () => {
 };
 
 function clearMirror() {
+  const resized = mirrorPreview && (mirrorPreview.width !== $('traceEdit').width || mirrorPreview.height !== $('traceEdit').height);
   mirrorPoints = []; mirrorSourcePoint = null; mirrorPreview = null;
   $('mirrorApply').disabled = true;
   $('mirrorHint').textContent = 'Click two points to define the mirror line.';
-  drawMirrorGuides();
+  if (resized) traceResetView();
+  else applyTraceTransform();
   traceApplyView();
   requestThresholdPreview(true);
 }
 
 function drawMirrorGuides() {
-  const svg = $('traceGuides'), canvas = $('traceEdit');
+  const svg = $('traceGuides'), { width, height, offsetX, offsetY } = traceBounds();
   svg.replaceChildren();
-  svg.setAttribute('viewBox', `0 0 ${canvas.width || 1} ${canvas.height || 1}`);
+  svg.setAttribute('viewBox', `${-offsetX} ${-offsetY} ${width || 1} ${height || 1}`);
   const radius = 5 / (traceFit().fit * traceView.zoom);
   const add = (tag, attrs) => {
     const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -3477,7 +3633,7 @@ function drawMirrorGuides() {
   };
   if (mirrorPoints.length === 2) {
     const [a, b] = mirrorPoints, dx = b[0] - a[0], dy = b[1] - a[1];
-    const scale = 2 * Math.hypot(canvas.width, canvas.height) / Math.hypot(dx, dy);
+    const scale = 2 * Math.hypot(width, height) / Math.hypot(dx, dy);
     add('line', { x1: a[0] - dx * scale, y1: a[1] - dy * scale,
       x2: b[0] + dx * scale, y2: b[1] + dy * scale,
       stroke: '#38bdf8', 'stroke-width': 2, 'stroke-dasharray': '7 4', 'vector-effect': 'non-scaling-stroke' });
@@ -3489,6 +3645,7 @@ function drawMirrorGuides() {
 }
 
 function updateMirrorPreview() {
+  const previous = traceBounds();
   mirrorPreview = null;
   if (mirrorPoints.length === 2 && ($('mirrorMode').value === 'flip' || mirrorSourcePoint)) {
     const [a, b] = mirrorPoints;
@@ -3502,7 +3659,10 @@ function updateMirrorPreview() {
     $('mirrorHint').textContent = 'Click the side to keep and copy across the line.';
   }
   $('mirrorApply').disabled = !mirrorPreview;
-  drawMirrorGuides(); traceApplyView(); requestThresholdPreview(true);
+  const { width, height } = traceBounds();
+  if (width !== previous.width || height !== previous.height) traceResetView();
+  else applyTraceTransform();
+  traceApplyView(); requestThresholdPreview(true);
 }
 
 function addMirrorPoint(point) {
@@ -3527,9 +3687,13 @@ $('mirrorMode').onchange = updateMirrorPreview;
 $('mirrorCancel').onclick = clearMirror;
 $('mirrorApply').onclick = () => {
   if (!mirrorPreview || !editLoaded) return;
-  editHistory.remember(canvasPixels());
-  $('traceEdit').getContext('2d').putImageData(
+  editHistory.remember(editorSnapshot());
+  const canvas = $('traceEdit');
+  canvas.width = mirrorPreview.width; canvas.height = mirrorPreview.height;
+  canvas.getContext('2d').putImageData(
     new ImageData(mirrorPreview.data, mirrorPreview.width, mirrorPreview.height), 0, 0);
+  for (const layer of lineArt.items) { layer.x += mirrorPreview.offsetX; layer.y += mirrorPreview.offsetY; }
+  updateTemplateControls();
   clearMirror(); imageEdited();
 };
 $('editUndo').onclick = () => restoreEdit('undo');
@@ -3541,9 +3705,15 @@ $('editRedo').onclick = () => restoreEdit('redo');
 const TRACE_ZOOM_MIN = 0.2, TRACE_ZOOM_MAX = 8;
 const traceView = { zoom: 1, tx: 0, ty: 0 };
 
+/** Preview bounds include the position of the unchanged source canvas. */
+function traceBounds() {
+  const { width, height } = mirrorPreview ?? $('traceEdit');
+  return { width, height, offsetX: mirrorPreview?.offsetX ?? 0, offsetY: mirrorPreview?.offsetY ?? 0 };
+}
+
 /** The "contain" fit of the image inside the viewport, plus its letterbox. */
 function traceFit() {
-  const c = $('traceEdit');
+  const c = traceBounds();
   const vp = $('traceViewport');
   if (!c.width || !c.height || !vp.clientWidth || !vp.clientHeight) {
     return { fit: 1, bx: 0, by: 0 };
@@ -3555,7 +3725,7 @@ function traceFit() {
 /** Size the stage to the fitted image and apply the translate/scale. */
 function applyTraceTransform() {
   const stage = $('traceStage');
-  const c = $('traceEdit');
+  const c = traceBounds();
   if (!traceState.source || !c.width || !c.height) {
     stage.style.width = stage.style.height = '';
     stage.style.transform = '';
@@ -3565,8 +3735,18 @@ function applyTraceTransform() {
   stage.style.width = `${c.width * fit}px`;
   stage.style.height = `${c.height * fit}px`;
   stage.style.transform = `translate(${traceView.tx}px, ${traceView.ty}px) scale(${traceView.zoom})`;
+  // The source raster and its SVG retain their size and position while the
+  // mirror/threshold previews fill the expanded stage.
+  for (const layer of [$('traceEdit'), $('traceSvg')]) {
+    layer.style.left = `${100 * c.offsetX / c.width}%`;
+    layer.style.top = `${100 * c.offsetY / c.height}%`;
+    layer.style.width = `${100 * $('traceEdit').width / c.width}%`;
+    layer.style.height = `${100 * $('traceEdit').height / c.height}%`;
+  }
   $('traceZoomVal').textContent = `${Math.round(traceView.zoom * 100)}%`;
   drawMirrorGuides();
+  if (templateRenderedBounds !== `${c.width},${c.height},${c.offsetX},${c.offsetY}`) renderTemplates();
+  else drawTemplateGuides();
 }
 
 /** Reset the zoom to fit, centring the image in the viewport. */
@@ -3599,7 +3779,7 @@ function loadEditCanvas({ reset = false } = {}) {
     };
     img.onload = () => {
       if (editObjectUrl !== url) { resolve(); return; }
-      if (reset) editHistory.remember(canvasPixels());
+      if (reset) editHistory.remember(editorSnapshot());
       else editHistory.clear();
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
@@ -3608,9 +3788,11 @@ function loadEditCanvas({ reset = false } = {}) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
       editLoaded = true;
+      renderTemplates();
       clearAdjustments();
       clearMirror();
       updateEditHistory();
+      updateTemplateControls();
       if (reset) imageEdited();
       traceResetView();
       resolve();
@@ -3621,13 +3803,20 @@ function loadEditCanvas({ reset = false } = {}) {
 }
 
 /** The image pixels to trace, with display-only previews excluded. */
-async function currentTraceFile() {
+async function currentTraceFile({ includeTemplates = true } = {}) {
   await editCanvasReady;
   if (editLoaded) {
+    let canvas = $('traceEdit');
+    if (includeTemplates && lineArt.items.length) {
+      const composed = document.createElement('canvas');
+      composed.width = canvas.width; composed.height = canvas.height;
+      const ctx = composed.getContext('2d'); ctx.drawImage(canvas, 0, 0); lineArt.draw(ctx);
+      canvas = composed;
+    }
     // Trace the same white-composited pixels as the preview (including image
     // orientation and transparency), without baking in the threshold layer.
     return new Promise((resolve, reject) => {
-      $('traceEdit').toBlob(
+      canvas.toBlob(
         (blob) => blob
           ? resolve(new File([blob], 'edited.png', { type: 'image/png' }))
           : reject(new Error('could not read the edited image')),
@@ -3645,7 +3834,8 @@ function toCanvasPoint(e) {
   // Undo translate+scale first, then the "contain" fit, to reach image pixels.
   const cx = (e.clientX - r.left - $('traceViewport').clientLeft - traceView.tx) / traceView.zoom;
   const cy = (e.clientY - r.top - $('traceViewport').clientTop - traceView.ty) / traceView.zoom;
-  return [cx / fit, cy / fit];
+  const { offsetX, offsetY } = traceBounds();
+  return [cx / fit - offsetX, cy / fit - offsetY];
 }
 
 function drawStrokeTo(p) {
@@ -3683,15 +3873,31 @@ editViewport.addEventListener('pointerdown', (e) => {
     panStart = { x: e.clientX, y: e.clientY, tx: traceView.tx, ty: traceView.ty };
   } else {
     const point = toCanvasPoint(e), canvas = $('traceEdit');
-    if (point[0] < 0 || point[1] < 0 || point[0] >= canvas.width || point[1] >= canvas.height) return;
-    if (eyedropping) { pickColorAt(e); return; }
-    if (editTool === 'mirror') { addMirrorPoint(point); return; }
-    editHistory.remember(canvasPixels());
-    // Invalidate an in-flight SVG as soon as the first pixel changes.
-    invalidateTrace();
-    stroking = true;
-    lastPoint = point;
-    drawStrokeTo(lastPoint);   // a tap leaves a dot
+    if (editTool === 'template' && !eyedropping) {
+      const hit = hitTemplate(lineArt.items, lineArt.selected, point, 7 / (traceFit().fit * traceView.zoom));
+      lineArt.selected = hit?.layer.id ?? null;
+      updateTemplateControls(); drawTemplateGuides();
+      if (!hit) return;
+      editHistory.remember(editorSnapshot());
+      templateGesture = { ...hit, start: point, original: { ...hit.layer } };
+      invalidateTrace();
+    } else {
+      if (editTool === 'mirror' && !eyedropping) {
+        const { width, height, offsetX, offsetY } = traceBounds();
+        if (point[0] >= -offsetX && point[1] >= -offsetY && point[0] < width - offsetX && point[1] < height - offsetY) {
+          addMirrorPoint(point);
+        }
+        return;
+      }
+      if (point[0] < 0 || point[1] < 0 || point[0] >= canvas.width || point[1] >= canvas.height) return;
+      if (eyedropping) { pickColorAt(e); return; }
+      editHistory.remember(editorSnapshot());
+      // Invalidate an in-flight SVG as soon as the first pixel changes.
+      invalidateTrace();
+      stroking = true;
+      lastPoint = point;
+      drawStrokeTo(lastPoint);   // a tap leaves a dot
+    }
   }
   editPointer = e.pointerId;
   editViewport.setPointerCapture(e.pointerId);
@@ -3705,11 +3911,17 @@ editViewport.addEventListener('pointermove', (e) => {
     applyTraceTransform();
   }
   if (stroking) drawStrokeTo(toCanvasPoint(e));
+  if (templateGesture) {
+    Object.assign(templateGesture.layer, transformTemplate(templateGesture.original, templateGesture,
+      toCanvasPoint(e), $('templateAspect').checked));
+    renderTemplates(); updateTemplateControls(); requestThresholdPreview(true);
+  }
 });
 function endEditPointer(e) {
   if (e && e.pointerId !== editPointer) return;
   const pointer = editPointer;
   editPointer = null; panStart = null;
+  if (templateGesture) { templateGesture = null; imageEdited(); }
   finishStroke();
   if (pointer !== null && editViewport.hasPointerCapture(pointer)) editViewport.releasePointerCapture(pointer);
   updateEditCursor();
@@ -3719,7 +3931,7 @@ for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
 }
 
 function resetEdit() {
-  if (!editLoaded || stroking) return;
+  if (!editLoaded || stroking || templateGesture) return;
   invalidateTrace();
   loadEditCanvas({ reset: true });
 }
@@ -3747,7 +3959,7 @@ $('editReset').onclick = resetEdit;
 
 /* Zoom the trace viewport with the wheel, anchored at the cursor. */
 function zoomTrace(factor, mx = editViewport.clientWidth / 2, my = editViewport.clientHeight / 2) {
-  if (!editLoaded || stroking || panStart) return;
+  if (!editLoaded || stroking || panStart || templateGesture) return;
   const next = clamp(traceView.zoom * factor, TRACE_ZOOM_MIN, TRACE_ZOOM_MAX);
   if (next === traceView.zoom) return;
   const cx = (mx - traceView.tx) / traceView.zoom;   // image point under the cursor
@@ -3862,6 +4074,8 @@ window.addEventListener('keydown', (e) => {
   if (currentScreen !== 'trace') return;
   if (e.key === 'Escape') { endEditPointer(); clearMirror(); clearAdjustments(); return; }
   if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (!$('libraryPicker').hidden || !$('libEditor').hidden) return;
+  if (editTool === 'template' && ['Delete', 'Backspace'].includes(e.key)) { e.preventDefault(); deleteTemplate(); return; }
   if (e.key === 'Control') setEyedropping(true);
   if (e.code === 'Space') { e.preventDefault(); spacePanning = true; updateEditCursor(); }
   if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
@@ -3879,6 +4093,8 @@ function clearTrace() {
   endEditPointer();
   editLoaded = false;
   editHistory.clear(); updateEditHistory();
+  templateSession++; lineArt.clear(); updateTemplateControls(); renderTemplates();
+  $('templateStatus').textContent = 'Add line art from a file or the library. Templates stay editable.';
   previewRequest++;
   cancelAnimationFrame(previewFrame);
   previewWorker?.terminate(); previewWorker = null; previewDirty = true; previewBusy = false;
@@ -3888,6 +4104,7 @@ function clearTrace() {
   $('traceMirrorPreview').width = $('traceMirrorPreview').height = 0;
   traceState.original = traceState.resource = null;
   traceState.committedParams = traceState.committedSource = null;
+  traceState.committedTemplates = null;
   traceState.seq++;
   traceController?.abort();
   clearTimeout(traceTimer);
@@ -3999,7 +4216,8 @@ async function useTrace() {
     if (!await runTrace()) return;
     const name = (traceState.name || 'trace').replace(/\.[^.]+$/, '') + '.svg';
     traceState.committedParams = { ...traceState.params };
-    traceState.committedSource = await currentTraceFile();
+    traceState.committedSource = await currentTraceFile({ includeTemplates: false });
+    traceState.committedTemplates = lineArt.snapshot();
     traceState.svgFile = new File([traceState.svg], name, { type: 'image/svg+xml' });
     traceState.svgFile.resource = traceState.resource;
     $('modelTrace').hidden = false;
@@ -4450,7 +4668,7 @@ async function buildProject() {
   if (rebuildFailed || $('go').disabled) throw new Error("Restore valid shape settings before saving; your painting is still kept.");
   const stacked = layers.length > 1;
   const traceFile = picked === traceState.svgFile && traceState.source
-    ? traceState.committedSource ?? await currentTraceFile() : null;
+    ? traceState.committedSource ?? await currentTraceFile({ includeTemplates: false }) : null;
   const project = {
     format: PROJECT_FORMAT,
     version: stacked ? 2 : 1,
@@ -4472,6 +4690,7 @@ async function buildProject() {
         original: { name: (traceState.original ?? traceState.source).name, data: await fileBase64(traceState.original ?? traceState.source) },
         resource: traceState.resource,
         params: traceState.committedParams ?? traceState.params,
+        templates: traceState.committedTemplates ?? lineArt.snapshot(),
       }
       : null,
     profile: profilePicked
@@ -4578,7 +4797,7 @@ function readFaces(faces) {
  * again. The saved SVG is shown straight away — re-tracing happens lazily, on
  * the first parameter change.
  */
-function restoreTrace(project) {
+async function restoreTrace(project) {
   const t = project.trace;
   if (!t?.source?.data) { $('modelTrace').hidden = true; return; }
   const srcFile = new File([fromBase64(t.source.data)], t.source.name || 'source.png');
@@ -4590,6 +4809,8 @@ function restoreTrace(project) {
   traceState.name = t.source.name || '';
   traceState.params = { ...DEFAULT_TRACE_PARAMS, ...(t.params ?? {}) };
   traceState.committedParams = { ...traceState.params };
+  await lineArt.load(t.templates ?? []);
+  traceState.committedTemplates = lineArt.snapshot();
   traceState.svgFile = picked;          // the drawing just set by pickFile
   traceState.view = 'svg';
   try {
@@ -4693,7 +4914,7 @@ async function applyProject(project) {
   slicePreview.restore(project.slices);
   if (profilePicked) profilePicked.resource = project.profile?.resource ?? null;
   if (boundaryPicked) boundaryPicked.resource = project.boundary?.resource ?? null;
-  restoreTrace(project);
+  await restoreTrace(project);
   restoreLayers(project.layers ?? '');
   layers[0].holes = Array.isArray(project.holes) ? project.holes : [];
 
@@ -5709,6 +5930,7 @@ let pickerResources = [];
 let pickerSlot = null;   // 'subject' | 'boundary' | 'stack' | 'profile'
 
 const PICKER_INFO = {
+  template: { title: 'Add a line-art template', note: 'Choose an SVG to place over the image. Each template stays editable.' },
   cusps: {title:'Cusp paths',note:'Uses the same coordinates as the main frame'},
   cuspProfile: {title:'Cusp profile',note:'An independent closed cross-section for the finer paths'},
   subject: {
@@ -5735,7 +5957,11 @@ async function openPicker(slot) {
   $('libPickTitle').textContent = info.title;
   $('libPickNote').textContent = info.note;
   $('libPickNote').style.color = '';
+  $('libPickSearch').value = '';
+  $('libPickFile').accept = slot === 'template' ? '.svg,.png,image/svg+xml,image/png' : '.svg,.dxf,application/dxf,image/svg+xml';
+  $('libPickNew').title = slot === 'template' ? 'Add an SVG or PNG template from a file' : 'Upload a file, keep it in the library, and use it right away';
   $('libraryPicker').hidden = false;
+  $('libPickSearch').focus();
   await refreshLibrary();
   try {
     pickerResources = (await resourceRequest()).resources;
@@ -5750,18 +5976,22 @@ function closePicker() {
 
 function renderPickerGrid() {
   const kind = ['subject', 'stack', 'cusps'].includes(pickerSlot) ? 'subject' : pickerSlot === 'cuspProfile' ? 'profile' : pickerSlot;
-  const resources = pickerResources.filter((r) => r.kind === kind).map((r) => ({
+  const resources = pickerResources.filter((r) => pickerSlot === 'template' || r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
   }));
-  renderGrid($('libPickGrid'), [...resources, ...lib], {
+  const query = $('libPickSearch').value.trim().toLocaleLowerCase();
+  const entries = [...resources, ...lib].filter(entry =>
+    (pickerSlot !== 'template' || entry.kind === 'svg') && entry.name.toLocaleLowerCase().includes(query));
+  renderGrid($('libPickGrid'), entries, {
     onOpen: applyLibraryEntry,
-    empty: 'nothing in the library yet — “+ add file…” to upload one now',
+    empty: query ? 'No matching drawings. Try another search.' : 'No drawings available — “+ add file…” to upload one now.',
   });
 }
 
 /** Feed a chosen library drawing to the slot it was picked for. */
 async function applyFileToSlot(slot, file) {
+  if (slot === 'template') return addTemplateFile(file);
   if (slot === 'cusps' || slot === 'cuspProfile') return setCuspFile(slot, file);
   if (slot === 'subject') return swapSubject(file);
   if (slot === 'boundary') return applyBoundaryFile(file);
@@ -5770,17 +6000,20 @@ async function applyFileToSlot(slot, file) {
 }
 
 async function applyLibraryEntry(entry) {
-  const slot = pickerSlot;
+  const slot = pickerSlot, session = templateSession;
   closePicker();
   try {
-    setStatus(`getting ${entry.name}…`);
+    if (slot === 'template') $('templateStatus').textContent = `Loading ${entry.name}…`;
+    else setStatus(`getting ${entry.name}…`);
     const file = entry.resourceRecord ? await resourceFile(entry.resourceRecord, 'drawing') : await libraryFileFrom(entry);
+    if (slot === 'template') return addTemplateFile(file, session);
     await applyFileToSlot(slot, file);
     if (slot === 'subject' && picked === file && entry.resourceRecord?.files.original) {
       await restoreResourceTrace(entry.resourceRecord, file);
     }
   } catch (e) {
-    setStatus(String(e.message ?? e), true);
+    if (slot === 'template') $('templateStatus').textContent = String(e.message ?? e);
+    else setStatus(String(e.message ?? e), true);
   }
 }
 
@@ -5805,6 +6038,7 @@ async function swapSubject(file) {
 /** Upload a brand-new file from the picker, then put it straight to work. */
 async function pickerAddFile(file) {
   const slot = pickerSlot;
+  if (slot === 'template') { closePicker(); await addTemplateFile(file); return; }
   try {
     await fetch('/api/library', { method: 'POST', body: uploadForm(file, file.name) })
       .then(async (res) => {
@@ -6025,19 +6259,20 @@ $('boundaryLibrary').onclick = () => openPicker('boundary');
 $('profileLibrary').onclick = () => openPicker('profile');
 
 $('libPickClose').onclick = closePicker;
+$('libPickSearch').oninput = renderPickerGrid;
 $('libraryPicker').addEventListener('pointerdown', (e) => {
   if (e.target === $('libraryPicker')) closePicker();
 });
 $('libPickManage').onclick = () => {
   closePicker();
-  libReturn = currentScreen === 'model' ? 'model' : 'start';
+  libReturn = currentScreen;
   showScreen('library');
 };
 $('libPickNew').onclick = () => $('libPickFile').click();
 $('libPickFile').onchange = (e) => {
   const file = e.target.files[0];
   e.target.value = '';
-  if (file && DRAWING.test(file.name)) pickerAddFile(file);
+  if (file && (pickerSlot === 'template' ? TEMPLATE_FILE : DRAWING).test(file.name)) pickerAddFile(file);
 };
 
 $('libEditClose').onclick = closeLibEditor;
@@ -6200,8 +6435,11 @@ async function restoreResourceTrace(record, drawing) {
   traceState.original = original; traceState.source = traceState.committedSource = edited;
   traceState.resource = { id: record.id, revision: record.revision, name: record.name };
   traceState.name = record.name; traceState.svg = svg; traceState.svgFile = drawing;
-  traceState.params = { ...DEFAULT_TRACE_PARAMS, ...record.trace };
+  const { templates = [], ...params } = record.trace ?? {};
+  traceState.params = { ...DEFAULT_TRACE_PARAMS, ...params };
   traceState.committedParams = { ...traceState.params };
+  await lineArt.load(templates);
+  traceState.committedTemplates = lineArt.snapshot();
   populateTrace(); await editCanvasReady; $('traceUse').disabled = false; $('modelTrace').hidden = !drawing;
 }
 $('resourceImport').onclick = async () => {
@@ -6231,9 +6469,9 @@ $('savePattern').onclick = async () => {
     if (!await runTrace()) return;
     const form = new FormData(); form.set('name', name); form.set('kind', 'pattern');
     form.set('original', traceState.original ?? traceState.source);
-    form.set('edited', await currentTraceFile());
+    form.set('edited', await currentTraceFile({ includeTemplates: false }));
     form.set('drawing', new File([traceState.svg], 'pattern.svg', { type: 'image/svg+xml' }));
-    form.set('trace', JSON.stringify(traceState.params));
+    form.set('trace', JSON.stringify({ ...traceState.params, templates: lineArt.snapshot() }));
     const record = await resourceRequest(existing ? '/' + existing.id : '', { method: existing ? 'PUT' : 'POST', body: form });
     traceState.resource = { id: record.id, revision: record.revision, name: record.name };
     traceState.name = record.name;

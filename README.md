@@ -74,10 +74,25 @@ in saved subjects and projects; **reset image** restores the uploaded original.
 Choose **mirror**, then click two distinct points to define a mirror line.
 With **Copy one side**, click the side to keep and copy across the line;
 **Flip the whole image** reflects both sides. Inspect the preview, then
-**Apply mirror**, or **Clear line** / Escape to discard it. The image size
-stays fixed: content beyond its edges is clipped and uncovered pixels become
-white. Applied edits are included when tracing, saving a subject or creating
-a model.
+**Apply mirror**, or **Clear line** / Escape to discard it. The image expands
+to include mirrored content beyond its original edges; uncovered pixels become
+white. The preview shows the expanded image, and undo restores its previous size.
+Applied edits are included when tracing, saving a subject or creating a model.
+
+**Line-art templates** remain separate, editable layers over the image. Use
+**Add template…** to search the library with thumbnails (including SVGs traced
+from photos), or **Upload SVG / PNG…** to add files. Select a layer in the list
+or with the **templates** tool, drag to move it, drag a corner to resize, and
+use the green handle to rotate. The position, dimensions and rotation can also
+be entered directly; **keep proportions** controls resizing. **Delete template**
+or Delete/Backspace removes the selected layer, and undo/redo covers template edits.
+
+White template backgrounds let the image show through. Original and Threshold
+views preview the combined result; SVG generation temporarily composites the
+layers onto a copy of the painted image. Painting, adjustments and mirroring
+keep the templates separate. Saved subjects and projects embed the template
+files and placements so they can still be moved after reopening, even if the
+library entry changes or is deleted.
 
 **3D model** — the relief builder: walls, sizes, palette, painting, holes,
 boundary, and export. A **← Start** button returns to the landing screen. When
@@ -135,7 +150,7 @@ and removed after each request.
 `deno task dev` restarts on file changes, `deno task check` type-checks, and
 `deno task setup` prepares `.venv` without starting the server.
 `deno task test:editor` checks threshold previews against the Python tracer,
-tone adjustments and preview caching, arbitrary mirror lines, clipping and
+tone adjustments and preview caching, arbitrary mirror lines, canvas expansion and
 undo/redo (requires the prepared `.venv`).
 
 Open the page and pick a starting point on the **Start** screen (trace a photo,

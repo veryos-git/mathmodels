@@ -11,6 +11,7 @@ type Project = {
     source?: Embedded;
     original?: Embedded;
     params?: Record<string, unknown>;
+    templates?: unknown[];
   };
 };
 function file(value: Embedded | undefined): File | null {
@@ -98,7 +99,10 @@ export async function importProjectResources(
               const edited = file(trace.source);
               if (original) form.set("original", original);
               if (edited) form.set("edited", edited);
-              form.set("trace", JSON.stringify(trace.params ?? {}));
+              form.set("trace", JSON.stringify({
+                ...trace.params,
+                ...(trace.templates ? { templates: trace.templates } : {}),
+              }));
             }
             await store.save(form, id);
             result.added++;
