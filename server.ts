@@ -2,6 +2,8 @@ import { FilamentStore } from "./storage/filaments.ts";
 import { importProjectResources } from "./storage/import_projects.ts";
 import { ResourceStore, atomicWrite } from "./storage/resources.ts";
 import { PYTHON } from "./tools/python.ts";
+import { cylinderFlags, cylinderMeshes, cylinderSettings, readThreadedDefaults } from "./tools/cylinder.ts";
+import { findOpenScad } from "./tools/openscad.ts";
 /// Deno web server: upload a DXF or SVG, get back a relief STL.
 /// The heavy lifting is done by tools/dxf2stl.py (ezdxf + svgelements +
 /// shapely + trimesh).
@@ -149,8 +151,8 @@ class HttpError extends Error {
 }
 
 /** Run the converter. Resolves with its JSON stdout, throws HttpError on failure. */
-async function runScript(args: string[]): Promise<Record<string, unknown>> {
-  const cmd = new Deno.Command(PYTHON, { args: [SCRIPT, ...args], stdout: "piped", stderr: "piped" });
+async function runScript(args: string[], script = SCRIPT): Promise<Record<string, unknown>> {
+  const cmd = new Deno.Command(PYTHON, { args: [script, ...args], stdout: "piped", stderr: "piped" });
   const { code, stdout, stderr } = await cmd.output();
   const err = new TextDecoder().decode(stderr).trim();
   if (code !== 0) {
@@ -294,6 +296,49 @@ function handleRegions(req: Request): Promise<Response> {
   });
 }
 
+/** Shells are cached separately from the artwork, which stays editable locally. */
+function handleCylinder(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    try {
+      const settings = cylinderSettings(await req.json());
+      const meshes = await cylinderMeshes(settings, dir);
+      return Response.json({ settings, body: meshes.body.toBase64(), lid: meshes.lid?.toBase64() });
+    } catch (error) {
+      throw new HttpError(422, error instanceof Error ? error.message : String(error));
+    }
+  });
+}
+
+function handleLidArt(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    const { form, paths, profilePath } = await takeUpload(req, dir);
+    if (!profilePath) throw new HttpError(400, "Load a sweep profile to use a lid-top sketch");
+    let settings;
+    try { settings = cylinderSettings(JSON.parse(String(form.get("cylinder")))); }
+    catch (error) { throw new HttpError(422, error instanceof Error ? error.message : String(error)); }
+    if (!settings.lid) throw new HttpError(422, "A lid-top sketch requires Add lid");
+    const config = `${dir}/lid-settings.json`, output = `${dir}/lid-art.stl`;
+    await Deno.writeTextFile(config, JSON.stringify(settings));
+    const info = await runScript([
+      paths[0], profilePath, config, output,
+      ...numericFlags(form, { profileScale: "--profile-scale", sagitta: "--sagitta" }),
+    ], "tools/lid_art.py");
+    return Response.json({ ...info, stl: (await Deno.readFile(output)).toBase64() });
+  });
+}
+
+async function takeCylinder(form: FormData, dir: string, profilePath: string | null) {
+  try {
+    const lidSketch = await takeExtra(form, "lidSketch", "lid-top sketch", dir);
+    if (lidSketch && (!form.has("cylinder") || !profilePath)) {
+      throw new Error("A lid-top sketch requires cylinder mode and a sweep profile");
+    }
+    return [...await cylinderFlags(form.get("cylinder"), dir),
+      ...(lidSketch ? ["--lid-sketch", lidSketch] : [])];
+  }
+  catch (error) { throw new HttpError(422, error instanceof Error ? error.message : String(error)); }
+}
+
 /**
  * Write a per-region JSON map from the form into the scratch dir, and return
  * the flag pair the converter needs for it.
@@ -358,6 +403,7 @@ async function layerSpecs(
 function handleConvert(req: Request, slice = false): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, file, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    if (slice && form.has("cylinder")) throw new HttpError(400, "Slice SVG export is available in flat mode. Use STL for a cylinder.");
     const height = form.get("sliceHeight");
     if (slice && (typeof height !== "string" || height.trim() === "" ||
       !Number.isFinite(Number(height)) || Number(height) < 0)) {
@@ -378,6 +424,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await layerSpecs(form, dir, paths),
       ...(slice ? ["--slice-height", String(height)] : []),
+      ...await takeCylinder(form, dir, profilePath),
     ];
 
     const stats = await runScript(args);
@@ -423,6 +470,7 @@ function handleExport(req: Request): Promise<Response> {
       ...stacks,
       ...groups,
       ...await layerSpecs(form, dir, paths),
+      ...await takeCylinder(form, dir, profilePath),
     ]);
 
     const listed = (stats.files ?? []) as Array<Record<string, unknown>>;
@@ -1109,6 +1157,7 @@ async function deleteLibrary(name: string): Promise<Response> {
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    if (form.has("cylinder")) throw new HttpError(400, "Colour-variation 3MF export is available in flat mode. Use cylinder STL exports.");
     const output = `${dir}/variations`;
     // Legacy callers may specify one pattern; the dialog sends slicerOptions.
     const patterns = form.get("patterns");
@@ -1171,6 +1220,14 @@ async function calibrationCoupon(req: Request): Promise<Response> {
   });
 }
 
+try {
+  console.log(`Cylinder shell mode ready: ${await findOpenScad()}`);
+} catch (error) {
+  console.warn(
+    `Cylinder shell mode unavailable: ${error instanceof Error ? error.message : error} Flat mode is available.`,
+  );
+}
+
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
   try {
@@ -1190,6 +1247,12 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/inspect" && req.method === "POST") return await handleInspect(req);
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);
+    if (url.pathname === "/api/cylinder/defaults" && req.method === "GET") {
+      const { defaults, design, parameters } = readThreadedDefaults();
+      return Response.json({ defaults, design, automaticNeck: parameters.neck_height === 0 });
+    }
+    if (url.pathname === "/api/cylinder" && req.method === "POST") return await handleCylinder(req);
+    if (url.pathname === "/api/cylinder/lid-art" && req.method === "POST") return await handleLidArt(req);
     if (url.pathname === "/api/convert" && req.method === "POST") return await handleConvert(req);
     if (url.pathname === "/api/slice" && req.method === "POST") return await handleConvert(req, true);
     if (url.pathname === "/api/export" && req.method === "POST") return await handleExport(req);

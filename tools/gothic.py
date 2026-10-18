@@ -109,6 +109,55 @@ def solid_union(meshes):
     return trimesh.util.concatenate(parts)
 
 
+def segmented_profile_sweep(profile, chains, miter_limit=4.0, overlap=.001):
+    """Union closed, mitre-cut prisms for tightly turning profile paths.
+
+    Joining rings into one long shell can fold its inner surface through
+    itself when the profile is wider than a bend. Individual prisms remain
+    solids there, so the boolean removes the overlapping inner surfaces.
+    A micron of overlap at internal joints avoids zero-thickness contacts.
+    Return a Manifold so placement can precede the STL precision check.
+    """
+    contours = [list(profile.exterior.coords)[:-1]] + [list(r.coords)[:-1] for r in profile.interiors]
+    section = manifold3d.CrossSection(contours, manifold3d.FillRule.EvenOdd)
+    margin = max(abs(profile.bounds[0]), abs(profile.bounds[2]))*miter_limit + overlap
+    solids = []
+    for chain in chains:
+        if len(chain) < 2:
+            continue
+        points, normals, closed = path_frames(chain, miter_limit)
+        for i in range(len(points) if closed else len(points)-1):
+            j = (i+1) % len(points)
+            direction = points[j]-points[i]
+            length = np.linalg.norm(direction)
+            if length < 1e-10:
+                continue
+            direction /= length
+            normal = np.array([-direction[1], direction[0]])
+            # The ring sweep shortens capped mitres. A prism cut cannot
+            # reproduce that shortened ring without changing its section.
+            if any(abs(normals[v] @ normal-1) > 1e-6 for v in (i, j)):
+                raise ValueError("The profile is too wide at a sharp lid-sketch corner; soften the corner or reduce the profile width")
+            origin = points[i]-direction*margin
+            solid = section.extrude(length+2*margin).transform([
+                [normal[0], 0, direction[0], origin[0]],
+                [normal[1], 0, direction[1], origin[1]],
+                [0, 1, 0, 0]])
+            for v, start in ((i, True), (j, False)):
+                cut = np.array([normals[v, 1], -normals[v, 0]])
+                if cut @ direction < 0:
+                    cut = -cut
+                cut /= np.linalg.norm(cut)
+                if not start:
+                    cut = -cut
+                internal = closed or v not in (0, len(points)-1)
+                solid = solid.trim_by_plane([*cut, 0], cut @ points[v]-(overlap if internal else 0))
+            solids.append(solid)
+    if not solids:
+        raise ValueError("The lid-top sketch has no drawable paths")
+    return manifold3d.Manifold.batch_boolean(solids, manifold3d.OpType.Add).simplify(.0001)
+
+
 def revolved_ending(profile, point, normal, outward, angle=90, side=1, segments=24):
     """Revolve an end cross-section about its side's vertical axis.
 

@@ -29,6 +29,13 @@
   input[type=number]:focus-visible, button:focus-visible, a:focus-visible,
   #drop:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #surfaceMode, #cylinderSizing { width: 100%; padding: 8px; border: 1px solid #2a2e35;
+                 border-radius: 6px; background: #1d2127; color: #ddd; }
+  #cylinderSuggestions { max-height: 280px; overflow-y: auto; display: grid; gap: 6px; }
+  #cylinderSuggestions button { text-align: left; margin: 0; padding: 8px; font-size: 12px; }
+  #cylinderSuggestions button[aria-pressed=true] { border-color: #60a5fa; background: #243a53; }
+  #cylinderSuggestions small { display: block; margin-top: 4px; color: #b6c1d0; }
+  #cylinderOptions label[hidden] { display: none; }
 
   /* file drop zone */
   #drop { margin-top: 4px; padding: 18px 12px; border: 1px dashed #3a4049; border-radius: 8px;
@@ -769,6 +776,30 @@
 
   <fieldset id="sizeBox">
     <legend>size &amp; walls</legend>
+    <label for="surfaceMode">model surface</label>
+    <select id="surfaceMode"><option value="flat">Flat relief</option><option value="cylinder">Cylinder shell</option></select>
+    <div id="cylinderOptions" hidden>
+      <div class="row"><label>Desired diameter (mm)<input id="cylinderDiameter" type="number" value="60" min="10" max="500" step="1"></label><label>Desired container height (mm)<input id="cylinderHeight" type="number" value="60" min="5" max="500" step="1"></label></div>
+      <label for="cylinderSizing">Artwork sizing</label>
+      <select id="cylinderSizing"><option value="proportional">Keep proportions · allow uniform scaling</option><option value="original">Keep original size · repeat only</option><option value="stretch">Stretch to exact dimensions (legacy)</option></select>
+      <p id="cylinderFitSummary" class="muted" aria-live="polite">Generate 3D to calculate size suggestions.</p>
+      <div id="cylinderSuggestions" role="group" aria-label="Suggested cylinder sizes"></div>
+      <div class="row"><label title="Minimum wall thickness; screw lids use a smooth neck and a short threaded band">Shell thickness (mm)<input id="cylinderThickness" type="number" value="2.4" min="0.4" step="0.1"></label><label>Bottom thickness (mm)<input id="cylinderBottom" type="number" value="2.4" min="0.4" step="0.1"></label></div>
+      <label class="check"><input id="cylinderLid" type="checkbox"> Add lid</label>
+      <div id="cylinderLidOptions" hidden>
+        <label class="check"><input id="cylinderThreaded" type="checkbox" checked> Screw thread</label>
+        <p id="cylinderThreadDefaults" class="muted" hidden></p>
+        <div class="row"><label>Lid top (mm)<input id="cylinderLidTop" type="number" value="2.4" min="0.4" step="0.1"></label><label>Neck height (mm)<input id="cylinderNeck" type="number" value="6" min="0.4" step="0.5"></label></div>
+        <div class="row"><label>Thread pitch (mm)<input id="cylinderPitch" type="number" value="1" min="0.5" max="5" step="0.1"></label><label>Radial clearance (mm)<input id="cylinderClearance" type="number" value="0.15" min="0.01" step="0.01"></label></div>
+        <label>Artwork gap at lid seam (mm)<input id="cylinderSeamGap" type="number" value="0.2" min="0.01" max="2" step="0.05"></label>
+        <label>Lid-top sketch (optional)</label>
+        <div class="row"><button type="button" class="ghost" id="lidSketchPick">Upload sketch…</button><button type="button" class="ghost" id="lidSketchLibrary">From library…</button></div>
+        <input type="file" id="lidSketchFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
+        <div class="seed-row"><span id="lidSketchName" class="muted">No lid-top sketch</span><button type="button" class="ghost" id="lidSketchClear" hidden aria-label="Remove lid-top sketch">✕</button></div>
+        <p id="lidSketchNote" class="muted">Fits a separate sketch to the circular lid, then sweeps it with the current profile. The profile's section stays unchanged.</p>
+      </div>
+      <p class="muted">Suggestions are ranked by closeness to your desired diameter and height. The artwork can repeat around the cylinder (X) and up its height (Y), with up to 12 repeats each and 64 copies total. Each copy shares its painting. Relief depths stay in mm. The lid seam splits the artwork.</p>
+    </div>
     <div class="row">
       <div><label for="wallWidth">wall width (mm)</label>
         <input type="number" id="wallWidth" value="1.0" step="0.1" min="0.1"></div>
@@ -908,7 +939,9 @@
     <button id="exportZip" hidden title="One STL per colour, plus the walls">Export STLs by colour</button>
     <button id="exportBambu" hidden>Download .3mf (BambuStudio)</button>
     <button id="export3mf" hidden>Download .3mf (Snapmaker Orca)</button>
-    <div class="muted">Choose colour variations before downloading. Includes single hue, frame only, black frame + one hue, and the flat silhouette plate.</div>
+    <div id="flatExportNote" class="muted">Choose colour variations before downloading. Includes single hue, frame only, black frame + one hue, and the flat silhouette plate.</div>
+    <p id="cylinderExportNote" class="muted" hidden>Cylinder exports use STL. Download STL joins the relief to each shell. Colour STLs keep body and lid parts registered; import each part's files together. 3MF variations and CNC slices are available in flat mode.</p>
+    <div id="flatSlices">
     <hr>
     <strong>CNC slices</strong>
     <p id="sliceRange" class="muted"></p>
@@ -917,6 +950,7 @@
     <button id="exportSlices" hidden>Download all slice SVGs</button>
     <p class="muted">Each slice has its own color. Edit its height to move the matching plane in the 3D preview. Turn off other planes to inspect one slice.</p>
     <div class="muted">Horizontal cross-section, full size in mm, with holes and closed cutting outlines. All slices share the same canvas for alignment. For 3 mm sheets, sample at 1.5, 4.5, 7.5 mm… below the model top. Apply cutter compensation in your CNC software.</div>
+    </div>
   </fieldset>
 
   <div id="status"></div>
@@ -1078,6 +1112,7 @@ import { LineArtTemplates, TEMPLATE_FILE, templatePoint, templateHandles, templa
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { cylinderDimensions, cylinderFit, cylinderSuggestions, wrapCylinderTriangles } from './cylinder.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1424,6 +1459,186 @@ let hovered = null;
 let wireframe = false;
 let topLocked = false;
 let holeMode = false;
+let cylinderContext = null;
+let cylinderShell = null;
+let cylinderFlatBounds = null;
+let cylinderAppliedFit = null;
+let cylinderChoice = null;
+let lidSketchPicked = null;
+let lidSketchRevision = 0;
+let lidArtInfo = null;
+const cylinderDefaultsResponse = await fetch('/api/cylinder/defaults');
+if (!cylinderDefaultsResponse.ok) throw new Error('Could not load cylinder design defaults');
+const cylinderDesign = await cylinderDefaultsResponse.json();
+const cylinderDefaults = cylinderDesign.defaults;
+for (const [key,value] of Object.entries(cylinderDefaults)) {
+  const control=$('cylinder'+key[0].toUpperCase()+key.slice(1));
+  if(typeof value==='boolean')control.checked=value;else control.value=value;
+}
+
+const cylinderEnabled = () => $('surfaceMode').value === 'cylinder';
+const cylinderControl = key => $('cylinder'+key[0].toUpperCase()+key.slice(1));
+function readCylinderTargets() {
+  const c=Object.fromEntries(Object.entries(cylinderDefaults).map(([key,value]) =>
+    [key, typeof value === 'boolean' ? cylinderControl(key).checked : Number(cylinderControl(key).value)]));
+  if(c.lid&&c.threaded)Object.assign(c,{
+    bottom:c.thickness,lidTop:c.thickness,
+    neck:cylinderDesign.automaticNeck?cylinderDesign.design.lidHeight-c.thickness-cylinderDesign.design.rimClearance:cylinderDefaults.neck,
+    pitch:cylinderDefaults.pitch,clearance:cylinderDefaults.clearance,threadedDesign:cylinderDesign.design,
+  });
+  return c;
+}
+function readCylinderSettings() {
+  const target=readCylinderTargets(), fit=cylinderAppliedFit;
+  return {...target, diameter:fit?.diameter??target.diameter, height:fit?.height??target.height,
+    repeatX:fit?.repeatX??1, repeatY:fit?.repeatY??1};
+}
+function cylinderInputSnapshot() {
+  return JSON.stringify(cylinderEnabled()?{target:readCylinderTargets(),mode:$('cylinderSizing').value,choice:cylinderChoice,
+    lidSketch:lidSketchRevision,profile:profileRevision,profileScale:$('profileScale').value,sagitta:$('sagitta').value}:null);
+}
+function updateCylinderFits() {
+  const list=$('cylinderSuggestions'), summary=$('cylinderFitSummary');
+  list.replaceChildren();
+  cylinderAppliedFit=null;
+  if(!cylinderFlatBounds) { summary.textContent='Generate 3D to calculate size suggestions.'; return; }
+  const target=readCylinderTargets(), mode=$('cylinderSizing').value;
+  if(mode==='stretch') {
+    cylinderAppliedFit={...target,repeatX:1,repeatY:1};
+    summary.textContent=`Applied: Ø ${target.diameter.toFixed(2)} × ${target.height.toFixed(2)} mm. Width and height scale independently in this legacy mode.`
+      +(target.lid?` Assembled height: ${cylinderDimensions(target).height.toFixed(2)} mm.`:'');
+    return;
+  }
+  const fits=cylinderSuggestions(cylinderFlatBounds,target,mode);
+  const chosen=cylinderChoice?cylinderFit(cylinderFlatBounds,target,...cylinderChoice,mode):null;
+  cylinderAppliedFit=chosen??fits[0]??null;
+  if(!cylinderAppliedFit) { summary.textContent='No printable size fits these settings. Adjust the desired size or shell dimensions.'; return; }
+  if(chosen&&!fits.some(f=>f.repeatX===chosen.repeatX&&f.repeatY===chosen.repeatY))fits.push(chosen);
+  const active=cylinderAppliedFit;
+  summary.textContent=`Applied: Ø ${active.diameter.toFixed(2)} × ${active.height.toFixed(2)} mm · ${active.repeatX} around × ${active.repeatY} up · ${(active.scale*100).toFixed(1)}% artwork scale.`
+    +(target.lid?` Assembled height: ${cylinderDimensions({...target,...active}).height.toFixed(2)} mm.`:'');
+  for(const [i,fit] of fits.entries()) {
+    const button=document.createElement('button'); button.type='button'; button.className='ghost';
+    button.setAttribute('aria-pressed',String(fit.repeatX===active.repeatX&&fit.repeatY===active.repeatY));
+    const delta=(actual,wanted)=>`${actual>=wanted?'+':''}${(actual-wanted).toFixed(2)}`;
+    button.textContent=`${i===0?'Closest · ':''}Ø ${fit.diameter.toFixed(2)} × ${fit.height.toFixed(2)} mm`;
+    const detail=document.createElement('small');
+    detail.textContent=`${fit.repeatX} around × ${fit.repeatY} up · ${(fit.scale*100).toFixed(1)}% scale · Δ ${delta(fit.diameter,target.diameter)} / ${delta(fit.height,target.height)} mm`;
+    button.append(detail);
+    button.onclick=()=>{ cylinderChoice=[fit.repeatX,fit.repeatY]; updateCylinderFits(); if(!$('go').disabled)refit('Cylinder size applied — your painting is kept'); };
+    list.append(button);
+  }
+}
+function restoreCylinder(saved) {
+  lidSketchPicked=null; lidSketchRevision++; lidArtInfo=null;
+  lidSketchUI();
+  cylinderAppliedFit=null;
+  cylinderFlatBounds=null;
+  cylinderChoice=saved?.fit?[saved.repeatX??1,saved.repeatY??1]:null;
+  $('cylinderSizing').value=saved?(saved.fit?.mode??'stretch'):'proportional';
+  $('surfaceMode').value = saved ? 'cylinder' : 'flat';
+  for (const [key,value] of Object.entries(cylinderDefaults)) {
+    const control = cylinderControl(key), next = saved?.fit?.[key] ?? saved?.[key] ?? value;
+    if (typeof value === 'boolean') control.checked = next === true;
+    else control.value = next;
+  }
+  updateCylinderFits();
+  cylinderUI();
+}
+function cylinderUI() {
+  const enabled = cylinderEnabled();
+  $('cylinderOptions').hidden = !enabled;
+  $('cylinderLidOptions').hidden = !$('cylinderLid').checked;
+  $('cylinderPitch').disabled = !$('cylinderThreaded').checked;
+  const c=readCylinderTargets(), screw=c.lid&&c.threaded;
+  for(const key of ['bottom','lidTop','neck','pitch','clearance'])cylinderControl(key).closest('label').hidden=screw;
+  $('cylinderThreadDefaults').hidden=!screw;
+  if(screw)$('cylinderThreadDefaults').textContent=`Lid ${c.threadedDesign.lidHeight} mm high · neck ${c.neck.toFixed(2)} mm · thread pitch ${c.pitch} mm. Thread fit and chamfers use the container design defaults. Bottom and lid top match the shell thickness.`;
+  for (const id of ['exportBambu','export3mf']) $(id).hidden = enabled || !baseModel();
+  $('flatExportNote').hidden = $('flatSlices').hidden = enabled;
+  $('cylinderExportNote').hidden = !enabled;
+  $('holeBox').hidden = enabled || !baseModel();
+  if (enabled) setHoleMode(false);
+  lidSketchUI();
+}
+function lidSketchUI() {
+  $('lidSketchName').textContent=lidSketchPicked?.name??'No lid-top sketch';
+  $('lidSketchClear').hidden=!lidSketchPicked;
+  $('lidSketchNote').textContent=lidSketchPicked&&!profilePicked?'Load a sweep profile to build this lid-top sketch.':
+    lidArtInfo?`Fitted to Ø ${lidArtInfo.diameter.toFixed(2)} mm · profile ${lidArtInfo.profileWidth.toFixed(2)} mm wide × ${lidArtInfo.profileHeight.toFixed(2)} mm high. Decorated lids export with the artwork facing up.`:
+    'Fits the sketch proportionally to the circular lid, allowing for the current profile width. The profile section stays unchanged.';
+}
+async function applyLidSketchFile(file) {
+  if(file&&!DRAWING.test(file.name))throw new Error('The lid-top sketch must be a .dxf or .svg file');
+  lidSketchPicked=file; lidSketchRevision++; lidArtInfo=null; lidSketchUI();
+  if(file)libraryRemember(file);
+  if(!$('go').disabled)await refit(file?'Lid-top sketch updated — your painting is kept':'Lid-top sketch removed');
+}
+$('lidSketchPick').onclick=()=>$('lidSketchFile').click();
+$('lidSketchFile').onchange=e=>{
+  const file=e.target.files[0]; e.target.value='';
+  if(file)applyLidSketchFile(file).catch(error=>setStatus(error.message,true));
+};
+$('lidSketchClear').onclick=()=>applyLidSketchFile(null).catch(error=>setStatus(error.message,true));
+function clearCylinderPreview() {
+  cylinderContext = null;
+  lidArtInfo=null;
+  if (cylinderShell) {
+    cylinderShell.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    group.remove(cylinderShell); cylinderShell = null;
+  }
+}
+function disposeWrapped(mesh) {
+  if (mesh.userData.cylinderWrapped) mesh.geometry.dispose();
+}
+function wrapPreviewMesh(mesh, layer) {
+  if (!cylinderContext || mesh.userData.cylinderWrapped) return;
+  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const attribute = source.getAttribute('position');
+  if (!attribute?.count) { if (source !== mesh.geometry) source.dispose(); return; }
+  const positions = new Float64Array(attribute.count*3);
+  for (let i=0;i<attribute.count;i++) {
+    positions[3*i]=attribute.getX(i);
+    positions[3*i+1]=attribute.getY(i);
+    positions[3*i+2]=attribute.getZ(i)*mesh.scale.z+mesh.position.z+layer.zBase;
+  }
+  if (source !== mesh.geometry) source.dispose();
+  const parts = wrapCylinderTriangles(positions, cylinderContext.bounds, cylinderContext.settings);
+  const merged = new Float32Array(parts.body.length+parts.lid.length);
+  merged.set(parts.body); merged.set(parts.lid,parts.body.length);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(merged,3));
+  geometry.computeVertexNormals();
+  mesh.geometry=geometry; mesh.scale.z=1; mesh.position.z=0;
+  mesh.userData.cylinderWrapped=true;
+}
+function buildCylinderPreview(shell, lidArt = null) {
+  const box=new THREE.Box3().setFromObject(group);
+  cylinderContext={ settings:shell.settings, bounds:[box.min.x,box.min.y,box.max.x,box.max.y] };
+  for(const layer of layers) {
+    layer.group.position.z=0;
+    for(const mesh of [...layer.wallMeshes,...layer.regionMeshes.flat()]) wrapPreviewMesh(mesh,layer);
+    if(layer.holeMarkers)layer.holeMarkers.visible=false;
+  }
+  cylinderShell=new THREE.Group();
+  for(const part of ['body','lid']) {
+    if(!shell[part])continue;
+    const geometry=new STLLoader().parse(fromBase64(shell[part]).buffer);
+    const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:0x687582,roughness:0.8,wireframe}));
+    mesh.userData.cylinderShell=true;
+    cylinderShell.add(mesh);
+  }
+  if(lidArt) {
+    const geometry=new STLLoader().parse(fromBase64(lidArt.stl).buffer);
+    const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({
+      color:$('workflowMode').value==='gothic'?0xb9c4d2:0x2b2f36,metalness:0.1,roughness:0.8,wireframe}));
+    mesh.userData.cylinderShell=true; mesh.userData.lidArtwork=true;
+    cylinderShell.add(mesh); lidArtInfo=lidArt;
+  }
+  group.add(cylinderShell);
+  cylinderUI();
+  frameModel();
+}
 
 /** The base layer's model — the palette range lives on every layer alike. */
 const baseModel = () => layers[0]?.model ?? null;
@@ -1492,9 +1707,9 @@ function unitPrism(parts) {
 function disposeLayer(l) {
   l.group.clear();
   for (const meshes of l.regionMeshes) {
-    for (const m of meshes) m.material.dispose();
+    for (const m of meshes) { disposeWrapped(m); m.material.dispose(); }
   }
-  for (const m of l.wallMeshes) m.material.dispose();
+  for (const m of l.wallMeshes) { disposeWrapped(m); m.material.dispose(); }
   for (const g of l.regionGeom) g.dispose();
   for (const steps of l.stepGeom) for (const g of steps ?? []) g.dispose();
   for (const g of l.wallGeom) g.dispose();
@@ -1515,6 +1730,7 @@ function disposeLayer(l) {
 
 /** Geometry of every layer gone, ahead of a rebuild. */
 function disposeModels() {
+  clearCylinderPreview();
   for (const l of layers) disposeLayer(l);
   slicePreview.syncModel();
   selected = hovered = null;
@@ -1530,6 +1746,10 @@ function dropLayer(li) {
 
 /** Back to a blank single layer — a new base drawing replaces everything. */
 function resetLayers() {
+  clearCylinderPreview();
+  cylinderFlatBounds=null;
+  cylinderAppliedFit=null;
+  updateCylinderFits();
   while (layers.length) dropLayer(0);
   slicePreview.clear();
   slicePreview.syncModel();
@@ -1569,7 +1789,7 @@ function frameStack(l) {
 /** Rebuild one layer's frame slabs from the current options. */
 function rebuildFrame(li) {
   const l = layers[li];
-  for (const m of l.wallMeshes) { l.group.remove(m); m.material.dispose(); }
+  for (const m of l.wallMeshes) { l.group.remove(m); disposeWrapped(m); m.material.dispose(); }
   l.wallMeshes = [];
   if (!l.model) return;
 
@@ -1581,6 +1801,7 @@ function rebuildFrame(li) {
     mesh.userData = { layer: li, region: null };
     l.group.add(mesh);
     l.wallMeshes.push(mesh);
+    wrapPreviewMesh(mesh,l);
     return;
   }
 
@@ -1601,6 +1822,7 @@ function rebuildFrame(li) {
       mesh.userData = { layer: li, region: null };
       l.group.add(mesh);
       l.wallMeshes.push(mesh);
+      wrapPreviewMesh(mesh,l);
       z += layer.t;
     }
   }
@@ -1688,7 +1910,7 @@ function faceSlabs(l, i) {
 /** Rebuild one face's slabs from its stack, bottom up. */
 function rebuildRegion(li, i) {
   const l = layers[li];
-  for (const m of l.regionMeshes[i] ?? []) { l.group.remove(m); m.material.dispose(); }
+  for (const m of l.regionMeshes[i] ?? []) { l.group.remove(m); disposeWrapped(m); m.material.dispose(); }
   const meshes = [];
   const drawn = l.model.regions[i].parts.length > 0;
   for (const slab of faceSlabs(l, i)) {
@@ -1704,6 +1926,7 @@ function rebuildRegion(li, i) {
     mesh.userData = { layer: li, region: i };
     l.group.add(mesh);
     meshes.push(mesh);
+    wrapPreviewMesh(mesh,l);
   }
   l.regionMeshes[i] = meshes;
   if (selected && selected.li === li && selected.id === i) highlight(li, i, 0x4a4a4a);
@@ -2038,7 +2261,7 @@ function drawFaceCard(sel, event) {
 }
 
 function updateReadout() {
-  slicePreview.syncModel();
+  if (!cylinderEnabled()) slicePreview.syncModel();
   if (!baseModel()) return;
   const totals = layers.flatMap((l) => l.stacks.map(totalHeight));
   // A drawing can hold no closed faces at all, and so nothing to measure.
@@ -2160,6 +2383,10 @@ function regionAt(event) {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (hit && cylinderShell) {
+    const shellHit=raycaster.intersectObjects(cylinderShell.children,false)[0];
+    if(shellHit && shellHit.distance<hit.distance-1e-5)return null;
+  }
   return hit ? { li: hit.object.userData.layer, id: hit.object.userData.region } : null;
 }
 
@@ -2471,6 +2698,7 @@ async function loadStacked(l, fit = true) {
 let cuspPicked = null;
 let cuspProfilePicked = null;
 let profilePicked = null;  // the profile drawing (File), null in standard mode
+let profileRevision = 0;
 let profileDims = null;    // { x, y } mm — what the profile measures
 
 /** Settings a swept frame takes over get out of the way while one is set. */
@@ -2489,11 +2717,13 @@ function profileUI() {
   // A hole through a swept frame would need a mesh boolean the converter
   // does not have, so hole placement is refused while a profile is set.
   $('addHole').disabled = on;
+  lidSketchUI();
 }
 
 /** Set (or clear, with null) the sweep profile. */
 async function setProfile(file) {
   profilePicked = file;
+  profileRevision++;
   profileDims = file ? await inspectSize(file) : null;
   if (file && allHoles().length) {
     for (const l of layers) l.holes = [];
@@ -4387,6 +4617,8 @@ function mulberry32(a) {
 
 function shapeForm() {
   const form = new FormData();
+  if (cylinderEnabled()) form.append('cylinder', JSON.stringify(readCylinderSettings()));
+  if(cylinderEnabled()&&$('cylinderLid').checked&&lidSketchPicked)form.append('lidSketch',lidSketchPicked);
   // The drawings go in stacking order, base first; everything else about the
   // shape is shared, so it is sent once.
   for (const l of layers) form.append('file', l.file);
@@ -4460,9 +4692,18 @@ async function generate(keep = null, { lenient = false } = {}) {
   $('go').disabled = true;
   paintLossNote = '';
   try {
-    const res = await fetch('/api/regions', { method: 'POST', body: shapeForm() });
+    const requestedCylinder = cylinderInputSnapshot();
+    if(cylinderEnabled()&&$('cylinderLid').checked&&lidSketchPicked&&!profilePicked)throw new Error('Load a sweep profile to use the lid-top sketch.');
+    const form = shapeForm();
+    form.delete('lidSketch'); // The top sketch has its own fitted sweep request.
+    const res = await fetch('/api/regions', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error([data.error ?? res.statusText, data.log].filter(Boolean).join('\n'));
+    // A first thread render can take a while. Do not publish stale geometry
+    // when dimensions changed before any model existed for refit() to rebuild.
+    if (requestedCylinder !== cylinderInputSnapshot()) {
+      return await generate(keep, { lenient });
+    }
 
     const drawings = data.drawings ?? [data];
     if (keep) {
@@ -4485,6 +4726,31 @@ async function generate(keep = null, { lenient = false } = {}) {
     const seed = Number($('seed').value);
     buildModel(data, lo, hi, mulberry32(Number.isFinite(seed) && $('seed').value !== ''
       ? seed : (Math.random() * 1e9) | 0), keep);
+    const box=new THREE.Box3().setFromObject(group);
+    cylinderFlatBounds=[box.min.x,box.min.y,box.max.x,box.max.y];
+    updateCylinderFits();
+    if (cylinderEnabled()) {
+      if(!cylinderAppliedFit)throw new Error($('cylinderFitSummary').textContent);
+      setStatus('building cylinder shell…');
+      const response=await fetch('/api/cylinder',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(readCylinderSettings())});
+      const shell=await response.json();
+      if(!response.ok)throw new Error(shell.error ?? response.statusText);
+      if(requestedCylinder!==cylinderInputSnapshot())return await generate(keepStacks(),{lenient});
+      let lidArt=null;
+      if(shell.settings.lid&&lidSketchPicked) {
+        setStatus('sweeping the lid-top sketch…');
+        const topForm=new FormData();
+        topForm.append('file',lidSketchPicked); topForm.append('profile',profilePicked);
+        topForm.append('cylinder',JSON.stringify(shell.settings));
+        topForm.append('profileScale',$('profileScale').value); topForm.append('sagitta',$('sagitta').value);
+        const topResponse=await fetch('/api/cylinder/lid-art',{method:'POST',body:topForm});
+        lidArt=await topResponse.json();
+        if(!topResponse.ok)throw new Error(lidArt.error??topResponse.statusText);
+        if(requestedCylinder!==cylinderInputSnapshot())return await generate(keepStacks(),{lenient});
+      }
+      buildCylinderPreview(shell,lidArt);
+    }
+    cylinderUI();
     buildPalette(lo, hi);
     select(null);
     modelThumb = captureModelThumbnail();   // the 3D object just generated
@@ -4566,6 +4832,17 @@ const REFIT_FIELDS = {
     : 'faces meet the walls exactly, with nothing to fuse them'),
   sagitta: (v) => `curves are now flattened to within ${v} mm`,
 };
+
+for (const control of [$('surfaceMode'), $('cylinderSizing'), ...Object.keys(cylinderDefaults).map(cylinderControl)]) {
+  control.addEventListener('change', () => {
+    cylinderChoice=null;
+    updateCylinderFits();
+    cylinderUI();
+    // Existing planes describe the flat model and cannot follow a wrap.
+    if (cylinderEnabled()) slicePreview.clear();
+    if(!$('go').disabled)refit('Surface updated — your painting is kept');
+  });
+}
 
 for (const [id, note] of Object.entries(REFIT_FIELDS)) {
   $(id).onchange = () => {
@@ -4751,6 +5028,8 @@ async function buildProject() {
         'subjectScale', 'subjectX', 'subjectY']
         .map((id) => [id, $(id).value]),
     ),
+    cylinder: cylinderEnabled() ? {...readCylinderSettings(),fit:{diameter:Number($('cylinderDiameter').value),height:Number($('cylinderHeight').value),mode:$('cylinderSizing').value}} : null,
+    lidSketch: lidSketchPicked ? {name:lidSketchPicked.name,data:await fileBase64(lidSketchPicked),resource:lidSketchPicked.resource??null} : null,
     layers: selectedLayers(),
     palette: [...HUES],
     frame: {
@@ -4876,8 +5155,10 @@ async function applyProject(project) {
 
   showScreen('model');
   setWorkflow(project.workflow ?? 'glass', false);
+  restoreCylinder(project.cylinder);
   filamentManager?.restore(project.filaments);
   const embeddedFile = (value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
+  lidSketchPicked=embeddedFile(project.lidSketch); lidSketchRevision++; lidSketchUI();
   cuspPicked = embeddedFile(project.tracery?.cusps);
   cuspProfilePicked = embeddedFile(project.tracery?.profile);
   for (const [id,value] of Object.entries({cuspWidth:.55,cuspHeight:.55,cuspZ:0,endAngle:90,endSide:1})) $(id).value=value;
@@ -4954,7 +5235,7 @@ async function applyProject(project) {
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
   await pickFile(Object.assign(new File([bytes], project.drawing.name || 'drawing.dxf'), { resource: project.drawing.resource ?? null }), false);
-  slicePreview.restore(project.slices);
+  slicePreview.restore(cylinderEnabled() ? [] : project.slices);
   if (profilePicked) profilePicked.resource = project.profile?.resource ?? null;
   if (boundaryPicked) boundaryPicked.resource = project.boundary?.resource ?? null;
   await restoreTrace(project);
@@ -5976,6 +6257,7 @@ const PICKER_INFO = {
   template: { title: 'Add a line-art template', note: 'Choose an SVG to place over the image. Each template stays editable.' },
   cusps: {title:'Cusp paths',note:'Uses the same coordinates as the main frame'},
   cuspProfile: {title:'Cusp profile',note:'An independent closed cross-section for the finer paths'},
+  lidSketch: {title:'Lid-top sketch',note:'Fits to the circular lid and uses the current sweep profile'},
   subject: {
     title: 'Subject from the library',
     note: 'replaces the current drawing — a loaded boundary (frame) and its placement stay put',
@@ -6019,7 +6301,7 @@ function closePicker() {
 }
 
 function renderPickerGrid() {
-  const kind = ['subject', 'stack', 'cusps'].includes(pickerSlot) ? 'subject' : pickerSlot === 'cuspProfile' ? 'profile' : pickerSlot;
+  const kind = ['subject', 'stack', 'cusps', 'lidSketch'].includes(pickerSlot) ? 'subject' : pickerSlot === 'cuspProfile' ? 'profile' : pickerSlot;
   const resources = pickerResources.filter((r) => pickerSlot === 'template' || r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
@@ -6035,6 +6317,7 @@ function renderPickerGrid() {
 
 /** Feed a chosen library drawing to the slot it was picked for. */
 async function applyFileToSlot(slot, file) {
+  if (slot === 'lidSketch') return applyLidSketchFile(file);
   if (slot === 'template') return addTemplateFile(file);
   if (slot === 'cusps' || slot === 'cuspProfile') return setCuspFile(slot, file);
   if (slot === 'subject') return swapSubject(file);
@@ -6301,6 +6584,7 @@ $('subjectLibrary').onclick = () => openPicker('subject');
 $('addDrawingLibrary').onclick = () => openPicker('stack');
 $('boundaryLibrary').onclick = () => openPicker('boundary');
 $('profileLibrary').onclick = () => openPicker('profile');
+$('lidSketchLibrary').onclick = () => openPicker('lidSketch');
 
 $('libPickClose').onclick = closePicker;
 $('libPickSearch').oninput = renderPickerGrid;
@@ -6584,6 +6868,7 @@ function updateGothicConfineWarning() {
   $('gothicConfineWarning').hidden = $('workflowMode').value !== 'gothic' || !$('confineWalls').checked;
 }
 async function newWorkflow(mode) {
+  restoreCylinder(null);
   resetLayers();picked=null;clearTrace();
   cuspPicked=cuspProfilePicked=null;
   await setProfile(null);await setBoundary(null);

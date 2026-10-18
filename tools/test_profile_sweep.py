@@ -10,6 +10,8 @@ from shapely.geometry import Polygon, Point, shape
 
 from dxf2stl import chain_curves, load_profile, read_curves, sweep_profile
 from slice_svg import planar_section
+from gothic import segmented_profile_sweep
+from cylinder import mesh_of
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -40,6 +42,15 @@ class ProfileSweepTests(unittest.TestCase):
         self.assertAlmostEqual(planar_section([mesh], .5).area, 36, places=3)
         self.assertAlmostEqual(planar_section([mesh], 1.5).area, 19, places=3)
         self.assertAlmostEqual(mesh.volume, 55, places=3)
+
+    def test_segmented_sweep_preserves_profile_and_square_open_ends(self):
+        profile = Polygon([(-1, 0), (1, 0), (0, 2)])
+        solid = segmented_profile_sweep(profile, [[(0, 0), (5, 0), (10, 0)]])
+        mesh = mesh_of(solid)
+        self.assertTrue(mesh.is_volume)
+        np.testing.assert_allclose(mesh.bounds, [[0, -1, 0], [10, 1, 2]], atol=1e-6)
+        self.assertAlmostEqual(mesh.volume, 20, places=5)
+        self.assertAlmostEqual(planar_section([mesh], 1).area, 10, places=5)
 
     def test_spitzbogen_matches_measured_step_sections(self):
         profile = load_profile(str(ROOT / 'examples/spitzbogen/profile.svg'), .002)

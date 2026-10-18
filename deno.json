@@ -2,20 +2,27 @@
   "tasks": {
     "setup": "deno run --allow-read=. --allow-write=.venv --allow-run=py,python,python3,.venv/bin/python,.venv/Scripts/python.exe tools/setup.ts",
     "start": {
-      "command": "deno run --env-file=.env --allow-net --allow-read --allow-write=.tmp,projects,library --allow-run=.venv/bin/python,.venv/Scripts/python.exe --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
+      "command": "deno run --env-file=.env --allow-net --allow-read --allow-write=.tmp,projects,library --allow-run=.venv/bin/python,.venv/Scripts/python.exe,openscad,openscad.com,\"C:/Program Files/OpenSCAD/openscad.com\",/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
       "dependencies": [
-        "setup"
+        "install"
       ]
     },
     "dev": {
-      "command": "deno run --watch --env-file=.env --allow-net --allow-read --allow-write=.tmp,projects,library --allow-run=.venv/bin/python,.venv/Scripts/python.exe --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
+      "command": "deno run --watch --env-file=.env --allow-net --allow-read --allow-write=.tmp,projects,library --allow-run=.venv/bin/python,.venv/Scripts/python.exe,openscad,openscad.com,\"C:/Program Files/OpenSCAD/openscad.com\",/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD --allow-env=PORT,PROJECT_DIR,LIBRARY_DIR server.ts",
+      "dependencies": [
+        "install"
+      ]
+    },
+    "check": "deno check server.ts tools/setup.ts tools/python_test.ts tools/setup_test.ts tools/install.ts tools/cylinder_test.ts",
+    "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts tools/cylinder_test.ts",
+    "test:editor": "deno run --allow-read --allow-env --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_image_editor.mjs",
+    "test:geometry": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/python.ts -m unittest discover -s tools -p test_*.py",
+    "install": {
+      "command": "deno run --allow-run --allow-sys=uid tools/install.ts",
       "dependencies": [
         "setup"
       ]
     },
-    "check": "deno check server.ts tools/setup.ts tools/python_test.ts tools/setup_test.ts",
-    "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts",
-    "test:editor": "deno run --allow-read --allow-env --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_image_editor.mjs",
-    "test:geometry": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/python.ts -m unittest discover -s tools -p test_*.py"
+    "test:cylinder": "deno run --allow-read tools/test_cylinder.mjs"
   }
 }

@@ -131,8 +131,16 @@ unchanged. Higher radii can merge intentional spaces between neighbouring lines.
 ## Running it
 
 ```bash
-deno task start          # http://localhost:8788
+deno task start          # Installs dependencies, then serves http://localhost:8788
 ```
+
+`deno task start` and `deno task dev` automatically prepare the Python environment
+and install [OpenSCAD](https://openscad.org/downloads.html) if it is missing,
+using apt, dnf or pacman on Linux, Homebrew on macOS, or winget on Windows.
+Linux package installation may ask for your sudo password. Existing installations
+are reused. If installation fails, startup stops and reports the error; rerun
+the same command after resolving it. `deno task install` remains available to
+prepare all dependencies without starting the server.
 
 Run this from the project folder in Windows PowerShell or Command Prompt,
 macOS Terminal, or a Linux shell. The first run creates `.venv` and installs
@@ -161,6 +169,83 @@ open a drawing or a project, or use the example). Tune the sizes in the 3D
 step and press **Generate 3D**. The browser gets the face shapes and extrudes
 them itself, so painting is instant — nothing goes back to the server until
 you save.
+
+### Cylinder shells
+
+In **Shape → size & walls → model surface**, choose **Cylinder shell**. Enter the
+desired outside diameter and container height, then generate the model. The app
+shows ten nearby size suggestions, ranked by relative error in diameter and
+height, and applies the closest one. Each suggestion shows its actual dimensions,
+the difference from your targets, repeats around the cylinder (X) and up its
+height (Y), and the artwork scale. Click a suggestion to apply it. Your requested
+dimensions stay in the input fields; **Applied** shows the resulting shell size.
+
+**Keep proportions · allow uniform scaling** uses the same scale for artwork
+width and height, so motifs keep their proportions. It searches up to 12 repeats
+per direction and 64 copies total. **Keep original size · repeat only** offers
+sizes that preserve each motif's current dimensions. Painting a face updates
+that face in every copy. Relief depths remain in millimetres.
+
+**Add lid** adds a matching neck and lid; **Screw thread** selects
+`hgc/cylinder_shell_mode/threaded_container.scad`. The app reads the script's
+Customizer defaults directly. Only requested diameter, container height and
+shell thickness override model parameters, and equal values are left at their
+SCAD defaults. Thread pitch and band height, neck and lid height, clearances,
+lead-ins, exterior chamfers, alignment stop and quality remain defined by the
+script. The bottom and lid roof share the shell thickness, as in the supplied
+design. The adapter in `tools/threaded-container.scad` places the lid using the
+script's alignment offset and rotation without changing the source file.
+
+Container height includes the neck. For a screw lid, assembled height is
+container height minus neck height, plus lid height and the alignment offset.
+The current defaults produce a 70 mm container and an 80.2 mm assembled model,
+with a 20 mm lid, 2 mm pitch and 5 mm thread band. The preview, size suggestions,
+artwork seam and exports account for these dimensions and the exterior chamfers.
+Changing the script's defaults and refreshing the browser updates the controls.
+Existing screw-lid projects also use the current design defaults; their requested
+diameter, height and shell thickness remain adjustable.
+
+Plain shells and unthreaded lids use `tools/cylinder-container.scad`; their
+independent bottom, roof, neck and clearance controls remain available. Their
+assembled height adds 0.2 mm rim clearance and the lid top thickness.
+
+With **Add lid** enabled, **Lid-top sketch → Upload sketch…** or **From library…**
+adds a separate DXF/SVG decoration. Its paths are centered and scaled uniformly
+to the circular top, accounting for the profile width and mitred corners so the
+finished sweep fits the flat top diameter inside any lid chamfer. It uses the current sweep profile and
+profile-width setting, preserving the section height. The swept artwork sits on
+the lid with a small bonding overlap. Changing the cylinder size or profile
+rebuilds it, and the sketch is embedded in saved projects. Remove it with **✕**.
+A loaded sweep profile is required; disabling the lid retains the sketch for
+later use.
+
+Tight bends in a lid sketch can make a continuous sweep intersect itself.
+If that happens, the app rebuilds it from closed, mitred sections with a
+0.001 mm overlap at their joins and checks the result at STL precision after
+placing it on the lid. The profile height and the SCAD chamfers are preserved.
+
+Size suggestions include the lid's assembled height. Artwork overlaps by
+0.05 mm at each repeat boundary and the vertical wrap seam to join matching tips;
+this overlap is included when calculating the uniform scale and suggested sizes.
+The shell stays solid beneath the relief, including beneath holes in the artwork.
+Artwork crossing the lid seam is split with the selected gap, so it cannot lock
+the two parts together. Projects retain requested dimensions, the chosen repeats,
+and sizing mode. Existing cylinder projects reopen with **Stretch to exact
+dimensions (legacy)** to retain their previous shape; choose **Keep proportions**
+to obtain suggestions. Projects without cylinder settings open as flat reliefs.
+
+**Download STL** joins the relief to each shell and places the lid beside the
+container. Plain lids are roof down and open side up; decorated lids are opening
+down with the top artwork facing up. **Export STLs by colour** produces body
+and lid files with shared coordinates; import each part's files together into
+your slicer to retain their alignment. A decorated lid includes `lid-top-art.stl`
+in the same placement as its shell. Cylinder mode currently exports STL;
+the colour-variation 3MF workflow and CNC SVG slices remain available in flat mode.
+Check thread fit with your printer and material; radial clearance controls it.
+
+`deno task test:cylinder` checks browser wrapping and the lid seam;
+`deno task test:geometry` includes closed-mesh cylinder export checks.
+
 
 ## Painting the faces
 
@@ -837,6 +922,9 @@ go to stderr.
 | `POST /api/trace` | JSON `{id, params}` → `{svg, stats}`; runs `tools/trace.py` |
 | `POST /api/inspect` | multipart `file` (.dxf or .svg) → `{layers, skipped, curves, size}` |
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
+| `POST /api/cylinder` | JSON cylinder dimensions and lid/thread options → base64 body and optional lid STLs in assembled coordinates |
+| `GET /api/cylinder/defaults` | Current SCAD size defaults and lid/chamfer/alignment dimensions |
+| `POST /api/cylinder/lid-art` | multipart top-sketch `file`, `profile`, `cylinder` JSON and optional `profileScale`/`sagitta` → fitted lid-top sweep as base64 STL and dimensions |
 | `POST /api/convert` | `file` + settings + `stacks` → STL body, stats in the `x-stats` header |
 | `POST /api/export` | as above plus `groups` → JSON listing one base64 STL per group |
 | `POST /api/export3mf` | drawing + settings + `slicerOptions` JSON (`target`, `preview`, `selected`, `colours`, `layerHeight`, `pattern`) → preview catalogue and packing plan, or one base64 3MF project with selected colour assemblies |

@@ -1222,18 +1222,18 @@ def face_slabs(poly, stack, effect):
     return flat_slabs(poly, stack)
 
 
-def region_solids(region_polys, stacks, cutter, z_base=0.0, effect=None):
+def region_solids(region_polys, stacks, cutter, z_base=0.0, effect=None, extrude=None):
     """Every layer of every face as a solid, paired with its colour group."""
     for poly, stack in zip(region_polys, stacks):
         for face, z, thickness, group in face_slabs(poly, stack, effect):
             for piece in cut(face, cutter):
-                solid = trimesh.creation.extrude_polygon(piece, thickness)
+                solid = (extrude or trimesh.creation.extrude_polygon)(piece, thickness)
                 solid.apply_translation((0.0, 0.0, z_base + z))
                 yield solid, group
 
 
 def wall_solids(wall_polys, wall_height, cutter, wall_stack=None, frame_mesh=None,
-                z_base=0.0):
+                z_base=0.0, extrude=None):
     """The frame, either as one solid or as a stack of coloured layers.
 
     Printing the frame from thin layers of the palette's own filaments saves
@@ -1255,7 +1255,7 @@ def wall_solids(wall_polys, wall_height, cutter, wall_stack=None, frame_mesh=Non
             if thickness <= 0:
                 continue
             for piece in cut(wall, cutter):
-                solid = trimesh.creation.extrude_polygon(piece, thickness)
+                solid = (extrude or trimesh.creation.extrude_polygon)(piece, thickness)
                 solid.apply_translation((0.0, 0.0, z))
                 yield solid, layer.get("g")
             z += thickness
@@ -1287,7 +1287,7 @@ def safe_name(name):
     return cleaned or "group"
 
 
-def colour_buckets(layers, wall_stack):
+def colour_buckets(layers, wall_stack, extrude=None):
     """Every solid, gathered under the colour group that prints it.
 
     A layered frame has its slabs filed under their own colours; a plain frame
@@ -1300,12 +1300,12 @@ def colour_buckets(layers, wall_stack):
         for solid, group in wall_solids(drawing["wall_polys"],
                                         drawing["wall_height"], drawing["cutter"],
                                         wall_stack, drawing["frame_mesh"],
-                                        drawing["z_base"]):
+                                        drawing["z_base"], extrude=extrude):
             buckets[group or "walls"].append(solid)
             n_walls += 1
         for solid, group in region_solids(drawing["region_polys"],
                                           drawing["stacks"], drawing["cutter"],
-                                          drawing["z_base"], drawing["effect"]):
+                                          drawing["z_base"], drawing["effect"], extrude=extrude):
             buckets[group or "ungrouped"].append(solid)
             n_regions += 1
 
@@ -2042,6 +2042,7 @@ def positive(name, value):
 
 
 def main():
+    # Cylinder settings and generated shells are supplied by the HTTP backend.
     ap = argparse.ArgumentParser()
     ap.add_argument("--slice-height", type=float, metavar="MM",
                     help="export an SVG cross-section this far above the model base")
@@ -2056,6 +2057,10 @@ def main():
                          "the 2D window-position preview, then exit")
     ap.add_argument("--heights", default=None, metavar="FILE",
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
+    ap.add_argument("--cylinder", default=None, metavar="FILE",
+                    help="Cylinder settings and OpenSCAD shell paths as JSON")
+    ap.add_argument("--lid-sketch", default=None, metavar="FILE",
+                    help="Separate lid-top sketch swept with --profile and fitted to the cylinder lid")
     ap.add_argument("--stacks", default=None, metavar="FILE",
                     help='JSON file mapping face id to its layer stack, e.g. '
                          '{"0": [{"t": 0.65, "g": "1-orange"}, {"t": 1.1, "g": "3-violet"}]}')
@@ -2160,6 +2165,8 @@ def main():
 
     positive("sagitta", args.sagitta)
     positive("scale", args.scale)
+    if args.lid_sketch and (not args.cylinder or not args.profile):
+        raise ConvertError("A lid-top sketch requires cylinder settings and a sweep profile")
 
     if args.inspect:
         json.dump(inspect(args.input, args.sagitta, args.scale), sys.stdout)
@@ -2379,6 +2386,26 @@ def main():
         )
 
     n_holes = sum(len(drawing["holes"]) for drawing in layers)
+
+    if args.cylinder:
+        from cylinder import cylinder_extrude, export_cylinder
+        if args.slice_height is not None or args.variations or args.slicer_options or args.output.lower().endswith(".3mf"):
+            raise ConvertError("Cylinder mode exports STL; switch to flat mode for SVG slices or 3MF variations")
+        buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=cylinder_extrude)
+        try:
+            with open(args.cylinder) as fp:
+                cylinder = json.load(fp)
+            lid_art = None
+            if args.lid_sketch:
+                from lid_art import lid_art_mesh
+                lid_art, _ = lid_art_mesh(args.lid_sketch, args.profile, cylinder,
+                                         args.profile_scale, args.sagitta)
+            result = export_cylinder(args.output, buckets, cylinder, bool(args.split or args.groups), lid_art)
+        except ValueError as error:
+            raise ConvertError(str(error)) from error
+        json.dump({**layers[0]["summary"], **result, "walls": n_walls,
+                   "regions": n_regions, "holes": n_holes}, sys.stdout)
+        return
 
     if args.slicer_options:
         from slicer_3mf import export
