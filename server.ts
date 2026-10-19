@@ -75,6 +75,7 @@ async function takeUpload(
   file: File;
   paths: string[];
   profilePath: string | null;
+  grooveProfilePath: string | null;
   cuspPath: string | null;
   cuspProfilePath: string | null;
   boundaryPath: string | null;
@@ -114,10 +115,14 @@ async function takeUpload(
   // Advanced modes each add a second drawing: one holding the sweep profile,
   // one holding the polygon that bounds the pattern.
   const profilePath = await takeExtra(form, "profile", "profile", dir);
+  const grooveProfilePath = await takeExtra(form, "grooveProfile", "groove profile", dir);
+  if (grooveProfilePath && !profilePath) {
+    throw new HttpError(400, "A groove profile requires a main sweep profile");
+  }
   const boundaryPath = await takeExtra(form, "boundary", "boundary", dir);
   const cuspPath = await takeExtra(form, "cusps", "cusp paths", dir);
   const cuspProfilePath = await takeExtra(form, "cuspProfile", "cusp profile", dir);
-  return { form, file, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath };
+  return { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath };
 }
 
 /**
@@ -282,12 +287,13 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
  */
 function handleRegions(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     return Response.json(await runScript([
       paths[0],
       "--regions",
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
       ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "holes", "--holes", dir),
@@ -311,7 +317,7 @@ function handleCylinder(req: Request): Promise<Response> {
 
 function handleLidArt(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, grooveProfilePath } = await takeUpload(req, dir);
     if (!profilePath) throw new HttpError(400, "Load a sweep profile to use a lid-top sketch");
     let settings;
     try { settings = cylinderSettings(JSON.parse(String(form.get("cylinder")))); }
@@ -321,6 +327,7 @@ function handleLidArt(req: Request): Promise<Response> {
     await Deno.writeTextFile(config, JSON.stringify(settings));
     const info = await runScript([
       paths[0], profilePath, config, output,
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...numericFlags(form, { profileScale: "--profile-scale", sagitta: "--sagitta" }),
     ], "tools/lid_art.py");
     return Response.json({ ...info, stl: (await Deno.readFile(output)).toBase64() });
@@ -402,7 +409,7 @@ async function layerSpecs(
 /** POST /api/convert — the DXF plus settings in, an STL out. */
 function handleConvert(req: Request, slice = false): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    const { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     if (slice && form.has("cylinder")) throw new HttpError(400, "Slice SVG export is available in flat mode. Use STL for a cylinder.");
     const height = form.get("sliceHeight");
     if (slice && (typeof height !== "string" || height.trim() === "" ||
@@ -416,6 +423,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
       output,
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
       ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
@@ -447,7 +455,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
  */
 function handleExport(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     // Colours travel either per layer (stacks) or per face (groups).
     const stacks = await mapFlag(form, "stacks", "--stacks", dir);
     const groups = await mapFlag(form, "groups", "--groups", dir);
@@ -462,6 +470,7 @@ function handleExport(req: Request): Promise<Response> {
       "--split",
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
       ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
@@ -1156,7 +1165,7 @@ async function deleteLibrary(name: string): Promise<Response> {
  */
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     if (form.has("cylinder")) throw new HttpError(400, "Colour-variation 3MF export is available in flat mode. Use cylinder STL exports.");
     const output = `${dir}/variations`;
     // Legacy callers may specify one pattern; the dialog sends slicerOptions.
@@ -1168,6 +1177,7 @@ function handleExport3mf(req: Request): Promise<Response> {
       ...await mapFlag(form, "slicerOptions", "--slicer-options", dir),
       ...shapeFlags(form, boundaryPath),
       ...(profilePath ? ["--profile", profilePath] : []),
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
       ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),

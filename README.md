@@ -209,6 +209,12 @@ Plain shells and unthreaded lids use `tools/cylinder-container.scad`; their
 independent bottom, roof, neck and clearance controls remain available. Their
 assembled height adds 0.2 mm rim clearance and the lid top thickness.
 
+With **Add lid** off, **Top rim chamfer (mm)** bevels both the inner and outer
+edges of the open rim at 45°. Set it to **0** for a square rim, or try **0.3 mm**
+to soften the edge. The value must be less than half the shell thickness so
+a flat rim remains. Wrapped relief follows the outer bevel in the preview and
+STL exports. The setting is saved with the project; older projects start at 0.
+
 With **Add lid** enabled, **Lid-top sketch → Upload sketch…** or **From library…**
 adds a separate DXF/SVG decoration. Its paths are centered and scaled uniformly
 to the circular top, accounting for the profile width and mitred corners so the
@@ -580,6 +586,31 @@ continuation wins at a junction), and duplicate strokes are swept once.
 Projects carry the profile and its width scale, so a saved sweep reopens as
 one.
 
+**Groove profile (subtract)** under **Inputs → Sweep profiles & cusp paths**
+loads an optional second DXF/SVG section, from a file or the library. Generate
+3D to sweep it along the main frame's paths and subtract it after the sweeps
+are joined. This clears the groove through path intersections as well. Clear
+the groove profile to restore the uncut frame.
+
+Draw both sections in the **same coordinates**: the groove keeps its sideways
+offset and height relative to the main profile's centre and bottom. It is not
+independently centred or lowered onto the base. **Profile width (×)** scales
+both sections sideways together; neither section scales with the subject.
+For the supplied `hgc/examples/example6_groove/` files, load
+`Part Studio 2 - paths.dxf` as the subject, `Part Studio 2 - profile.dxf` as the main profile,
+and `Part Studio 2 - profile_remover_groove.dxf` as the groove profile. Disable
+**keep walls inside the silhouette** to preserve the CAD paths.
+
+The groove is included in the preview, STL/3MF and slice exports, layered
+subjects, and lid-top sweeps. Projects embed both profiles. It cuts the swept
+frame; painted faces retain their assigned heights. Separate cusp paths keep
+their own section, with any material crossing the main groove also removed.
+
+```bash
+.venv/bin/python tools/dxf2stl.py paths.dxf out.stl --profile profile.dxf \
+    --groove-profile groove.dxf --frame-only
+```
+
 ## Cropping to a boundary
 
 Drop a **second** subject — a closed polygon — and it **bounds** the subject:
@@ -939,7 +970,10 @@ go to stderr.
 JSON array. All are sent as form fields, and `holes` applies to every route. A
 second file field, `profile`, switches the frame to a swept cross-section (see
 *Sweep profile*) — with `profileScale` stretching its width — and refuses
-`holes` and `wallStack`. Another file field, `boundary`, bounds the subject
+`holes` and `wallStack`. The optional `grooveProfile` file requires `profile`
+and subtracts a second sweep using the main profile's coordinates and width
+scale. It is also accepted by `/api/cylinder/lid-art`.
+Another file field, `boundary`, bounds the subject
 with a closed polygon (see *Cropping to a boundary*), with `boundaryScale`,
 `boundaryX`, `boundaryY` placing it, `boundaryFit=0` keeping it as drawn
 instead of centred and fitted, and `boundaryWall=0` cutting flush instead of

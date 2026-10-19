@@ -6,6 +6,7 @@ type Project = {
   drawings?: Embedded[];
   boundary?: Embedded;
   profile?: Embedded;
+  grooveProfile?: Embedded;
   tracery?: { cusps?: Embedded; profile?: Embedded };
   trace?: {
     source?: Embedded;
@@ -49,6 +50,7 @@ export async function importProjectResources(
           ["profile", project.tracery?.profile],
           ["boundary", project.boundary],
           ["profile", project.profile],
+          ["profile", project.grooveProfile],
         ];
         const idFor = async (
           kind: string,

@@ -150,6 +150,7 @@ Deno.test("project import preserves trace images and roles and is repeatable", a
         drawing: embedded("ghost.svg", "<svg/>"),
         boundary: embedded("frame.dxf", "frame"),
         profile: embedded("profile.dxf", "profile"),
+        grooveProfile: embedded("groove.dxf", "groove"),
         trace: {
           source: embedded("edited.png", "edited"),
           original: embedded("original.png", "original"),
@@ -159,7 +160,7 @@ Deno.test("project import preserves trace images and roles and is repeatable", a
       }),
     );
     const first = await importProjectResources(projects, store);
-    assert(first.added === 3 && first.skipped.length === 0);
+    assert(first.added === 4 && first.skipped.length === 0);
     const records = await store.list();
     assert(new Set(records.map((r) => r.kind)).size === 3);
     const subject = records.find((r) => r.kind === "subject")!;
@@ -171,8 +172,8 @@ Deno.test("project import preserves trace images and roles and is repeatable", a
       ) === "original",
     );
     const repeated = await importProjectResources(projects, store);
-    assert(repeated.added === 0 && repeated.existing === 3);
-    assert((await store.list()).length === 3);
+    assert(repeated.added === 0 && repeated.existing === 4);
+    assert((await store.list()).length === 4);
   });
 });
 

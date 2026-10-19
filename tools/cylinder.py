@@ -50,6 +50,59 @@ def mesh_of(solid):
     return mesh
 
 
+def printable_mesh(solid):
+    """Keep closed solid topology when STL welding collapses tiny contacts.
+
+    A boolean can keep two surfaces as separate vertex fans at one edge.
+    STL loses that distinction: a slicer welds the equal coordinates into a
+    four-face edge. Only when conversion fails, simplify below a micron and
+    join those contacts with a local, sub-micron overlap. Do not fill holes
+    in an invalid input or discard small, real disconnected solids.
+    """
+    if solid.status() != mf.Error.NoError or solid.is_empty():
+        raise ValueError("The wrapped export did not form closed printable parts")
+    mesh = mesh_of(solid)
+    if mesh.is_volume:
+        return mesh
+    # Several float32 ULPs, with a 0.1 micron floor in model millimetres.
+    tolerance = max(.0001, np.max(np.abs(mesh.vertices))*2**-21)
+    solid = solid.simplify(tolerance)
+    for attempt in range(3):
+        mesh = mesh_of(solid)
+        pieces = []
+        for piece in mesh.split(only_watertight=False, repair=False):
+            local = piece.copy()
+            local.apply_translation(-local.vertices.mean(axis=0))
+            if not piece.is_watertight and np.linalg.matrix_rank(local.vertices, tol=1e-7) < 3:
+                continue  # A collapsed boolean sliver left a planar scrap.
+            if piece.is_watertight and abs(local.volume) <= tolerance**3:
+                continue
+            pieces.append(piece)
+        if not pieces:
+            break
+        mesh = trimesh.util.concatenate(pieces)
+        mesh.merge_vertices()
+        if mesh.is_volume:
+            return mesh
+        edges, counts = np.unique(mesh.edges_sorted, axis=0, return_counts=True)
+        contacts = edges[counts > 2]
+        if attempt == 2 or not len(contacts) or np.any(counts % 2):
+            break  # Open contours are not edge contacts; keep the validation.
+        overlaps = []
+        for a, b in mesh.vertices[contacts]:
+            direction = b-a
+            length = np.linalg.norm(direction)
+            direction /= length
+            side = np.cross(direction, [1, 0, 0] if abs(direction[0]) < .9 else [0, 1, 0])
+            side /= np.linalg.norm(side)
+            transform = np.column_stack((side, np.cross(direction, side), direction,
+                                         a-direction*tolerance))
+            overlaps.append(mf.Manifold.cylinder(length+2*tolerance, tolerance,
+                                                 tolerance, 8).transform(transform))
+        solid = union([solid, *overlaps]).simplify(tolerance)
+    raise ValueError("The wrapped export did not form closed printable parts")
+
+
 def union(solids):
     return mf.Manifold.batch_boolean(solids, mf.OpType.Add)
 
@@ -65,6 +118,9 @@ def dimensions(c):
 
 
 def bevels(c, part):
+    if not c['lid']:
+        top = c.get('topChamfer', 0)
+        return [c['height']-top] if top > 0 else []
     d = c.get('threadedDesign') if c['lid'] and c.get('threaded') else None
     if not d:
         return []
@@ -75,6 +131,9 @@ def bevels(c, part):
 
 
 def surface_inset(z, c, part):
+    if not c['lid']:
+        top = c.get('topChamfer', 0)
+        return np.clip(z-c['height']+top, 0, top)
     d = c.get('threadedDesign') if c['lid'] and c.get('threaded') else None
     if not d:
         return 0
@@ -237,7 +296,7 @@ def export_cylinder(output, buckets, c, split=False, lid_art=None):
             for label, solid in solids:
                 if solid.is_empty():
                     continue
-                mesh = mesh_of(print_position(solid, c, part, gap, lid_art is not None))
+                mesh = printable_mesh(print_position(solid, c, part, gap, lid_art is not None))
                 name = f"{part}-{safe_name(label)}.stl"
                 mesh.export(os.path.join(output, name))
                 written.append({"file": name, "solids": len(solid.decompose()), "triangles": len(mesh.faces)})
@@ -246,7 +305,7 @@ def export_cylinder(output, buckets, c, split=False, lid_art=None):
             solid = union([shell] + [s for _, s in art])
             if solid.status() != mf.Error.NoError:
                 raise ValueError("Could not join the wrapped relief to the shell")
-            all_meshes.append(mesh_of(print_position(solid, c, part, gap, lid_art is not None)))
+            all_meshes.append(printable_mesh(print_position(solid, c, part, gap, lid_art is not None)))
     combined = trimesh.util.concatenate(all_meshes)
     if not combined.is_watertight or not combined.is_winding_consistent:
         raise ValueError("The wrapped export did not form closed printable parts")

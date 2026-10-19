@@ -786,6 +786,10 @@
       <div id="cylinderSuggestions" role="group" aria-label="Suggested cylinder sizes"></div>
       <div class="row"><label title="Minimum wall thickness; screw lids use a smooth neck and a short threaded band">Shell thickness (mm)<input id="cylinderThickness" type="number" value="2.4" min="0.4" step="0.1"></label><label>Bottom thickness (mm)<input id="cylinderBottom" type="number" value="2.4" min="0.4" step="0.1"></label></div>
       <label class="check"><input id="cylinderLid" type="checkbox"> Add lid</label>
+      <div id="cylinderTopChamferOptions">
+        <label>Top rim chamfer (mm)<input id="cylinderTopChamfer" type="number" value="0" min="0" step="0.1"></label>
+        <p class="muted">Bevels the inner and outer top edges at 45°. Use 0 to turn it off; keep the size below half the shell thickness.</p>
+      </div>
       <div id="cylinderLidOptions" hidden>
         <label class="check"><input id="cylinderThreaded" type="checkbox" checked> Screw thread</label>
         <p id="cylinderThreadDefaults" class="muted" hidden></p>
@@ -819,6 +823,12 @@
     <span class="muted" style="align-self:center">saved section</span>
   </div>
   <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+  <div class="resource-slot" id="grooveInputs">
+    <strong>Groove profile (subtract)</strong><span id="grooveProfileName" class="muted">No groove profile</span>
+    <div><button id="grooveProfilePick" class="ghost">Upload…</button><button id="grooveProfileLibrary" class="ghost">Library…</button><button id="grooveProfileClear" class="ghost" hidden>Clear</button></div>
+    <input id="grooveProfileFile" type="file" accept=".svg,.dxf" hidden>
+    <p class="muted" id="grooveProfileNote">Load a main sweep profile first. The groove profile is swept along the same paths and subtracted from the frame.</p>
+  </div>
   <div id="profileDimensions" class="muted" hidden></div>
   <div class="row" id="profileScaleRow" hidden>
     <div><label for="profileScale" title="Stretches the profile's width — its height stays as drawn">profile width (×)</label>
@@ -1549,6 +1559,7 @@ function cylinderUI() {
   const enabled = cylinderEnabled();
   $('cylinderOptions').hidden = !enabled;
   $('cylinderLidOptions').hidden = !$('cylinderLid').checked;
+  $('cylinderTopChamferOptions').hidden = $('cylinderLid').checked;
   $('cylinderPitch').disabled = !$('cylinderThreaded').checked;
   const c=readCylinderTargets(), screw=c.lid&&c.threaded;
   for(const key of ['bottom','lidTop','neck','pitch','clearance'])cylinderControl(key).closest('label').hidden=screw;
@@ -2698,6 +2709,7 @@ async function loadStacked(l, fit = true) {
 let cuspPicked = null;
 let cuspProfilePicked = null;
 let profilePicked = null;  // the profile drawing (File), null in standard mode
+let grooveProfilePicked = null;
 let profileRevision = 0;
 let profileDims = null;    // { x, y } mm — what the profile measures
 
@@ -2706,6 +2718,12 @@ function profileUI() {
   const on = !!profilePicked;
   $('profileName').textContent = profilePicked ? profilePicked.name : 'off — flat walls';
   $('profileClear').hidden = !on;
+  $('grooveProfileName').textContent = grooveProfilePicked?.name ?? 'No groove profile';
+  $('grooveProfileClear').hidden = !grooveProfilePicked;
+  $('grooveProfilePick').disabled = $('grooveProfileLibrary').disabled = !on;
+  $('grooveProfileNote').textContent = on
+    ? 'Sweeps along the same paths and subtracts from the frame. Draw both profiles in the same coordinates to set the groove position and depth. Profile width scales both together.'
+    : 'Load a main sweep profile first. The groove profile is swept along the same paths and subtracted from the frame.';
   $('profileScaleRow').hidden = !on;
   $('profileDimensions').hidden = !on;
   $('wallWidth').closest('.row').hidden = on;
@@ -2722,9 +2740,11 @@ function profileUI() {
 
 /** Set (or clear, with null) the sweep profile. */
 async function setProfile(file) {
+  const dimensions = file ? await inspectSize(file) : null;
   profilePicked = file;
+  if (!file) grooveProfilePicked = null;
   profileRevision++;
-  profileDims = file ? await inspectSize(file) : null;
+  profileDims = dimensions;
   if (file && allHoles().length) {
     for (const l of layers) l.holes = [];
     setHoleMode(false);
@@ -2760,6 +2780,27 @@ $('profileClear').onclick = async () => {
   if (drawing) fitToYSize();
   refit('back to flat walls');
 };
+
+async function applyGrooveProfileFile(file) {
+  if (file && !profilePicked) return setStatus('Load a main sweep profile first.', true);
+  if (file && !DRAWING.test(file.name)) return setStatus('The groove profile must be a .dxf or .svg file.', true);
+  try {
+    if (file) await inspectSize(file);
+    grooveProfilePicked = file;
+    profileRevision++;
+    profileUI();
+    if (file) libraryRemember(file);
+    refit(file ? `Groove profile: ${file.name}. Generate 3D to rebuild.` : 'Groove profile cleared. Generate 3D to rebuild.');
+  } catch (error) { setStatus(error.message, true); }
+}
+$('grooveProfilePick').onclick = () => $('grooveProfileFile').click();
+$('grooveProfileLibrary').onclick = () => openPicker('grooveProfile');
+$('grooveProfileFile').onchange = async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (file) await applyGrooveProfileFile(file);
+};
+$('grooveProfileClear').onclick = () => applyGrooveProfileFile(null);
 
 // The width scale re-fits like a wall width change: the frame is part of the
 // finished size, so the drawing's scale follows it.
@@ -4638,6 +4679,7 @@ function shapeForm() {
   if ($('frameOnly').checked) form.append('frameOnly','1');
   if (profilePicked) {
     form.append('profile', profilePicked);
+    if (grooveProfilePicked) form.append('grooveProfile', grooveProfilePicked);
     form.append('profileScale', $('profileScale').value);
   }
   if (boundaryPicked) {
@@ -4741,6 +4783,7 @@ async function generate(keep = null, { lenient = false } = {}) {
         setStatus('sweeping the lid-top sketch…');
         const topForm=new FormData();
         topForm.append('file',lidSketchPicked); topForm.append('profile',profilePicked);
+        if(grooveProfilePicked)topForm.append('grooveProfile',grooveProfilePicked);
         topForm.append('cylinder',JSON.stringify(shell.settings));
         topForm.append('profileScale',$('profileScale').value); topForm.append('sagitta',$('sagitta').value);
         const topResponse=await fetch('/api/cylinder/lid-art',{method:'POST',body:topForm});
@@ -5016,6 +5059,9 @@ async function buildProject() {
     profile: profilePicked
       ? { name: profilePicked.name, data: await fileBase64(profilePicked), resource: profilePicked.resource ?? null }
       : null,
+    grooveProfile: grooveProfilePicked
+      ? { name: grooveProfilePicked.name, data: await fileBase64(grooveProfilePicked), resource: grooveProfilePicked.resource ?? null }
+      : null,
     boundary: boundaryPicked
       ? { name: boundaryPicked.name, data: await fileBase64(boundaryPicked), resource: boundaryPicked.resource ?? null }
       : null,
@@ -5212,6 +5258,10 @@ async function applyProject(project) {
   } else {
     await setProfile(null);
   }
+
+  grooveProfilePicked = profilePicked ? embeddedFile(project.grooveProfile) : null;
+  profileRevision++;
+  profileUI();
 
   // So must the boundary polygon, whose placement fields are already in the
   // boxes above (the settings loop restores them).
@@ -6257,6 +6307,7 @@ const PICKER_INFO = {
   template: { title: 'Add a line-art template', note: 'Choose an SVG to place over the image. Each template stays editable.' },
   cusps: {title:'Cusp paths',note:'Uses the same coordinates as the main frame'},
   cuspProfile: {title:'Cusp profile',note:'An independent closed cross-section for the finer paths'},
+  grooveProfile: {title:'Groove profile',note:'A closed cutter section drawn in the same coordinates as the main profile'},
   lidSketch: {title:'Lid-top sketch',note:'Fits to the circular lid and uses the current sweep profile'},
   subject: {
     title: 'Subject from the library',
@@ -6301,7 +6352,7 @@ function closePicker() {
 }
 
 function renderPickerGrid() {
-  const kind = ['subject', 'stack', 'cusps', 'lidSketch'].includes(pickerSlot) ? 'subject' : pickerSlot === 'cuspProfile' ? 'profile' : pickerSlot;
+  const kind = ['subject', 'stack', 'cusps', 'lidSketch'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
   const resources = pickerResources.filter((r) => pickerSlot === 'template' || r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
@@ -6324,6 +6375,7 @@ async function applyFileToSlot(slot, file) {
   if (slot === 'boundary') return applyBoundaryFile(file);
   if (slot === 'stack') return addDrawing(file);
   if (slot === 'profile') return applyProfileFile(file);
+  if (slot === 'grooveProfile') return applyGrooveProfileFile(file);
 }
 
 async function applyLibraryEntry(entry) {
@@ -6830,7 +6882,7 @@ function setupWorkflowPanels() {
   }
   const sweeps=document.createElement('fieldset'); sweeps.id='sweepInputs';
   const legend=document.createElement('legend');legend.textContent='Sweep profiles & cusp paths';sweeps.append(legend);
-  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('cuspInputs'),$('gothicExample'),$('spitzbogenExample')])sweeps.append(node);
+  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('grooveInputs'),$('cuspInputs'),$('gothicExample'),$('spitzbogenExample')])sweeps.append(node);
   const sweepDetails=document.createElement('details');sweepDetails.id='sweepDetails';
   const sweepSummary=document.createElement('summary');sweepSummary.textContent='Sweep profiles & cusp paths';sweepDetails.append(sweepSummary,sweeps);
   $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
@@ -6904,7 +6956,7 @@ $('gothicExample').onclick=async()=>{
   try{
     const get=async(name)=>{const r=await fetch('/api/gothic-example/'+name);if(!r.ok)throw new Error('Could not load gothic reference');return new File([await r.blob()],name);};
     const [frame,cusps,profile,cuspProfile]=await Promise.all(['frame.dxf','cusps.dxf','frame-profile.svg','cusp-profile.svg'].map(get));
-    await setBoundary(null);await setProfile(profile);cuspPicked=cusps;cuspProfilePicked=cuspProfile;
+    await setBoundary(null);grooveProfilePicked=null;await setProfile(profile);cuspPicked=cusps;cuspProfilePicked=cuspProfile;
     $('profileScale').value=1;$('cuspWidth').value=1;$('cuspHeight').value=1;$('cuspZ').value=0;$('roundEnds').checked=true;$('endAngle').value=90;$('endSide').value=1;
     setWorkflow('gothic');updateCuspLabels();$('projectName').value='Gothic reference';
     await pickFile(frame,false);$('scale').value=1;showModelStep('shape');await generate(null);

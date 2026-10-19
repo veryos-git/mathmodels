@@ -26,6 +26,11 @@ Deno.test("cylinder settings validate dimensions against the current SCAD defaul
       { repeatX: 13 },
       { repeatX: 9, repeatY: 8 },
       { repeatX: "2" },
+      { topChamfer: -0.1 },
+      { topChamfer: Infinity },
+      { topChamfer: "0.3" },
+      { thickness: 1.2, topChamfer: 0.6 },
+      { height: 5, bottom: 4.8, topChamfer: 0.3 },
     ]
   ) {
     let failed = false;
@@ -43,6 +48,19 @@ Deno.test("cylinder settings validate dimensions against the current SCAD defaul
   if (repeated.repeatX !== 4 || repeated.repeatY !== 3) {
     throw new Error("Lost repeats");
   }
+});
+
+Deno.test("top rim chamfer is optional, saved in settings and only applied without a lid", () => {
+  if (cylinderSettings({}).topChamfer !== 0) throw new Error("Old projects must keep a square rim");
+  const c = cylinderSettings({ thickness: 1.2, topChamfer: .4 });
+  const plan = cylinderRenderPlan(c);
+  if (c.topChamfer !== .4 || plan.parameters.top_chamfer !== .4 || plan.parameters.edge_chamfer !== 0) {
+    throw new Error("The top chamfer must not change the bottom edge");
+  }
+  const plainLid = cylinderRenderPlan(cylinderSettings({ lid: true, threaded: false, topChamfer: .4 }));
+  if (plainLid.parameters.top_chamfer !== 0) throw new Error("An open-rim chamfer changed a lidded shell");
+  const screw = cylinderRenderPlan(cylinderSettings({ lid: true, topChamfer: .4 }));
+  if ("top_chamfer" in screw.parameters) throw new Error("An open-rim chamfer changed the screw-lid design");
 });
 
 Deno.test("screw lids leave model defaults to the supplied SCAD and override only requested sizes", () => {

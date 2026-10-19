@@ -7,9 +7,8 @@ import sys
 import numpy as np
 import manifold3d as mf
 import trimesh
-from shapely.affinity import scale as scale_polygon
 
-from dxf2stl import ConvertError, MITER_LIMIT, chain_curves, load_profile, read_curves, sweep_profile
+from dxf2stl import ConvertError, MITER_LIMIT, chain_curves, load_sweep_profiles, read_curves, sweep_profile, subtract_groove
 from gothic import path_frames, segmented_profile_sweep
 from cylinder import EMBED, dimensions, manifold, mesh_of
 
@@ -47,7 +46,7 @@ def fit_lid_paths(curves, profile, diameter):
     return [(np.asarray(chain)*factor).tolist() for chain in chains], factor
 
 
-def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02):
+def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groove_path=None):
     if not c.get('lid'):
         raise ValueError("A lid-top sketch requires Add lid")
     if not profile_path:
@@ -56,8 +55,7 @@ def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02):
         raise ValueError("Profile width must be greater than zero")
     if not math.isfinite(sagitta) or sagitta <= 0:
         raise ValueError("Curve tolerance must be greater than zero")
-    profile = load_profile(profile_path, sagitta)
-    profile = scale_polygon(profile, xfact=profile_scale, yfact=1, origin=(0, 0))
+    profile, groove = load_sweep_profiles(profile_path, groove_path, sagitta, profile_scale)
     design = c.get('threadedDesign', {}) if c.get('threaded') else {}
     diameter = c['diameter']-2*design.get('lidTopChamfer', 0)
     curves, _, _ = read_curves(sketch, sagitta)
@@ -93,6 +91,8 @@ def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02):
         if not parts or any(not p.is_volume for p in parts):
             raise ValueError("The lid-top sweep did not form closed solids; reduce the profile width or simplify tight sketch corners")
         mesh = trimesh.util.concatenate(parts)
+    if groove is not None:
+        mesh = subtract_groove(mesh, groove, chains, z_offset=z)
     return mesh, {'scale': factor, 'diameter': diameter,
                   'profileWidth': profile.bounds[2]-profile.bounds[0],
                   'profileHeight': profile.bounds[3], 'triangles': len(mesh.faces)}
@@ -105,11 +105,12 @@ def main():
     parser.add_argument('config')
     parser.add_argument('output')
     parser.add_argument('--profile-scale', type=float, default=1)
+    parser.add_argument('--groove-profile')
     parser.add_argument('--sagitta', type=float, default=.02)
     args = parser.parse_args()
     with open(args.config) as stream:
         settings = json.load(stream)
-    mesh, info = lid_art_mesh(args.sketch, args.profile, settings, args.profile_scale, args.sagitta)
+    mesh, info = lid_art_mesh(args.sketch, args.profile, settings, args.profile_scale, args.sagitta, args.groove_profile)
     mesh.export(args.output)
     json.dump(info, sys.stdout)
 

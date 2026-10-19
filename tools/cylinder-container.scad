@@ -19,6 +19,8 @@ bottom_thickness = 2.4;
 lid_top_thickness = 2.4;
 neck_height = 6;
 edge_chamfer = 0.5;
+// 45-degree bevel on both edges of an open container's rim; 0 disables it.
+top_chamfer = 0;
 
 /* [Thread fit] */
 thread_pitch = 1;
@@ -41,6 +43,7 @@ inner_r = has_lid ? neck_r - wall_thickness : outer_r - wall_thickness;
 shoulder_z = has_lid ? container_height - neck_height : container_height;
 lid_cavity_height = neck_height + rim_clearance;
 lid_height = lid_cavity_height + lid_top_thickness;
+rim_chamfer = has_lid ? 0 : top_chamfer;
 
 assert(inner_r > 0 && wall_thickness > 0, "Diameter is too small for these walls");
 assert(bottom_thickness > 0 && shoulder_z > bottom_thickness);
@@ -52,6 +55,9 @@ assert(radial_clearance > 0 && (!has_lid || !threaded || radial_clearance < thre
 assert(axial_clearance >= 0 && axial_clearance < 0.1 * thread_pitch,
        "Axial clearance must be less than 10% of the pitch");
 assert(edge_chamfer >= 0 && edge_chamfer < min(bottom_thickness, lid_top_thickness, wall_thickness));
+assert(rim_chamfer >= 0 && 2*rim_chamfer < wall_thickness &&
+       rim_chamfer < container_height-bottom_thickness,
+       "Top chamfer must leave a flat rim and stay above the bottom");
 assert(quality >= 32 && quality == floor(quality));
 assert(view == "print" || view == "container" || view == "lid" ||
        view == "assembled" || view == "section" || view == "lid-assembled", "Unknown view");
@@ -94,7 +100,8 @@ module container() {
         union() {
             rotate_extrude() polygon([
                 [0, 0], [outer_r-edge_chamfer, 0],
-                [outer_r, edge_chamfer], [outer_r, shoulder_z],
+                [outer_r, edge_chamfer], [outer_r, shoulder_z-rim_chamfer],
+                [outer_r-rim_chamfer, shoulder_z],
                 [0, shoulder_z]]);
             if (has_lid) translate([0, 0, shoulder_z-eps])
                 cylinder(r = neck_r, h = neck_height+eps);
@@ -102,6 +109,9 @@ module container() {
         }
         translate([0, 0, bottom_thickness])
             cylinder(r = inner_r, h = container_height);
+        if (rim_chamfer > 0) translate([0, 0, container_height-rim_chamfer])
+            cylinder(r1 = inner_r, r2 = inner_r+rim_chamfer+eps,
+                     h = rim_chamfer+eps);
     }
 }
 

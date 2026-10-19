@@ -14,6 +14,7 @@ export type CylinderSettings = {
   pitch: number;
   clearance: number;
   seamGap: number;
+  topChamfer: number;
   repeatX: number;
   repeatY: number;
   threadedDesign?: ReturnType<typeof readThreadedDefaults>["design"];
@@ -25,7 +26,7 @@ export function cylinderSettings(raw: unknown): CylinderSettings {
   }
   const input = { ...raw } as Record<string, unknown>;
   const scad = readThreadedDefaults();
-  const { lid: _lid, threaded: _threaded, ...defaults } = scad.defaults;
+  const { lid: _lid, threaded: _threaded, topChamfer, ...defaults } = scad.defaults;
   const result = {
     lid: input.lid ?? false,
     threaded: input.threaded ?? true,
@@ -54,6 +55,14 @@ export function cylinderSettings(raw: unknown): CylinderSettings {
     Object.assign(result, { [key]: value });
   }
   const c = result;
+  const chamfer = input.topChamfer ?? topChamfer;
+  if (typeof chamfer !== "number" || !Number.isFinite(chamfer) || chamfer < 0 || chamfer > 500) {
+    throw new Error("Top chamfer must be a non-negative number up to 500 mm (0 turns it off)");
+  }
+  c.topChamfer = chamfer;
+  if (!c.lid && (2*chamfer >= c.thickness || chamfer >= c.height-c.bottom)) {
+    throw new Error("Top chamfer must be less than half the shell thickness and stay above the bottom");
+  }
   for (const key of ["repeatX", "repeatY"] as const) {
     const value = input[key] ?? 1;
     if (
@@ -171,6 +180,7 @@ export function cylinderRenderPlan(
       thread_pitch: c.pitch,
       radial_clearance: c.clearance,
       edge_chamfer: 0,
+      top_chamfer: c.lid ? 0 : c.topChamfer,
       has_lid: c.lid,
       threaded: false,
       quality: 128,

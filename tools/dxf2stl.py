@@ -481,11 +481,12 @@ def closed_faces(path, sagitta, what):
     return faces
 
 
-def load_profile(path, sagitta):
+def load_profile(path, sagitta, origin=None):
     """The closed cross-section to sweep, anchored centre-x / bottom edge.
 
     Interior construction lines dissolve in the union, and the largest shape
     left is the section — a profile is one closed outline, not several.
+    An explicit origin registers a cutter against the main profile instead.
     """
     merged = unary_union(closed_faces(path, sagitta, "profile"))
     polys = list(polygons_of(merged))
@@ -494,7 +495,26 @@ def load_profile(path, sagitta):
                            "the sweep profile must be one closed shape")
     profile = max(polys, key=lambda p: p.area)
     minx, miny, maxx, _ = profile.bounds
-    return translate(profile, xoff=-(minx + maxx) / 2.0, yoff=-miny)
+    if origin is None:
+        origin = ((minx + maxx) / 2.0, miny)
+    return translate(profile, xoff=-origin[0], yoff=-origin[1])
+
+
+def load_sweep_profiles(path, groove_path, sagitta, width_scale=1.0):
+    """Place both sections relative to the main section's centre and base.
+
+    A cutter must keep its drawn elevation and lateral offset. Anchoring it
+    independently would drop its tip onto the base and cut through the frame.
+    """
+    if not math.isfinite(width_scale) or width_scale <= 0:
+        raise ConvertError("profile scale must be greater than 0")
+    profile = load_profile(path, sagitta, origin=(0, 0))
+    minx, miny, maxx, _ = profile.bounds
+    origin = ((minx + maxx) / 2, miny)
+    profile = translate(profile, xoff=-origin[0], yoff=-origin[1])
+    groove = load_profile(groove_path, sagitta, origin=origin) if groove_path else None
+    return tuple(aff_scale(p, xfact=width_scale, yfact=1, origin=(0, 0))
+                 if p is not None else None for p in (profile, groove))
 
 
 def chain_curves(curves, min_dot=-0.95):
@@ -645,6 +665,39 @@ def sweep_profile(profile, chains):
         return solid_union(meshes)
     except (ValueError, RuntimeError) as error:
         raise ConvertError(f"Could not build the profile sweep: {error}") from error
+
+
+def subtract_groove(mesh, profile, chains, z_offset=0):
+    """Subtract the whole cutter network after the positive sweeps are fused.
+
+    Cutting the 2D section first leaves material from neighbouring sweeps
+    inside the groove at junctions. A final solid difference clears it there.
+    """
+    from cylinder import manifold, mesh_of
+
+    cutter = sweep_profile(profile, chains)
+    if z_offset:
+        cutter.apply_translation((0, 0, z_offset))
+    try:
+        result = mesh_of((manifold(mesh) - manifold(cutter)).simplify(.0001))
+        # Tangencies can leave zero-volume fragments; keep only closed solids
+        # that remain valid after float32 STL vertices have been welded.
+        parts = []
+        for part in result.split(only_watertight=False, repair=False):
+            local = part.copy()
+            local.apply_translation(-local.vertices.mean(axis=0))
+            if not part.is_watertight and np.linalg.matrix_rank(local.vertices, tol=1e-7) < 3:
+                continue  # A collapsed sliver can leave an isolated planar face.
+            if abs(local.volume) > 1e-6:
+                parts.append(part)
+        if not parts:
+            raise ValueError("the groove profile removes the entire frame")
+        if any(not p.is_volume for p in parts):
+            raise ValueError("the grooved frame is not closed at STL precision; "
+                             "adjust the profile or curve tolerance")
+        return trimesh.util.concatenate(parts)
+    except (ValueError, RuntimeError) as error:
+        raise ConvertError(f"Could not subtract the groove: {error}") from error
 
 
 # ------------------------------------------------------------- boundary crop
@@ -852,14 +905,13 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
     curves, used, skipped = read_curves(path, args.sagitta, layers, scale)
 
     wall_width, wall_height = args.wall_width, args.wall_height
-    profile = None
+    profile = groove_profile = None
+    groove_path = getattr(args, "groove_profile", None)
+    if groove_path and not args.profile:
+        raise ConvertError("A groove profile requires a main sweep profile")
     if args.profile:
-        profile = load_profile(args.profile, args.sagitta)
-        if args.profile_scale != 1.0:
-            if args.profile_scale <= 0:
-                raise ConvertError("profile scale must be greater than 0")
-            profile = aff_scale(profile, xfact=args.profile_scale, yfact=1.0,
-                                origin=(0.0, 0.0))
+        profile, groove_profile = load_sweep_profiles(
+            args.profile, groove_path, args.sagitta, args.profile_scale)
         minx, _, maxx, maxy = profile.bounds
         # The profile sets the frame's dimensions: its x span is the wall
         # width the faces are planned against, its top is the wall height.
@@ -1017,6 +1069,13 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
                 frame_mesh = solid_union([frame_mesh, connection_mesh])
             except (ValueError, RuntimeError) as error:
                 raise ConvertError(f"Could not fuse the frame connections: {error}") from error
+
+    if groove_profile is not None:
+        groove_paths = swept + [list(rib.coords) for rib in connection_curves]
+        groove_chains = chain_curves(groove_paths)
+        frame_mesh = subtract_groove(frame_mesh, groove_profile, groove_chains)
+        if connection_mesh is not None:
+            connection_mesh = subtract_groove(connection_mesh, groove_profile, groove_chains)
 
     summary = {
         "curves": n_curves,
@@ -2109,6 +2168,9 @@ def main():
     ap.add_argument("--profile-scale", type=float, default=1.0,
                     help="stretch the profile's width (its x axis); the height "
                          "stays as drawn")
+    ap.add_argument("--groove-profile", default=None, metavar="FILE",
+                    help="DXF/SVG cutter section in the main profile's coordinates; "
+                         "sweep along the same paths and subtract from the frame")
     ap.add_argument("--cusps", help="Separate SVG/DXF cusp paths in the frame coordinate system")
     ap.add_argument("--cusp-profile", help="Optional independent closed section for cusp paths")
     ap.add_argument("--cusp-width", type=float, default=0.55)
@@ -2399,7 +2461,7 @@ def main():
             if args.lid_sketch:
                 from lid_art import lid_art_mesh
                 lid_art, _ = lid_art_mesh(args.lid_sketch, args.profile, cylinder,
-                                         args.profile_scale, args.sagitta)
+                                         args.profile_scale, args.sagitta, args.groove_profile)
             result = export_cylinder(args.output, buckets, cylinder, bool(args.split or args.groups), lid_art)
         except ValueError as error:
             raise ConvertError(str(error)) from error

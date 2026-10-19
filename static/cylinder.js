@@ -25,7 +25,7 @@ export function cylinderFit(bounds, c, repeatX, repeatY, mode='proportional') {
     (a*(c.diameter+seam)/c.diameter**2+b*(c.height+extra)/c.height**2)/(a*a/c.diameter**2+b*b/c.height**2);
   const minRadius=c.lid?2*c.thickness+c.clearance+(c.threaded?0.4*c.pitch:0):c.thickness;
   const transition=c.lid&&c.threaded?c.thickness+c.clearance+0.4*c.pitch:0;
-  const minHeight=c.bottom+(c.lid?c.neck:0)+transition;
+  const minHeight=c.bottom+(c.lid?c.neck:(c.topChamfer??0))+transition;
   if(mode!=='original') {
     const minScale=Math.max((Math.max(10,2*minRadius+1e-6)+seam)/a,
       (Math.max(5,minHeight+1e-6)+extra)/b);
@@ -69,6 +69,7 @@ export function cylinderDimensions(c) {
 }
 
 export function cylinderBevels(c, part) {
+  if(!c.lid)return c.topChamfer>0?[c.height-c.topChamfer]:[];
   const d=c.lid&&c.threaded?c.threadedDesign:null;
   if(!d)return [];
   const {shoulder,height}=cylinderDimensions(c), base=c.height-c.neck;
@@ -77,6 +78,7 @@ export function cylinderBevels(c, part) {
 }
 
 export function cylinderSurfaceInset(z, c, part) {
+  if(!c.lid)return Math.max(0,Math.min(c.topChamfer??0,z-c.height+(c.topChamfer??0)));
   const d=c.lid&&c.threaded?c.threadedDesign:null;
   if(!d)return 0;
   const {shoulder,height}=cylinderDimensions(c), base=c.height-c.neck;

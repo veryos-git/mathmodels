@@ -73,3 +73,20 @@ for(const [part,positions] of Object.entries(beveled))for(let i=0;i<positions.le
   assert.ok(part==='body'?positions[i+2]<=60.10001:positions[i+2]>=60.29999,'seam follows the raised alignment stop');
 }
 console.log('Cylinder preview: proportions, suggestions, repetitions, curvature, default chamfers and lid seam passed');
+
+const openRim={...c,lid:false,topChamfer:.4};
+assert.equal(cylinderSurfaceInset(59,openRim,'body'),0);
+assert.ok(Math.abs(cylinderSurfaceInset(59.8,openRim,'body')-.2)<1e-9);
+assert.equal(cylinderSurfaceInset(60,openRim,'body'),.4);
+assert.equal(cylinderSurfaceInset(60,{...openRim,topChamfer:0},'body'),0);
+assert.equal(cylinderSurfaceInset(60,{...openRim,lid:true,threaded:false},'body'),0);
+assert.ok(Math.abs(Math.hypot(...cylinderPoint([0,55,1],bounds,openRim).slice(0,2))-30.55)<1e-9);
+const rimPreview=wrapCylinderTriangles(new Float64Array([-10,5,1,90,5,1,90,55,1]),bounds,openRim);
+let hasChamferStart=false;
+for(let i=0;i<rimPreview.body.length;i+=3) {
+  const [x,y,z]=rimPreview.body.slice(i,i+3);
+  assert.ok(Math.abs(Math.hypot(x,y)-(30.95-cylinderSurfaceInset(z,openRim,'body')))<1e-4);
+  if(Math.abs(z-59.6)<1e-4)hasChamferStart=true;
+}
+assert.ok(hasChamferStart,'triangles split at the start of the top chamfer');
+console.log('Optional open-rim chamfer: preview follows the bevel and lidded models ignore it');

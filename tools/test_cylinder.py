@@ -1,16 +1,20 @@
 import math
 import os
+import io
 import tempfile
 import unittest
 import json
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 import manifold3d as mf
+import numpy as np
+import ezdxf
 import trimesh
 
-from cylinder import dimensions, export_cylinder, manifold, mesh_of, wrap_solid
+from cylinder import dimensions, export_cylinder, manifold, mesh_of, printable_mesh, surface_inset, wrap_solid
 
 
 class CylinderTests(unittest.TestCase):
@@ -42,6 +46,44 @@ class CylinderTests(unittest.TestCase):
         expected = math.pi*(30.95**2-29.95**2)*60
         self.assertAlmostEqual(solid.volume()/expected, 1, places=3)
         self.assertEqual(dimensions(c), (60, 60))
+
+    def test_open_rim_chamfer_keeps_wrapped_artwork_closed(self):
+        c = {**self.c, 'lid': False, 'topChamfer': .4}
+        mesh = printable_mesh(wrap_solid(self.flat, self.bounds, c, 'body'))
+        loaded = trimesh.load(io.BytesIO(mesh.export(file_type='stl')), file_type='stl')
+        self.assertTrue(loaded.is_volume)
+        for z, outer in [(0, 30.95), (59.6, 30.95), (60, 30.55)]:
+            vertices = loaded.vertices[np.abs(loaded.vertices[:, 2]-z)<1e-4]
+            self.assertGreater(len(vertices), 0)
+            self.assertAlmostEqual(np.linalg.norm(vertices[:, :2], axis=1).max(), outer, places=4)
+        self.assertAlmostEqual(float(surface_inset(59.8, c, 'body')), .2)
+
+    @unittest.skipUnless(shutil.which('openscad'), 'OpenSCAD is required to check the actual shell')
+    def test_scad_open_rim_chamfers_inner_and_outer_edges_only(self):
+        source = Path(__file__).with_name('cylinder-container.scad')
+        with tempfile.TemporaryDirectory() as directory:
+            meshes = []
+            for chamfer in (0, .4):
+                path = Path(directory)/f'rim-{chamfer}.stl'
+                result = subprocess.run(['openscad', '-o', str(path), '-D', 'view="container"',
+                    '-D', 'has_lid=false', '-D', 'edge_chamfer=0', '-D', f'top_chamfer={chamfer}',
+                    str(source)], env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'},
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                mesh = trimesh.load_mesh(path)
+                self.assertTrue(mesh.is_volume)
+                top = mesh.vertices[np.abs(mesh.vertices[:, 2]-60)<1e-4]
+                radii = np.linalg.norm(top[:, :2], axis=1)
+                inner = radii[radii < 28.8]
+                self.assertAlmostEqual(inner.max(), 27.6+chamfer, delta=.001)
+                # Boolean intersections may add vertices inside a polygon
+                # facet, between its apothem and the nominal corner radius.
+                self.assertGreaterEqual(inner.min(), (27.6+chamfer)*math.cos(math.pi/128)-.001)
+                self.assertAlmostEqual(radii.max(), 30-chamfer, delta=.001)
+                bottom = mesh.vertices[np.abs(mesh.vertices[:, 2])<1e-4]
+                self.assertAlmostEqual(np.linalg.norm(bottom[:, :2], axis=1).max(), 30, delta=.001)
+                meshes.append(mesh)
+            self.assertLess(meshes[1].volume, meshes[0].volume)
 
     def test_chamfered_artwork_is_closed_and_clears_the_raised_lid_seam(self):
         import numpy as np
@@ -86,6 +128,63 @@ class CylinderTests(unittest.TestCase):
         for bad in ({'repeatX': 0}, {'repeatY': 1.5}, {'repeatX': 12, 'repeatY': 12}):
             with self.assertRaises(ValueError):
                 wrap_solid(self.flat, self.bounds, {**self.c, **bad}, 'body')
+
+    def test_stl_edge_contacts_are_closed_without_losing_small_solids(self):
+        touching = (mf.Manifold.cube((1, 1, 1))
+                    + mf.Manifold.cube((1, 1, 1)).translate((1, 1, 0)))
+        tiny = mf.Manifold.cube((.01, .01, .01)).translate((4, 0, 0))
+        solid = touching + tiny
+        self.assertFalse(mesh_of(solid).is_watertight)
+        mesh = printable_mesh(solid)
+        loaded = trimesh.load(io.BytesIO(mesh.export(file_type='stl')), file_type='stl')
+        self.assertTrue(loaded.is_volume)
+        self.assertAlmostEqual(loaded.volume, solid.volume(), delta=1e-7)
+        np.testing.assert_allclose(loaded.bounds, mesh_of(solid).bounds, atol=.00011)
+        parts = loaded.split()
+        self.assertEqual(len(parts), 2)
+        self.assertAlmostEqual(min(p.volume for p in parts), .01**3, places=10)
+
+    def test_printable_conversion_rejects_an_open_input(self):
+        invalid = mf.Manifold(mf.Mesh64(np.array([[0., 0, 0], [1, 0, 0], [0, 1, 0]]),
+                                       np.array([[0, 1, 2]], dtype=np.uint32)))
+        with self.assertRaisesRegex(ValueError, 'closed printable parts'):
+            printable_mesh(invalid)
+
+    def test_grooved_elven_cylinder_survives_stl_welding(self):
+        fixture = json.loads((Path(__file__).parent/'fixtures/groove-cylinder-precision.json').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            doc = ezdxf.new()
+            for entity in fixture['entities']:
+                args = {k: v for k, v in entity.items() if k != 'type'}
+                getattr(doc.modelspace(), 'add_'+entity['type'].lower())(**args)
+            doc.saveas(root/'subject.dxf')
+            for key in ('profile', 'grooveProfile'):
+                doc = ezdxf.new()
+                doc.modelspace().add_lwpolyline(fixture[key], close=True)
+                doc.saveas(root/(key+'.dxf'))
+            c = fixture['cylinder']
+            radius, height = c['diameter']/2, c['height']
+            shell = (mf.Manifold.cylinder(height, radius, radius, 128)
+                     - mf.Manifold.cylinder(height, radius-c['thickness'], radius-c['thickness'], 128)
+                     .translate((0, 0, c['bottom'])))
+            c['bodyPath'] = str(root/'shell.stl')
+            mesh_of(shell).export(c['bodyPath'])
+            (root/'cylinder.json').write_text(json.dumps(c))
+            (root/'stacks.json').write_text(json.dumps(fixture['stacks']))
+            target = root/'wrapped.stl'
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('dxf2stl.py')),
+                str(root/'subject.dxf'), str(target), '--profile', str(root/'profile.dxf'),
+                '--groove-profile', str(root/'grooveProfile.dxf'), '--stacks', str(root/'stacks.json'),
+                '--cylinder', str(root/'cylinder.json')], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            loaded = trimesh.load_mesh(target)
+            self.assertTrue(loaded.is_volume)
+            # The analytic shell avoids OpenSCAD's coordinate rounding; the
+            # volume must still match the saved project to ten parts per million.
+            self.assertAlmostEqual(loaded.volume/35318.7446, 1, delta=1e-5)
+            self.assertAlmostEqual(loaded.bounds[0, 2], 0, delta=.00011)
+            self.assertAlmostEqual(loaded.bounds[1, 2], height, delta=.00011)
 
     def test_exports_are_closed_and_lid_is_print_oriented(self):
         # Analytic shells isolate wrapping/export checks from OpenSCAD startup.

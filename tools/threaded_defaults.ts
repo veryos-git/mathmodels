@@ -61,6 +61,7 @@ export function readThreadedDefaults() {
       pitch: number("thread_pitch"),
       clearance: number("radial_clearance"),
       seamGap: 0.2,
+      topChamfer: 0,
       lid: false,
       threaded: true,
     },

@@ -17,6 +17,7 @@ The pipeline in one line:
 | **region** | A closed area enclosed by the subject's lines — the 2D thing that becomes paint. |
 | **boundary** | A closed shape that crops the subject and defines the finished outline and size (for example to fit a lantern). |
 | **profile** | A closed cross-section swept along the subject's lines to form the frame. |
+| **groove profile** | A second closed cross-section swept along the main frame's paths and subtracted from it; its coordinates set the groove position and depth relative to the main profile. |
 | **tracery** | The network of ornament lines of a gothic subject. |
 
 ## 3D result
