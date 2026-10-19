@@ -116,10 +116,10 @@ class SliceSVGTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / 'slice.svg'
             result = subprocess.run([
-                sys.executable, 'tools/dxf2stl.py', 'examples/gothic/frame.dxf',
-                str(target), '--profile', 'examples/gothic/frame-profile.svg',
-                '--cusps', 'examples/gothic/cusps.dxf', '--cusp-profile',
-                'examples/gothic/cusp-profile.svg', '--cusp-width', '1',
+                sys.executable, 'tools/dxf2stl.py', 'hgc/examples/gothic/frame.dxf',
+                str(target), '--profile', 'hgc/examples/gothic/frame-profile.svg',
+                '--cusps', 'hgc/examples/gothic/cusps.dxf', '--cusp-profile',
+                'hgc/examples/gothic/cusp-profile.svg', '--cusp-width', '1',
                 '--cusp-height', '1', '--frame-only', '--round-ends',
                 '--slice-height', '1',
             ], cwd=root, capture_output=True, text=True, check=True)

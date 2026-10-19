@@ -70,6 +70,7 @@ const MIME: Record<string, string> = {
 async function takeUpload(
   req: Request,
   dir: string,
+  profileIsInput = false,
 ): Promise<{
   form: FormData;
   file: File;
@@ -114,7 +115,7 @@ async function takeUpload(
 
   // Advanced modes each add a second drawing: one holding the sweep profile,
   // one holding the polygon that bounds the pattern.
-  const profilePath = await takeExtra(form, "profile", "profile", dir);
+  const profilePath = profileIsInput ? paths[0] : await takeExtra(form, "profile", "profile", dir);
   const grooveProfilePath = await takeExtra(form, "grooveProfile", "groove profile", dir);
   if (grooveProfilePath && !profilePath) {
     throw new HttpError(400, "A groove profile requires a main sweep profile");
@@ -204,11 +205,19 @@ function handleInspect(req: Request): Promise<Response> {
   });
 }
 
-/**
- * POST /api/preview — the raw subject and boundary outlines, so the browser can
- * draw the 2D window-position preview and reposition the subject inside the
- * boundary without a full 3D rebuild on every drag.
- */
+/** POST /api/profiles/preview — registered sections from the sweep's own parser. */
+function handleProfileSections(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    const { form, paths, grooveProfilePath, cuspProfilePath } = await takeUpload(req, dir, true);
+    return Response.json(await runScript([
+      paths[0], "--profile-sections", ...numericFlags(form, { sagitta: "--sagitta" }),
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
+      ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
+    ]));
+  });
+}
+
+/** POST /api/preview — raw subject and boundary outlines for 2D placement. */
 function handlePreview(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, boundaryPath } = await takeUpload(req, dir);
@@ -233,6 +242,9 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
     sagitta: "--sagitta",
     scale: "--scale",
     profileScale: "--profile-scale",
+    profileHeightScale: "--profile-height-scale",
+    grooveWidth: "--groove-width", grooveHeight: "--groove-height",
+    profileZ: "--profile-z", grooveZ: "--groove-z",
     cuspWidth: "--cusp-width", cuspHeight: "--cusp-height", cuspZ: "--cusp-z",
     endAngle: "--end-angle", endSide: "--end-side",
     effectSteps: "--effect-steps",
@@ -328,7 +340,9 @@ function handleLidArt(req: Request): Promise<Response> {
     const info = await runScript([
       paths[0], profilePath, config, output,
       ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
-      ...numericFlags(form, { profileScale: "--profile-scale", sagitta: "--sagitta" }),
+      ...numericFlags(form, { profileScale: "--profile-scale", profileHeightScale: "--profile-height-scale",
+        profileZ: "--profile-z", grooveZ: "--groove-z",
+        grooveWidth: "--groove-width", grooveHeight: "--groove-height", sagitta: "--sagitta" }),
     ], "tools/lid_art.py");
     return Response.json({ ...info, stl: (await Deno.readFile(output)).toBase64() });
   });
@@ -1256,6 +1270,7 @@ Deno.serve({ port: PORT }, async (req) => {
 
     if (url.pathname === "/api/inspect" && req.method === "POST") return await handleInspect(req);
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
+    if (url.pathname === "/api/profiles/preview" && req.method === "POST") return await handleProfileSections(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);
     if (url.pathname === "/api/cylinder/defaults" && req.method === "GET") {
       const { defaults, design, parameters } = readThreadedDefaults();

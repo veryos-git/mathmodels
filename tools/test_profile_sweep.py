@@ -2,11 +2,16 @@
 import io
 import json
 from pathlib import Path
+import tempfile
 import unittest
+import warnings
 
+import ezdxf
 import numpy as np
 import trimesh
-from shapely.geometry import Polygon, Point, shape
+from shapely.affinity import scale
+from shapely.geometry import LineString, Polygon, Point, shape
+from shapely.ops import unary_union
 
 from dxf2stl import chain_curves, load_profile, read_curves, sweep_profile
 from slice_svg import planar_section
@@ -52,9 +57,43 @@ class ProfileSweepTests(unittest.TestCase):
         self.assertAlmostEqual(mesh.volume, 20, places=5)
         self.assertAlmostEqual(planar_section([mesh], 1).area, 10, places=5)
 
+    def test_gothic_hook_widths_preserve_sections_and_survive_stl(self):
+        fixture = json.loads((ROOT / 'tools/fixtures/gothic-hook-sweep.json').read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'sketch.dxf'
+            doc = ezdxf.new()
+            drawing = doc.modelspace()
+            for entity in fixture['entities']:
+                args = {k: v for k, v in entity.items() if k != 'type'}
+                getattr(drawing, 'add_' + entity['type'].lower())(**args)
+            doc.saveas(path)
+            chains = chain_curves(read_curves(str(path), .02)[0])
+
+        # Both narrower and wider sections used to fail on these arches.
+        # Treat the accompanying zero-volume mass warning as a failure too.
+        for width in (.7, 1, 2):
+            with self.subTest(width=width), warnings.catch_warnings():
+                warnings.simplefilter('error', RuntimeWarning)
+                profile = scale(Polygon(fixture['profile']), xfact=width, yfact=1, origin=(0, 0))
+                mesh = sweep_profile(profile, chains)
+                loaded = trimesh.load(io.BytesIO(mesh.export(file_type='stl')), file_type='stl')
+                self.assertTrue(loaded.is_volume)
+                self.assertEqual(len(loaded.split()), 1)
+                np.testing.assert_allclose(loaded.bounds[:, 2], [0, 6], atol=1e-6)
+                for z in (.5, 2.5, 4.5):
+                    # An independent planar stroke gives the expected filled
+                    # area, including the holes between intersecting arches.
+                    section = profile.intersection(LineString([(-20, z), (20, z)]))
+                    expected = unary_union([
+                        LineString(chain).buffer(section.bounds[2], cap_style='flat',
+                                                 join_style='mitre', mitre_limit=4)
+                        for chain in chains])
+                    actual = planar_section([loaded], z)
+                    self.assertLess(actual.symmetric_difference(expected).area / expected.area, .001)
+
     def test_spitzbogen_matches_measured_step_sections(self):
-        profile = load_profile(str(ROOT / 'examples/spitzbogen/profile.svg'), .002)
-        curves, _, _ = read_curves(str(ROOT / 'examples/spitzbogen/frame.dxf'), .002)
+        profile = load_profile(str(ROOT / 'hgc/examples/spitzbogen/profile.svg'), .002)
+        curves, _, _ = read_curves(str(ROOT / 'hgc/examples/spitzbogen/frame.dxf'), .002)
         mesh = sweep_profile(profile, chain_curves(curves))
         loaded = trimesh.load(io.BytesIO(mesh.export(file_type='stl')), file_type='stl')
         self.assertTrue(loaded.is_volume)

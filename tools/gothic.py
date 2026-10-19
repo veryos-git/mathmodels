@@ -103,9 +103,22 @@ def solid_union(meshes):
     # precision and discard zero-volume slivers from tangent intersections.
     result.vertices = result.vertices.astype(np.float32).astype(float)
     result.merge_vertices()
-    parts = [p for p in result.split(only_watertight=False) if abs(p.volume) > 1e-6]
-    if not parts or any(not p.is_watertight for p in parts):
-        raise ValueError("The fused geometry is not watertight at STL precision; adjust the cusp width or ending side")
+    result.update_faces(np.all(np.diff(np.sort(result.faces, axis=1), axis=1) != 0, axis=1))
+    result.update_faces(result.unique_faces())
+    result.remove_unreferenced_vertices()
+    parts = []
+    for part in result.split(only_watertight=False, repair=False):
+        local = part.copy()
+        local.apply_translation(-local.vertices.mean(axis=0))
+        # Collapsed slivers have no mass: asking trimesh for their centre of
+        # mass divides by zero. Reject planar scraps before measuring volume,
+        # in local coordinates so distant open faces cannot fake a volume.
+        if np.linalg.matrix_rank(local.vertices, tol=1e-7) < 3:
+            continue
+        if abs(local.volume) > 1e-6:
+            parts.append(part)
+    if not parts or any(not p.is_volume for p in parts):
+        raise ValueError("The fused geometry is not watertight at STL precision")
     return trimesh.util.concatenate(parts)
 
 
@@ -137,7 +150,7 @@ def segmented_profile_sweep(profile, chains, miter_limit=4.0, overlap=.001):
             # The ring sweep shortens capped mitres. A prism cut cannot
             # reproduce that shortened ring without changing its section.
             if any(abs(normals[v] @ normal-1) > 1e-6 for v in (i, j)):
-                raise ValueError("The profile is too wide at a sharp lid-sketch corner; soften the corner or reduce the profile width")
+                raise ValueError("The profile is too wide at a sharp sketch corner; soften the corner or reduce the profile width")
             origin = points[i]-direction*margin
             solid = section.extrude(length+2*margin).transform([
                 [normal[0], 0, direction[0], origin[0]],
@@ -154,7 +167,7 @@ def segmented_profile_sweep(profile, chains, miter_limit=4.0, overlap=.001):
                 solid = solid.trim_by_plane([*cut, 0], cut @ points[v]-(overlap if internal else 0))
             solids.append(solid)
     if not solids:
-        raise ValueError("The lid-top sketch has no drawable paths")
+        raise ValueError("The sketch has no drawable paths")
     return manifold3d.Manifold.batch_boolean(solids, manifold3d.OpType.Add).simplify(.0001)
 
 

@@ -17,6 +17,11 @@
     "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts tools/cylinder_test.ts",
     "test:editor": "deno run --allow-read --allow-env --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_image_editor.mjs",
     "test:geometry": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/python.ts -m unittest discover -s tools -p test_*.py",
+    "test:profiles": {
+      "command": "deno run tools/test_profile_scales.mjs",
+      "dependencies": ["test:profile-editor"]
+    },
+    "test:profile-editor": "deno run tools/test_profile_editor.mjs",
     "install": {
       "command": "deno run --allow-run --allow-sys=uid tools/install.ts",
       "dependencies": [

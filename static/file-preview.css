@@ -1,0 +1,72 @@
+asset-preview {
+  display: flex; flex-direction: column; min-width: 0; margin: 10px 0;
+  border: 1px solid #354052; border-radius: 9px; overflow: hidden;
+  color: #b8c5d8; background: #171c24; font: 12px/1.4 system-ui, sans-serif;
+  text-align: left; cursor: default;
+}
+asset-preview[hidden], asset-preview [hidden] { display: none !important; }
+asset-preview .file-preview-viewport {
+  height: 174px; position: relative; overflow: hidden; cursor: grab;
+  touch-action: none; user-select: none; background: #f4f6f9;
+  background-image: linear-gradient(45deg, #e7ebf0 25%, transparent 25%, transparent 75%, #e7ebf0 75%),
+    linear-gradient(45deg, #e7ebf0 25%, transparent 25%, transparent 75%, #e7ebf0 75%);
+  background-size: 20px 20px; background-position: 0 0, 10px 10px;
+}
+asset-preview[data-tone="dark"] .file-preview-viewport { background: #101216; }
+asset-preview .file-preview-viewport.dragging { cursor: grabbing; }
+asset-preview .file-preview-viewport:focus-visible { outline: 2px solid #60a5fa; outline-offset: -3px; }
+asset-preview .file-preview-image {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  object-fit: contain; padding: 10px; pointer-events: none; transform-origin: center;
+}
+asset-preview:not([data-state="ready"]) .file-preview-image { visibility: hidden; }
+asset-preview .file-preview-message {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; padding: 16px; text-align: center; color: #475569;
+  background: #edf1f7; overflow: auto;
+}
+asset-preview[data-tone="dark"] .file-preview-message { background: #101216; color: #b8c5d8; }
+asset-preview .file-preview-toolbar { display: flex; align-items: center; gap: 3px; padding: 6px; border-top: 1px solid #354052; }
+asset-preview button.ghost {
+  margin: 0 !important; padding: 5px 7px !important; width: auto !important; flex: none !important;
+  min-height: 28px; font: 12px/1.3 system-ui, sans-serif !important; color: #c5d2e4;
+  background: #232c3a; border: 1px solid #3b485c; border-radius: 5px; white-space: nowrap;
+}
+asset-preview button.ghost:hover:not(:disabled) { background: #2f4059; border-color: #7893b8; }
+asset-preview button.ghost:disabled { opacity: .45; }
+asset-preview .file-preview-zoom { min-width: 35px; text-align: center; font-size: 10px; font-variant-numeric: tabular-nums; }
+asset-preview button.file-preview-expand { margin-left: auto !important; }
+asset-preview .file-preview-hint { padding: 0 8px 7px; color: #96a9c2; font-size: 10px; }
+.tile-thumb:has(asset-preview) { display: block; aspect-ratio: auto; background: transparent; }
+.tile-thumb > asset-preview { margin: 0; border: 0; border-bottom: 1px solid #354052; border-radius: 0; }
+.tile-thumb .file-preview-viewport { height: 175px; }
+.project-grid:has(asset-preview) { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
+.project-tile:focus-within .tile-actions { opacity: 1; }
+.project-tile .tile-open { margin: 8px 0 0 !important; width: 100% !important; padding: 7px 10px !important; font-size: 12px; }
+.project-tile .kind-chip { position: absolute; left: 8px; top: 8px; padding: 2px 6px; border: 1px solid #3b485c;
+  border-radius: 4px; background: #171c24e6; color: #c5d2e4; font-size: 10px; letter-spacing: .05em; }
+#libraryGrid .kind-chip { top: 8px; }
+#libEditPreview { margin-top: 8px; }
+#libEditPreview .file-preview-viewport { height: 220px; }
+.seed-row > span { overflow-wrap: anywhere; min-width: 0; }
+.file-inspector {
+  width: min(1120px, 94vw); height: min(860px, 90dvh); max-width: none; max-height: none;
+  padding: 0; color: #e2eaf7; background: #171c24; border: 1px solid #4a5e7b;
+  border-radius: 14px; box-shadow: 0 24px 100px #0009;
+}
+.file-inspector[open] { display: flex; flex-direction: column; }
+.file-inspector::backdrop { background: #060b16c9; }
+.file-inspector header { display: flex; align-items: center; gap: 20px; padding: 16px 20px; border-bottom: 1px solid #354052; }
+.file-inspector header > div { flex: 1; min-width: 0; }
+.file-inspector header strong { font-size: 16px; overflow-wrap: anywhere; }
+.file-inspector header p { color: #a1b2c9; font-size: 12px; margin: 5px 0 0; }
+.file-inspector header button { width: auto; margin: 0; padding: 8px 12px; }
+.file-inspector > asset-preview { margin: 0; border: 0; border-radius: 0; flex: 1; min-height: 0; }
+.file-inspector .file-preview-viewport { height: auto; flex: 1; min-height: 0; }
+.file-inspector .file-preview-toolbar { justify-content: center; gap: 8px; padding: 12px; }
+.file-inspector .file-preview-hint { text-align: center; padding-bottom: 12px; font-size: 12px; }
+@media (max-width: 600px) {
+  .file-inspector { width: 96vw; height: 94dvh; }
+  .file-inspector header { padding: 12px; gap: 12px; }
+  .file-inspector button.ghost { min-height: 40px; min-width: 36px; }
+}

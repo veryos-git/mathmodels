@@ -41,7 +41,8 @@ drawing is centred on the base drawing and sits on the frame top of the one
 below; colour groups are shared, so split and 3MF exports merge the layers.
 """
 
-from gothic import solid_union, revolved_ending, stepped_profile_sweep, path_frames
+from gothic import (solid_union, revolved_ending, stepped_profile_sweep,
+                    segmented_profile_sweep, path_frames)
 import argparse
 import base64
 import itertools
@@ -500,21 +501,41 @@ def load_profile(path, sagitta, origin=None):
     return translate(profile, xoff=-origin[0], yoff=-origin[1])
 
 
-def load_sweep_profiles(path, groove_path, sagitta, width_scale=1.0):
+def load_profile_sections(path, groove_path, sagitta, cusp_path=None):
+    """Unscaled sections in the same coordinates used by the sweep and editor."""
+    profile = load_profile(path, sagitta, origin=(0, 0))
+    minx, miny, maxx, _ = profile.bounds
+    origin = ((minx + maxx) / 2, miny)
+    profile = translate(profile, xoff=-origin[0], yoff=-origin[1])
+    return {
+        "main": profile,
+        "groove": load_profile(groove_path, sagitta, origin=origin) if groove_path else None,
+        "cusp": load_profile(cusp_path, sagitta) if cusp_path else profile,
+    }
+
+
+def load_sweep_profiles(path, groove_path, sagitta, width_scale=1.0,
+                        height_scale=1.0, groove_width=None, groove_height=None,
+                        profile_z=0.0, groove_z=0.0):
     """Place both sections relative to the main section's centre and base.
 
     A cutter must keep its drawn elevation and lateral offset. Anchoring it
     independently would drop its tip onto the base and cut through the frame.
     """
-    if not math.isfinite(width_scale) or width_scale <= 0:
-        raise ConvertError("profile scale must be greater than 0")
-    profile = load_profile(path, sagitta, origin=(0, 0))
-    minx, miny, maxx, _ = profile.bounds
-    origin = ((minx + maxx) / 2, miny)
-    profile = translate(profile, xoff=-origin[0], yoff=-origin[1])
-    groove = load_profile(groove_path, sagitta, origin=origin) if groove_path else None
-    return tuple(aff_scale(p, xfact=width_scale, yfact=1, origin=(0, 0))
-                 if p is not None else None for p in (profile, groove))
+    # Omitted cutter scales retain the original shared-scaling API behavior.
+    groove_width = width_scale if groove_width is None else groove_width
+    groove_height = height_scale if groove_height is None else groove_height
+    for label, value in (("Profile width", width_scale), ("Profile height", height_scale),
+                         ("Groove width", groove_width), ("Groove height", groove_height)):
+        if not math.isfinite(value) or value <= 0:
+            raise ConvertError(f"{label} scale must be greater than 0")
+    if not all(math.isfinite(v) for v in (profile_z, groove_z)):
+        raise ConvertError("Profile and groove vertical offsets must be finite")
+    sections = load_profile_sections(path, groove_path, sagitta)
+    profile, groove = sections["main"], sections["groove"]
+    return (translate(aff_scale(profile, xfact=width_scale, yfact=height_scale, origin=(0, 0)), yoff=profile_z),
+            translate(aff_scale(groove, xfact=groove_width, yfact=groove_height, origin=(0, 0)), yoff=groove_z)
+            if groove is not None else None)
 
 
 def chain_curves(curves, min_dot=-0.95):
@@ -611,10 +632,26 @@ def sweep_profile(profile, chains):
     profile = profile.simplify(0, preserve_topology=True)
     try:
         stepped = stepped_profile_sweep(profile, chains, MITER_LIMIT)
+        if stepped is not None:
+            return stepped
+        return _ring_profile_sweep(profile, chains)
+    except (ValueError, RuntimeError):
+        # Wide sections can fold through themselves on tight bends, or leave
+        # tangent slivers that collapse when STL rounds vertices to float32.
+        # Rebuild from closed prisms so the boolean resolves their overlaps.
+        # This recovery belongs to all sweeps, including tracery and cutters.
+        from cylinder import printable_mesh
+
+    try:
+        return printable_mesh(segmented_profile_sweep(profile, chains, MITER_LIMIT))
     except (ValueError, RuntimeError) as error:
-        raise ConvertError(f"Could not build the stepped profile sweep: {error}") from error
-    if stepped is not None:
-        return stepped
+        raise ConvertError("Could not build the profile sweep: the profile could not form "
+                           "closed solids at STL precision; reduce the profile width "
+                           "or simplify tight sketch corners") from error
+
+
+def _ring_profile_sweep(profile, chains):
+    """Join consecutive profile rings, preserving clipped mitres exactly."""
     ring = list(profile.exterior.coords)[:-1]
     cap_v, cap_f = trimesh.creation.triangulate_polygon(profile)
     meshes = []
@@ -661,10 +698,7 @@ def sweep_profile(profile, chains):
         mesh.remove_unreferenced_vertices()
         mesh.fix_normals(multibody=True)
         meshes.append(mesh)
-    try:
-        return solid_union(meshes)
-    except (ValueError, RuntimeError) as error:
-        raise ConvertError(f"Could not build the profile sweep: {error}") from error
+    return solid_union(meshes)
 
 
 def subtract_groove(mesh, profile, chains, z_offset=0):
@@ -911,7 +945,9 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
         raise ConvertError("A groove profile requires a main sweep profile")
     if args.profile:
         profile, groove_profile = load_sweep_profiles(
-            args.profile, groove_path, args.sagitta, args.profile_scale)
+            args.profile, groove_path, args.sagitta, args.profile_scale,
+            args.profile_height_scale, args.groove_width, args.groove_height,
+            args.profile_z, args.groove_z)
         minx, _, maxx, maxy = profile.bounds
         # The profile sets the frame's dimensions: its x span is the wall
         # width the faces are planned against, its top is the wall height.
@@ -922,10 +958,12 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
     if args.cusps:
         if profile is None:
             raise ConvertError("Cusp paths require a main sweep profile")
-        if not (0 < args.cusp_width <= 10 and 0 < args.cusp_height <= 10 and args.cusp_z >= 0):
-            raise ConvertError("Cusp width/height must be positive and elevation must not be negative")
+        if not (all(math.isfinite(v) and v > 0 for v in (args.cusp_width, args.cusp_height))
+                and math.isfinite(args.cusp_z)):
+            raise ConvertError("Cusp width/height must be positive and elevation must be finite")
         cusp_curves, _, _ = read_curves(args.cusps, args.sagitta, None, scale)
-        cusp_section = load_profile(args.cusp_profile, args.sagitta) if args.cusp_profile else profile
+        # Reuse the drawn section, before the main frame's width/height scales.
+        cusp_section = load_profile(args.cusp_profile or args.profile, args.sagitta)
         cusp_section = aff_scale(cusp_section, xfact=args.cusp_width, yfact=args.cusp_height, origin=(0, 0))
         cusp_section = translate(cusp_section, yoff=args.cusp_z)
         wall_height = max(wall_height, cusp_section.bounds[3])
@@ -2114,6 +2152,8 @@ def main():
     ap.add_argument("--preview", action="store_true",
                     help="report the subject and boundary outlines as JSON for "
                          "the 2D window-position preview, then exit")
+    ap.add_argument("--profile-sections", action="store_true",
+                    help="report normalized main, groove and cusp sections for the shared profile editor")
     ap.add_argument("--heights", default=None, metavar="FILE",
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
     ap.add_argument("--cylinder", default=None, metavar="FILE",
@@ -2168,6 +2208,16 @@ def main():
     ap.add_argument("--profile-scale", type=float, default=1.0,
                     help="stretch the profile's width (its x axis); the height "
                          "stays as drawn")
+    ap.add_argument("--profile-height-scale", type=float, default=1.0,
+                    help="stretch the profile's height (its y axis), independently of its width")
+    ap.add_argument("--groove-width", type=float, default=None,
+                    help="independent groove x scale (defaults to --profile-scale)")
+    ap.add_argument("--groove-height", type=float, default=None,
+                    help="independent groove y scale (defaults to --profile-height-scale)")
+    ap.add_argument("--profile-z", type=float, default=0.0,
+                    help="main profile vertical offset in mm, applied after scaling")
+    ap.add_argument("--groove-z", type=float, default=0.0,
+                    help="groove profile vertical offset in mm, applied after scaling")
     ap.add_argument("--groove-profile", default=None, metavar="FILE",
                     help="DXF/SVG cutter section in the main profile's coordinates; "
                          "sweep along the same paths and subtract from the frame")
@@ -2236,6 +2286,15 @@ def main():
 
     if args.preview:
         json.dump(preview(args), sys.stdout)
+        return
+
+    if args.profile_sections:
+        sections = load_profile_sections(args.input, args.groove_profile, args.sagitta, args.cusp_profile)
+        # Preserve section precision; small features must not disappear in the editor.
+        json.dump({key: {"exterior": list(poly.exterior.coords),
+                         "holes": [list(r.coords) for r in poly.interiors],
+                         "bounds": list(poly.bounds)} if poly is not None else None
+                   for key, poly in sections.items()}, sys.stdout)
         return
 
     if not args.output and not args.regions:
@@ -2461,7 +2520,9 @@ def main():
             if args.lid_sketch:
                 from lid_art import lid_art_mesh
                 lid_art, _ = lid_art_mesh(args.lid_sketch, args.profile, cylinder,
-                                         args.profile_scale, args.sagitta, args.groove_profile)
+                                         args.profile_scale, args.sagitta, args.groove_profile,
+                                         args.profile_height_scale, args.groove_width, args.groove_height,
+                                         args.profile_z, args.groove_z)
             result = export_cylinder(args.output, buckets, cylinder, bool(args.split or args.groups), lid_art)
         except ValueError as error:
             raise ConvertError(str(error)) from error

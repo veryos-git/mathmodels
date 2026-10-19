@@ -46,7 +46,9 @@ def fit_lid_paths(curves, profile, diameter):
     return [(np.asarray(chain)*factor).tolist() for chain in chains], factor
 
 
-def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groove_path=None):
+def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groove_path=None,
+                 profile_height_scale=1.0, groove_width=None, groove_height=None,
+                 profile_z=0.0, groove_z=0.0):
     if not c.get('lid'):
         raise ValueError("A lid-top sketch requires Add lid")
     if not profile_path:
@@ -55,7 +57,9 @@ def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groov
         raise ValueError("Profile width must be greater than zero")
     if not math.isfinite(sagitta) or sagitta <= 0:
         raise ValueError("Curve tolerance must be greater than zero")
-    profile, groove = load_sweep_profiles(profile_path, groove_path, sagitta, profile_scale)
+    profile, groove = load_sweep_profiles(profile_path, groove_path, sagitta, profile_scale,
+                                           profile_height_scale, groove_width, groove_height,
+                                           profile_z, groove_z)
     design = c.get('threadedDesign', {}) if c.get('threaded') else {}
     diameter = c['diameter']-2*design.get('lidTopChamfer', 0)
     curves, _, _ = read_curves(sketch, sagitta)
@@ -64,7 +68,7 @@ def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groov
     if factor > 1:
         curves, _, _ = read_curves(sketch, sagitta/factor)
         chains, factor = fit_lid_paths(curves, profile, diameter)
-    embed = min(EMBED, profile.bounds[3]/4)
+    embed = min(EMBED, (profile.bounds[3]-profile.bounds[1])/4)
     z = dimensions(c)[1]-embed
     try:
         mesh = sweep_profile(profile, chains)
@@ -86,6 +90,8 @@ def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groov
             # from an open triangle situated far above the origin.
             local = part.copy()
             local.apply_translation(-local.bounds.mean(axis=0))
+            if np.linalg.matrix_rank(local.vertices, tol=1e-7) < 3:
+                continue
             if abs(local.volume) > 1e-6:
                 parts.append(part)
         if not parts or any(not p.is_volume for p in parts):
@@ -95,7 +101,7 @@ def lid_art_mesh(sketch, profile_path, c, profile_scale=1.0, sagitta=0.02, groov
         mesh = subtract_groove(mesh, groove, chains, z_offset=z)
     return mesh, {'scale': factor, 'diameter': diameter,
                   'profileWidth': profile.bounds[2]-profile.bounds[0],
-                  'profileHeight': profile.bounds[3], 'triangles': len(mesh.faces)}
+                  'profileHeight': profile.bounds[3]-profile.bounds[1], 'triangles': len(mesh.faces)}
 
 
 def main():
@@ -105,12 +111,19 @@ def main():
     parser.add_argument('config')
     parser.add_argument('output')
     parser.add_argument('--profile-scale', type=float, default=1)
+    parser.add_argument('--profile-height-scale', type=float, default=1)
+    parser.add_argument('--groove-width', type=float)
+    parser.add_argument('--groove-height', type=float)
+    parser.add_argument('--profile-z', type=float, default=0)
+    parser.add_argument('--groove-z', type=float, default=0)
     parser.add_argument('--groove-profile')
     parser.add_argument('--sagitta', type=float, default=.02)
     args = parser.parse_args()
     with open(args.config) as stream:
         settings = json.load(stream)
-    mesh, info = lid_art_mesh(args.sketch, args.profile, settings, args.profile_scale, args.sagitta, args.groove_profile)
+    mesh, info = lid_art_mesh(args.sketch, args.profile, settings, args.profile_scale,
+                              args.sagitta, args.groove_profile, args.profile_height_scale,
+                              args.groove_width, args.groove_height, args.profile_z, args.groove_z)
     mesh.export(args.output)
     json.dump(info, sys.stdout)
 

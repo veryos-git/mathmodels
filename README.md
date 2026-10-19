@@ -27,6 +27,33 @@ trace settings and SVG. Resources have file-based revisions; model projects
 keep self-contained snapshots. See [resource storage and migration](docs/resource-storage.md)
 for the workflow, file layout and API.
 
+Uploaded drawings, boundaries, lid sketches and selected image templates have
+interactive source previews beside their
+filenames. The library, file picker and saved project thumbnails use the same
+viewer. Scroll over a preview to zoom at the pointer, drag to pan, and choose
+**Expand** for a large inspector. **Fit** (or **0**) resets the view; **+ / −**,
+arrow keys and the light/dark background button help inspect details. Escape
+closes the inspector and returns to the underlying picker or editor. Preview
+navigation does not change artwork placement or model settings. DXF uploads
+can be previewed before saving or generating a model.
+
+**Profile alignment**, under **Inputs → Sweep profiles & cusp paths**, shows
+the main profile (blue), groove cutter (pink) and cusp section (green) together
+on one millimetre grid. Click an outline or its named button to select it.
+Drag the selected section vertically to change its offset in **0.1 mm** steps;
+horizontal dragging cannot reposition it. Up/Down keys move by the same step.
+Drag the square handles to resize width, height or both, with **Keep proportions**
+available for each section. The exact width, height and vertical offset can
+also be entered below the preview. Escape cancels an active drag.
+
+Scroll to zoom, drag empty space to pan, use **Fit all**, or **Expand** for a
+larger editor. The groove retains its registration to the main drawing's
+original centre and base; a cusp without its own profile uses the unscaled
+main section. Each section's size and vertical offset are independent. These
+edits update the actual model when the gesture ends and are preserved in
+projects, STL exports and lid artwork. Older projects start with zero main
+and groove offsets and retain their saved cusp elevation.
+
 ## The workflow
 
 The app is three full-screen steps, each using the whole window:
@@ -558,8 +585,12 @@ classic behaviour: every curve buffered to *wall width* and extruded to *wall
 height*). The example under `advanced_profile_sweep/` (a triangular section on
 a gothic window) shows the shape of it.
 
-**profile width (×)** stretches the section sideways — ×2 doubles the frame's
-width while its height stays as drawn.
+Under **Inputs → Sweep profiles & cusp paths**, the main, cusp and groove
+profiles each have **width · X (×)** and **height · Y (×)** sliders with exact
+numeric inputs. Each slider changes only that section's dimension and keeps
+the drawing's path scale fixed. **Lock X/Y proportions** makes either slider
+resize both dimensions while preserving their current ratio. Unlock it to
+adjust width and height separately. Changes rebuild an existing preview.
 
 The profile's own axes become the sweep's: **x runs across the path**,
 **y is the height**. It is re-anchored to the centre of its base — draw the
@@ -583,8 +614,15 @@ twice the offset; sharper cusps are bevelled rather than spiking. Curves that
 meet end-to-end are chained into continuous paths first (the straightest
 continuation wins at a junction), and duplicate strokes are swept once.
 
-Projects carry the profile and its width scale, so a saved sweep reopens as
-one.
+If a sweep fails on tight bends or overlapping paths, the converter retries
+with closed, mitred sections joined by a 0.001 mm overlap. This applies to main
+profiles, cusps and groove cutters, preserving the profile's width and height.
+The result is checked at STL precision before preview or export.
+
+Projects carry all section scales and their proportion locks. Older projects
+retain their existing section dimensions when opened. Without a separate cusp
+profile, cusp scales use the main profile as originally drawn, independently
+of the main section's sliders.
 
 **Groove profile (subtract)** under **Inputs → Sweep profiles & cusp paths**
 loads an optional second DXF/SVG section, from a file or the library. Generate
@@ -594,8 +632,9 @@ the groove profile to restore the uncut frame.
 
 Draw both sections in the **same coordinates**: the groove keeps its sideways
 offset and height relative to the main profile's centre and bottom. It is not
-independently centred or lowered onto the base. **Profile width (×)** scales
-both sections sideways together; neither section scales with the subject.
+independently centred or lowered onto the base. The groove's own X/Y sliders
+scale its coordinates relative to that shared origin; neither section scales
+with the subject. Use the same X/Y factors on both profiles to resize them together.
 For the supplied `hgc/examples/example6_groove/` files, load
 `Part Studio 2 - paths.dxf` as the subject, `Part Studio 2 - profile.dxf` as the main profile,
 and `Part Studio 2 - profile_remover_groove.dxf` as the groove profile. Disable
@@ -969,10 +1008,16 @@ go to stderr.
 `stacks`, `heights` and `groups` are JSON objects keyed by face id; `holes` is a
 JSON array. All are sent as form fields, and `holes` applies to every route. A
 second file field, `profile`, switches the frame to a swept cross-section (see
-*Sweep profile*) — with `profileScale` stretching its width — and refuses
+*Sweep profile*) — with `profileScale` stretching its width and
+`profileHeightScale` its height — and refuses
 `holes` and `wallStack`. The optional `grooveProfile` file requires `profile`
-and subtracts a second sweep using the main profile's coordinates and width
-scale. It is also accepted by `/api/cylinder/lid-art`.
+and subtracts a second sweep using the main profile's coordinates, with
+independent `grooveWidth` and `grooveHeight` factors. If omitted, groove factors
+inherit the main profile's scales for compatibility. These fields are also
+accepted by `/api/cylinder/lid-art`. The corresponding CLI options are
+`--profile-scale`, `--profile-height-scale`, `--groove-width` and `--groove-height`.
+`cuspWidth` / `cuspHeight` (CLI `--cusp-width` / `--cusp-height`) scale the cusp
+section as drawn, including when it reuses the main profile.
 Another file field, `boundary`, bounds the subject
 with a closed polygon (see *Cropping to a boundary*), with `boundaryScale`,
 `boundaryX`, `boundaryY` placing it, `boundaryFit=0` keeping it as drawn

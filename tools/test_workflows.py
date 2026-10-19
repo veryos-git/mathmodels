@@ -35,7 +35,7 @@ class Workflows(unittest.TestCase):
     def test_reference_gothic_is_one_closed_printable_solid(self):
         with tempfile.TemporaryDirectory() as tmp:
             target=Path(tmp)/'gothic.stl'
-            command=[sys.executable,'tools/dxf2stl.py','examples/gothic/frame.dxf',str(target),'--profile','examples/gothic/frame-profile.svg','--cusps','examples/gothic/cusps.dxf','--cusp-profile','examples/gothic/cusp-profile.svg','--cusp-width','1','--cusp-height','1','--frame-only','--round-ends']
+            command=[sys.executable,'tools/dxf2stl.py','hgc/examples/gothic/frame.dxf',str(target),'--profile','hgc/examples/gothic/frame-profile.svg','--cusps','hgc/examples/gothic/cusps.dxf','--cusp-profile','hgc/examples/gothic/cusp-profile.svg','--cusp-width','1','--cusp-height','1','--frame-only','--round-ends']
             result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,check=True)
             self.assertEqual(json.loads(result.stdout)['regions'],0)
             mesh=trimesh.load(target)

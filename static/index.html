@@ -29,6 +29,10 @@
   input[type=number]:focus-visible, button:focus-visible, a:focus-visible,
   #drop:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .profile-scale-axis { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 8px; align-items: center; }
+  .profile-scale-axis input[type=range] { width: 100%; min-width: 0; margin: 0; accent-color: #60a5fa; }
+  .profile-scale-controls .check { margin-top: 8px; }
+  .profile-scale-controls[hidden] { display: none; }
   #surfaceMode, #cylinderSizing { width: 100%; padding: 8px; border: 1px solid #2a2e35;
                  border-radius: 6px; background: #1d2127; color: #ddd; }
   #cylinderSuggestions { max-height: 280px; overflow-y: auto; display: grid; gap: 6px; }
@@ -393,10 +397,6 @@
   #libEditSource:disabled { color: #4b5563; }
   #libEditKind { width: 100%; padding: 6px 8px; background: #1d2127; border: 1px solid #2a2e35;
       border-radius: 6px; color: #ddd; }
-  .lib-preview { height: 150px; border: 1px dashed #3a4049; border-radius: 8px; margin-top: 6px;
-      background: #101216; display: grid; place-items: center; overflow: hidden;
-      padding: 6px; font-size: 11px; text-align: center; }
-  .lib-preview img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
   #libEditFile { margin-top: 6px; word-break: break-word; }
   #libEditStatus { margin-top: 10px; white-space: pre-wrap; }
   #libEditStatus.error { color: #f87171; }
@@ -426,7 +426,7 @@
   #workflowMode, .workflow-dialog select, .workflow-dialog input:not([type=color]):not([type=checkbox]) { width:100%; padding:8px; background:#1d2127; color:#ddd; border:1px solid #394252; border-radius:6px; }
   .resource-slot { margin-top:14px; font-size:12px; }
   .resource-slot > span { display:block; margin-top:5px; overflow-wrap:anywhere; }
-  .resource-slot > div { display:flex; gap:5px; }
+  .resource-slot > div:not(.profile-scale-controls) { display:flex; gap:5px; }
   .resource-slot button { width:auto; flex:1; padding:7px 5px; }
   #sweepInputs .seed-row { display:flex; flex-wrap:wrap; gap:5px; }
   #sweepInputs .seed-row button { width:auto; padding:7px; }
@@ -436,6 +436,8 @@
   #workflowProgress { margin-bottom:12px; }
   @media(max-width:650px) { .filament-layout { grid-template-columns:1fr; } }
 </style>
+<link rel="stylesheet" href="/file-preview.css">
+<link rel="stylesheet" href="/profile-editor.css">
 </head>
 <body>
 <section id="startScreen" class="screen">
@@ -569,6 +571,7 @@
       <input id="templateFile" type="file" accept=".svg,.png,image/svg+xml,image/png" multiple hidden>
       <div id="templateList" aria-label="Template layers"></div>
       <div id="templateProperties" hidden>
+        <asset-preview id="templatePreview" hidden></asset-preview>
         <div class="row">
           <label>Center X <input id="templateX" type="number" step="1"></label>
           <label>Center Y <input id="templateY" type="number" step="1"></label>
@@ -705,6 +708,7 @@
     <small id="dropHint">or a photo to trace, or a saved .v2sproj — click to browse</small>
   </div>
   <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml,image/png,image/jpeg,image/gif,image/webp">
+  <asset-preview id="subjectPreview" hidden></asset-preview>
   <button class="ghost" id="example">Use the example subject</button>
 
   <div class="seed-row" style="margin-top:8px"
@@ -742,6 +746,7 @@
       <span class="muted" style="align-self:center">saved boundary</span>
     </div>
     <input type="file" id="boundaryFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+    <asset-preview id="boundaryPreview" hidden></asset-preview>
     <div id="boundaryOpts" hidden>
       <label class="check" title="Centre the boundary on the subject and scale it uniformly to just fit inside it — the right choice when the two files came out of different coordinate systems. Off keeps the boundary exactly where it was drawn.">
         <input type="checkbox" id="boundaryFit" checked> centre &amp; fit to the subject</label>
@@ -800,6 +805,7 @@
         <div class="row"><button type="button" class="ghost" id="lidSketchPick">Upload sketch…</button><button type="button" class="ghost" id="lidSketchLibrary">From library…</button></div>
         <input type="file" id="lidSketchFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
         <div class="seed-row"><span id="lidSketchName" class="muted">No lid-top sketch</span><button type="button" class="ghost" id="lidSketchClear" hidden aria-label="Remove lid-top sketch">✕</button></div>
+        <asset-preview id="lidSketchPreview" hidden></asset-preview>
         <p id="lidSketchNote" class="muted">Fits a separate sketch to the circular lid, then sweeps it with the current profile. The profile's section stays unchanged.</p>
       </div>
       <p class="muted">Suggestions are ranked by closeness to your desired diameter and height. The artwork can repeat around the cylinder (X) and up its height (Y), with up to 12 repeats each and 64 copies total. Each copy shares its painting. Relief depths stay in mm. The lid seam splits the artwork.</p>
@@ -823,16 +829,30 @@
     <span class="muted" style="align-self:center">saved section</span>
   </div>
   <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+  <section id="profileEditor" aria-label="Shared profile editor"></section>
   <div class="resource-slot" id="grooveInputs">
     <strong>Groove profile (subtract)</strong><span id="grooveProfileName" class="muted">No groove profile</span>
     <div><button id="grooveProfilePick" class="ghost">Upload…</button><button id="grooveProfileLibrary" class="ghost">Library…</button><button id="grooveProfileClear" class="ghost" hidden>Clear</button></div>
     <input id="grooveProfileFile" type="file" accept=".svg,.dxf" hidden>
     <p class="muted" id="grooveProfileNote">Load a main sweep profile first. The groove profile is swept along the same paths and subtracted from the frame.</p>
+    <div id="grooveScaleRow" class="profile-scale-controls" hidden>
+      <label for="grooveWidth">Groove width · X (×)</label>
+      <div class="profile-scale-axis"><input id="grooveWidthSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Groove width X scale"><input id="grooveWidth" type="number" min="0.01" step="0.01" value="1"></div>
+      <label for="grooveHeight">Groove height · Y (×)</label>
+      <div class="profile-scale-axis"><input id="grooveHeightSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Groove height Y scale"><input id="grooveHeight" type="number" min="0.01" step="0.01" value="1"></div>
+      <label class="check"><input id="grooveScaleLock" type="checkbox"> Lock groove X/Y proportions</label>
+      <label for="grooveZ">Groove vertical offset (mm)</label><input id="grooveZ" type="number" step="0.1" value="0">
+    </div>
   </div>
   <div id="profileDimensions" class="muted" hidden></div>
-  <div class="row" id="profileScaleRow" hidden>
-    <div><label for="profileScale" title="Stretches the profile's width — its height stays as drawn">profile width (×)</label>
-      <input type="number" id="profileScale" value="1" step="0.05" min="0.05"></div>
+  <div class="profile-scale-controls" id="profileScaleRow" hidden>
+    <label for="profileScale">Main profile width · X (×)</label>
+    <div class="profile-scale-axis"><input id="profileScaleSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Main profile width X scale"><input id="profileScale" type="number" min="0.01" step="0.01" value="1"></div>
+    <label for="profileHeightScale">Main profile height · Y (×)</label>
+    <div class="profile-scale-axis"><input id="profileHeightScaleSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Main profile height Y scale"><input id="profileHeightScale" type="number" min="0.01" step="0.01" value="1"></div>
+    <label class="check"><input id="profileScaleLock" type="checkbox"> Lock main X/Y proportions</label>
+    <label for="profileZ">Main vertical offset (mm)</label><input id="profileZ" type="number" step="0.1" value="0">
+    <p class="muted">Scales this section only. X runs across the path; profile Y becomes the model's vertical height. Lock keeps the current width/height ratio.</p>
   </div>
   <details id="gothicOptions">
     <summary>Cusp paths &amp; rounded endings</summary>
@@ -840,13 +860,22 @@
     <div id="cuspInputs">
       <div class="resource-slot"><strong>Cusp paths</strong><span id="cuspName" class="muted">No cusp paths</span>
         <div><button id="cuspPick" class="ghost">Upload…</button><button id="cuspLibrary" class="ghost">Library…</button><button id="cuspClear" class="ghost">Clear</button></div>
-        <input id="cuspFile" type="file" accept=".svg,.dxf" hidden></div>
+        <input id="cuspFile" type="file" accept=".svg,.dxf" hidden>
+        <asset-preview id="cuspPreview" hidden></asset-preview></div>
       <div class="resource-slot"><strong>Cusp profile</strong><span id="cuspProfileName" class="muted">Reduced main profile</span>
         <div><button id="cuspProfilePick" class="ghost">Upload…</button><button id="cuspProfileLibrary" class="ghost">Library…</button><button id="cuspProfileClear" class="ghost">Reset</button></div>
-        <input id="cuspProfileFile" type="file" accept=".svg,.dxf" hidden></div>
+        <input id="cuspProfileFile" type="file" accept=".svg,.dxf" hidden>
+        </div>
+      <div id="cuspScaleRow" class="profile-scale-controls">
+        <label for="cuspWidth">Cusp width · X (×)</label>
+        <div class="profile-scale-axis"><input id="cuspWidthSlider" type="range" min="0.01" max="10" step="0.01" value="0.55" aria-label="Cusp width X scale"><input id="cuspWidth" type="number" min="0.01" step="0.01" value="0.55"></div>
+        <label for="cuspHeight">Cusp height · Y (×)</label>
+        <div class="profile-scale-axis"><input id="cuspHeightSlider" type="range" min="0.01" max="10" step="0.01" value="0.55" aria-label="Cusp height Y scale"><input id="cuspHeight" type="number" min="0.01" step="0.01" value="0.55"></div>
+        <label class="check"><input id="cuspScaleLock" type="checkbox"> Lock cusp X/Y proportions</label>
+        <label for="cuspZ">Cusp vertical offset (mm)</label><input id="cuspZ" type="number" value="0" step="0.1">
+        <p class="muted">Uses its own section, or the main profile as drawn, with independent scales.</p>
+      </div>
     </div>
-    <div class="row"><label>Cusp width (×)<input id="cuspWidth" type="number" value="0.55" min="0.01" max="10" step="0.05"></label><label>Cusp height (×)<input id="cuspHeight" type="number" value="0.55" min="0.01" max="10" step="0.05"></label></div>
-    <label>Cusp elevation (mm)<input id="cuspZ" type="number" value="0" min="0" step="0.1"></label>
     <label class="check"><input id="roundEnds" type="checkbox"> Revolve open cusp endings</label>
     <div class="row"><label>Turn (degrees)<input id="endAngle" type="number" value="90" min="1" max="180" step="5"></label><label>Axis side<select id="endSide"><option value="1">Left edge</option><option value="-1">Right edge</option></select></label></div>
     <p class="muted">Without cusp paths, endings apply to open main-frame paths. Closed paths and cusp connections to the main frame are left joined. Switch axis side if the roll faces the wrong way.</p>
@@ -1090,7 +1119,7 @@
         <div class="muted" id="libEditFile">no file loaded — paste SVG markup instead</div>
         <input type="file" id="libEditFileInput" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
         <div class="group-title" style="margin-top:12px">preview</div>
-        <div id="libEditPreview" class="lib-preview muted">paste SVG to see it here</div>
+        <asset-preview id="libEditPreview" hidden></asset-preview>
         <div id="libEditStatus" class="muted"></div>
       </aside>
       <main>
@@ -1115,6 +1144,10 @@
 </script>
 <script type="module">
 import { remapPaint } from './region-paint.js';
+import { filePreview } from './file-preview.js';
+import { bindProfileScales, PROFILE_SCALE_GROUPS, PROFILE_POSITION_FIELDS, PROFILE_TRANSFORM_FIELDS } from './profile-scales.js';
+import { ProfileEditor } from './profile-editor.js';
+import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
 import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lineSide, mirrorImage } from './image-editor.js';
@@ -1126,6 +1159,7 @@ import { cylinderDimensions, cylinderFit, cylinderSuggestions, wrapCylinderTrian
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
+let profileEditor = null;
 let filamentManager = null;
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 const round3 = (v) => Math.round(v * 1000) / 1000;
@@ -1505,7 +1539,8 @@ function readCylinderSettings() {
 }
 function cylinderInputSnapshot() {
   return JSON.stringify(cylinderEnabled()?{target:readCylinderTargets(),mode:$('cylinderSizing').value,choice:cylinderChoice,
-    lidSketch:lidSketchRevision,profile:profileRevision,profileScale:$('profileScale').value,sagitta:$('sagitta').value}:null);
+    lidSketch:lidSketchRevision,profile:profileRevision,
+    profileScales:PROFILE_TRANSFORM_FIELDS.map(id=>$(id).value),sagitta:$('sagitta').value}:null);
 }
 function updateCylinderFits() {
   const list=$('cylinderSuggestions'), summary=$('cylinderFitSummary');
@@ -1573,6 +1608,7 @@ function cylinderUI() {
   lidSketchUI();
 }
 function lidSketchUI() {
+  $('lidSketchPreview').source = filePreview(lidSketchPicked);
   $('lidSketchName').textContent=lidSketchPicked?.name??'No lid-top sketch';
   $('lidSketchClear').hidden=!lidSketchPicked;
   $('lidSketchNote').textContent=lidSketchPicked&&!profilePicked?'Load a sweep profile to build this lid-top sketch.':
@@ -1766,6 +1802,7 @@ function resetLayers() {
   slicePreview.syncModel();
   layers.push(newLayer());
   picked = null;
+  $('subjectPreview').source = null;
   drawing = null;
   modelThumb = null;         // a new drawing has no generated model yet
   setHoleMode(false);
@@ -2622,6 +2659,7 @@ async function pickFile(file, fit = true) {
   resetLayers();
   invalidatePreview();
   picked = file;
+  $('subjectPreview').source = filePreview(file);
   layers[0].file = file;
   $('dropName').textContent = file.name;
   $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
@@ -2711,10 +2749,12 @@ let cuspProfilePicked = null;
 let profilePicked = null;  // the profile drawing (File), null in standard mode
 let grooveProfilePicked = null;
 let profileRevision = 0;
+let profileLoad = 0;
 let profileDims = null;    // { x, y } mm — what the profile measures
 
 /** Settings a swept frame takes over get out of the way while one is set. */
 function profileUI() {
+  profileEditor?.sync();
   const on = !!profilePicked;
   $('profileName').textContent = profilePicked ? profilePicked.name : 'off — flat walls';
   $('profileClear').hidden = !on;
@@ -2722,12 +2762,13 @@ function profileUI() {
   $('grooveProfileClear').hidden = !grooveProfilePicked;
   $('grooveProfilePick').disabled = $('grooveProfileLibrary').disabled = !on;
   $('grooveProfileNote').textContent = on
-    ? 'Sweeps along the same paths and subtracts from the frame. Draw both profiles in the same coordinates to set the groove position and depth. Profile width scales both together.'
+    ? 'Sweeps along the same paths and subtracts from the frame. Draw both profiles in the same coordinates; adjust their alignment in the shared preview. Each section has independent size and vertical offset.'
     : 'Load a main sweep profile first. The groove profile is swept along the same paths and subtracted from the frame.';
   $('profileScaleRow').hidden = !on;
+  $('grooveScaleRow').hidden = !on || !grooveProfilePicked;
   $('profileDimensions').hidden = !on;
   $('wallWidth').closest('.row').hidden = on;
-  $('profileDimensions').textContent = profileDims ? `Section: ${profileDims.x.toFixed(2)} mm wide × ${profileDims.y.toFixed(2)} mm high before width scaling` : '';
+  $('profileDimensions').textContent = profileDims ? `Main section: ${scaledProfileWidth().toFixed(2)} mm wide × ${(profileDims.y * Number($('profileHeightScale').value)).toFixed(2)} mm high` : '';
   if (on && $('sweepDetails')) $('sweepDetails').open = true;
   $('wallWidth').disabled = $('wallHeight').disabled = on;
   $('blackFrame').closest('label').hidden = on;
@@ -2740,9 +2781,11 @@ function profileUI() {
 
 /** Set (or clear, with null) the sweep profile. */
 async function setProfile(file) {
+  const request = ++profileLoad;
   const dimensions = file ? await inspectSize(file) : null;
+  if (request !== profileLoad) return false;
   profilePicked = file;
-  if (!file) grooveProfilePicked = null;
+  if (!file) { grooveProfilePicked = null; $('profileZ').value = $('grooveZ').value = '0'; }
   profileRevision++;
   profileDims = dimensions;
   if (file && allHoles().length) {
@@ -2751,6 +2794,7 @@ async function setProfile(file) {
     holeList();
   }
   profileUI();
+  return true;
 }
 
 $('profilePick').onclick = () => $('profileFile').click();
@@ -2761,7 +2805,7 @@ async function applyProfileFile(file) {
     return setStatus('the profile must be a .dxf or .svg file', true);
   }
   try {
-    await setProfile(file);
+    if (!await setProfile(file)) return;
     if (drawing) fitToYSize();
     refit(`frame swept from ${file.name} — a ${profileDims.x.toFixed(1)} × `
       + `${profileDims.y.toFixed(1)} mm section`);
@@ -2787,6 +2831,7 @@ async function applyGrooveProfileFile(file) {
   try {
     if (file) await inspectSize(file);
     grooveProfilePicked = file;
+    if (!file) $('grooveZ').value = '0';
     profileRevision++;
     profileUI();
     if (file) libraryRemember(file);
@@ -2802,14 +2847,50 @@ $('grooveProfileFile').onchange = async (event) => {
 };
 $('grooveProfileClear').onclick = () => applyGrooveProfileFile(null);
 
-// The width scale re-fits like a wall width change: the frame is part of the
-// finished size, so the drawing's scale follows it.
-$('profileScale').onchange = () => {
-  const v = Number($('profileScale').value);
-  if (!(v > 0)) return setStatus('profile width must be greater than 0', true);
-  if (drawing) fitToYSize();
-  refit(`profile width ×${v} — ${finishedSize()}`);
+let profileScaleTimer;
+const profileScales = bindProfileScales({ get: $, invalid: message => setStatus(message, true),
+  changed: (name, commit) => {
+    clearTimeout(profileScaleTimer);
+    profileUI();
+    // Section edits leave every path's scale fixed, including stacked drawings.
+    showYSize();
+    const rebuild = () => refit(`${name === 'main' ? 'Main' : name === 'cusp' ? 'Cusp' : 'Groove'} profile resized.`);
+    if (commit) rebuild(); else profileScaleTimer = setTimeout(rebuild, 250);
+  },
+});
+
+for (const id of PROFILE_POSITION_FIELDS) $(id).onchange = () => {
+  clearTimeout(profileScaleTimer);
+  const value = Number($(id).value);
+  $(id).value = String(Number.isFinite(value) ? snapProfileOffset(value) : 0);
+  profileUI();
+  refit('Profile vertical offset updated.');
 };
+for (const group of PROFILE_SCALE_GROUPS) $(group.lock).addEventListener('change', () => profileEditor?.sync());
+
+function profileEditorState() {
+  return {
+    files: { main: profilePicked, groove: grooveProfilePicked, cusp: cuspProfilePicked },
+    hasCusp: !!(cuspPicked || cuspProfilePicked), sagitta: $('sagitta').value,
+    values: Object.fromEntries(PROFILE_SCALE_GROUPS.map(group => [group.name, {
+      sx: Number($(group.width).value), sy: Number($(group.height).value),
+      z: Number($(group.position).value), locked: $(group.lock).checked,
+    }])),
+  };
+}
+
+function editProfileSection(name, value, commit) {
+  const group = PROFILE_SCALE_GROUPS.find(group => group.name === name);
+  if (![value.sx, value.sy, value.z].every(Number.isFinite) || value.sx <= 0 || value.sy <= 0) return;
+  clearTimeout(profileScaleTimer);
+  $(group.width).value = String(Number(value.sx.toPrecision(12)));
+  $(group.height).value = String(Number(value.sy.toPrecision(12)));
+  $(group.position).value = String(value.z);
+  $(group.lock).checked = value.locked;
+  profileScales.sync(); profileUI(); showYSize();
+  // Dragging updates only the shared view; rebuild once when the gesture ends.
+  if (commit) refit(`${name === 'main' ? 'Main' : name === 'groove' ? 'Groove' : 'Cusp'} profile updated.`);
+}
 
 /** The profile's width after the user's stretch, in model millimetres. */
 function scaledProfileWidth() {
@@ -2839,6 +2920,7 @@ async function inspectSize(file) {
 
 /** Show or hide the boundary controls and the ✕, and refresh the label. */
 function boundaryUI() {
+  $('boundaryPreview').source = filePreview(boundaryPicked);
   const on = !!boundaryPicked;
   $('boundaryName').textContent = boundaryPicked ? boundaryPicked.name : 'off — the whole subject';
   $('boundaryClear').hidden = !on;
@@ -3397,6 +3479,12 @@ function renderDrawings() {
     }
     box.append(row);
 
+    if (li > 0 && l.file) {
+      const preview = document.createElement('asset-preview');
+      preview.source = filePreview(l.file);
+      box.append(preview);
+    }
+
     // The base drawing's sublayers already have their own panel above.
     if (li > 0 && l.sublayers.length > 1) {
       const list = document.createElement('div');
@@ -3733,6 +3821,7 @@ function updateTemplateControls() {
     list.append(button);
   }
   const layer = lineArt.items.find(item => item.id === lineArt.selected);
+  $('templatePreview').source = layer ? { src: layer.src, name: layer.name } : null;
   $('templateProperties').hidden = !layer;
   for (const [id, key] of Object.entries(TEMPLATE_FIELDS)) {
     $(id).value = layer ? String(Math.round(layer[key] * 100) / 100) : '';
@@ -4672,7 +4761,7 @@ function shapeForm() {
   form.append('layers', selectedLayers());
   // One effect shapes every face of every drawing, so it travels once.
   for (const id of EFFECT_FIELDS) form.append(id, $(id).value);
-  for (const id of ['cuspWidth','cuspHeight','cuspZ','endAngle','endSide']) form.append(id, $(id).value);
+  for (const id of [...PROFILE_TRANSFORM_FIELDS,'endAngle','endSide']) form.append(id, $(id).value);
   if (cuspPicked) form.append('cusps', cuspPicked);
   if (cuspProfilePicked) form.append('cuspProfile', cuspProfilePicked);
   if ($('roundEnds').checked) form.append('roundEnds','1');
@@ -4680,7 +4769,6 @@ function shapeForm() {
   if (profilePicked) {
     form.append('profile', profilePicked);
     if (grooveProfilePicked) form.append('grooveProfile', grooveProfilePicked);
-    form.append('profileScale', $('profileScale').value);
   }
   if (boundaryPicked) {
     form.append('boundary', boundaryPicked);
@@ -4785,7 +4873,8 @@ async function generate(keep = null, { lenient = false } = {}) {
         topForm.append('file',lidSketchPicked); topForm.append('profile',profilePicked);
         if(grooveProfilePicked)topForm.append('grooveProfile',grooveProfilePicked);
         topForm.append('cylinder',JSON.stringify(shell.settings));
-        topForm.append('profileScale',$('profileScale').value); topForm.append('sagitta',$('sagitta').value);
+        for (const id of PROFILE_TRANSFORM_FIELDS) topForm.append(id,$(id).value);
+        topForm.append('sagitta',$('sagitta').value);
         const topResponse=await fetch('/api/cylinder/lid-art',{method:'POST',body:topForm});
         lidArt=await topResponse.json();
         if(!topResponse.ok)throw new Error(lidArt.error??topResponse.statusText);
@@ -5070,10 +5159,11 @@ async function buildProject() {
     // travel with the rest of the settings.
     settings: Object.fromEntries(
       [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize',
-        'profileScale', 'cuspWidth', 'cuspHeight', 'cuspZ', 'endAngle', 'endSide', 'boundaryScale', 'boundaryX', 'boundaryY',
+        ...PROFILE_TRANSFORM_FIELDS, 'endAngle', 'endSide', 'boundaryScale', 'boundaryX', 'boundaryY',
         'subjectScale', 'subjectX', 'subjectY']
         .map((id) => [id, $(id).value]),
     ),
+    profileScaleLocks: profileScales.snapshotLocks(),
     cylinder: cylinderEnabled() ? {...readCylinderSettings(),fit:{diameter:Number($('cylinderDiameter').value),height:Number($('cylinderHeight').value),mode:$('cylinderSizing').value}} : null,
     lidSketch: lidSketchPicked ? {name:lidSketchPicked.name,data:await fileBase64(lidSketchPicked),resource:lidSketchPicked.resource??null} : null,
     layers: selectedLayers(),
@@ -5199,6 +5289,7 @@ async function applyProject(project) {
     return setStatus('that project has no drawing in it', true);
   }
 
+  clearTimeout(profileScaleTimer);
   showScreen('model');
   setWorkflow(project.workflow ?? 'glass', false);
   restoreCylinder(project.cylinder);
@@ -5215,6 +5306,7 @@ async function applyProject(project) {
   for (const [id, value] of Object.entries(project.settings ?? {})) {
     if ($(id)) $(id).value = value;
   }
+  profileScales.restore(project);
   // A project saved before effects existed has no effect setting, so the box
   // keeps whatever it was on: put it back to none for them.
   if (!project.settings?.effect) $('effect').value = 'none';
@@ -5250,8 +5342,8 @@ async function applyProject(project) {
   // The profile must be in place before generate() posts the drawing.
   if (project.profile?.data) {
     try {
-      await setProfile(new File([fromBase64(project.profile.data)],
-        project.profile.name || 'profile.dxf'));
+      if (!await setProfile(new File([fromBase64(project.profile.data)],
+        project.profile.name || 'profile.dxf'))) return;
     } catch {
       await setProfile(null);   // an unreadable profile should not block the project
     }
@@ -5668,17 +5760,16 @@ function renderStartProjects() {
   }
   grid.className = 'project-grid';
   for (const item of shelf) {
-    const tile = document.createElement('button');
+    const tile = document.createElement('div');
     tile.className = 'project-tile';
     tile.onclick = () => openFromServer(item.name);
 
     const thumb = document.createElement('div');
     thumb.className = 'tile-thumb';
     if (item.thumb) {
-      const img = document.createElement('img');
-      img.src = `/api/projects/${encodeURIComponent(item.name)}/thumbnail?t=${Date.now()}`;
-      img.alt = '';
-      thumb.append(img);
+      const preview = document.createElement('asset-preview');
+      preview.source = { src: `/api/projects/${encodeURIComponent(item.name)}/thumbnail?t=${encodeURIComponent(item.saved)}`, name: `${item.name} · saved thumbnail`, dark: true };
+      thumb.append(preview);
     } else {
       thumb.textContent = item.name.slice(0, 1).toUpperCase() || '·';
     }
@@ -5692,6 +5783,11 @@ function renderStartProjects() {
     dt.className = 'tile-date';
     dt.textContent = ago(item.saved);
     body.append(nm, dt);
+    const open = document.createElement('button');
+    open.className = 'ghost tile-open'; open.textContent = 'Open project';
+    open.setAttribute('aria-label', `Open project ${item.name}`);
+    open.onclick = event => { event.stopPropagation(); openFromServer(item.name); };
+    body.append(open);
 
     const actions = document.createElement('div');
     actions.className = 'tile-actions';
@@ -5809,10 +5905,13 @@ refreshShelf();
 // The bundled profile makes sweep mode the out-of-the-box default — the ✕ in
 // the profile row goes back to flat walls. Missing file: stay flat, no fuss.
 (async () => {
+  const request = profileLoad;
   try {
     const res = await fetch('/api/default-profile.dxf');
     if (!res.ok) return;
-    await setProfile(new File([await res.blob()], 'default_profile.dxf'));
+    const file = new File([await res.blob()], 'default_profile.dxf');
+    // A slow startup default must not replace an upload or a restored project.
+    if (request === profileLoad) await setProfile(file);
   } catch {
     // No default profile on this server — flat walls it is.
   }
@@ -6077,7 +6176,6 @@ const LIB_EXT = /\.(svg|dxf)$/i;
 let lib = [];                // [{ name, kind, size, saved }], newest first
 let libFilter = '';          // the library page's name filter
 let libReturn = 'start';     // where ← on the library screen goes back to
-let libPreviews = new Map(); // library name -> object URL of a rendered preview
 let libEditEntry = null;     // the entry the editor is editing (null = new)
 let libEditFile = null;      // a file loaded into the editor replaces content
 
@@ -6160,31 +6258,17 @@ function libraryTile(entry, opts = {}) {
   const tile = document.createElement('div');
   tile.className = 'project-tile';
   if (opts.onOpen) {
-    tile.tabIndex = 0; tile.setAttribute('role', 'button');
     tile.onclick = () => opts.onOpen(entry);
-    tile.onkeydown = (event) => {
-      if (event.target === tile && ['Enter', ' '].includes(event.key)) { event.preventDefault(); opts.onOpen(entry); }
-    };
   }
 
   const thumb = document.createElement('div');
   thumb.className = 'tile-thumb';
   if (entry.resourceRecord) {
     appendResourceThumbnail(thumb, entry.resourceRecord);
-  } else if (entry.kind === 'svg') {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.onerror = () => { img.remove(); thumb.textContent = 'SVG'; };
-    thumb.append(img);
-    libraryPreviewFor(entry, img);   // async — the letter stands in meanwhile
   } else {
-    // DXF cannot be shown by the browser, so the server flattens it to an
-    // outline SVG on first request (cached beside the entry).
-    const img = document.createElement('img');
-    img.alt = '';
-    img.onerror = () => { img.remove(); thumb.textContent = 'DXF'; };
-    thumb.append(img);
-    img.src = `/api/library/${encodeURIComponent(entry.name)}/preview`;
+    const preview = document.createElement('asset-preview');
+    preview.source = libraryPreviewSource(entry);
+    thumb.append(preview);
   }
 
   const chip = document.createElement('span');
@@ -6197,10 +6281,18 @@ function libraryTile(entry, opts = {}) {
   const nm = document.createElement('div');
   nm.className = 'tile-name';
   nm.textContent = entry.name;
+  nm.title = entry.name;
   const dt = document.createElement('div');
   dt.className = 'tile-date';
   dt.textContent = `${libKB(entry.size)} · ${ago(entry.saved)}`;
   body.append(nm, dt);
+  if (opts.onOpen) {
+    const open = document.createElement('button');
+    open.className = 'ghost tile-open'; open.textContent = opts.openLabel || 'Use drawing';
+    open.setAttribute('aria-label', `${open.textContent}: ${entry.name}`);
+    open.onclick = event => { event.stopPropagation(); opts.onOpen(entry); };
+    body.append(open);
+  }
 
   tile.append(thumb, chip, body);
 
@@ -6217,18 +6309,13 @@ function libraryTile(entry, opts = {}) {
   return tile;
 }
 
-/** Fill an <img> with the entry's SVG, via a blob URL (no scripts run). */
-async function libraryPreviewFor(entry, img) {
-  try {
-    let url = libPreviews.get(entry.name);
-    if (!url) {
-      url = URL.createObjectURL(await libraryContentBlob(entry.name));
-      libPreviews.set(entry.name, url);
-    }
-    img.src = url;
-  } catch {
-    /* the tile's letter placeholder stays */
-  }
+function libraryPreviewSource(entry) {
+  return {
+    src: `/api/library/${encodeURIComponent(entry.name)}/preview?t=${encodeURIComponent(entry.saved ?? '')}`,
+    name: entry.name, dark: entry.kind === 'dxf',
+    // Enlarging uses the original drawing, preserving more DXF detail than the cached thumbnail.
+    detail: () => libraryFileFrom(entry),
+  };
 }
 
 /** Draw `entries` into `container` as project tiles. */
@@ -6264,6 +6351,7 @@ function renderLibraryPage() {
     !needle || e.name.toLowerCase().includes(needle));
   renderGrid($('libraryGrid'), entries, {
     onOpen: openLibEditor,
+    openLabel: 'Edit drawing',
     actions: [
       { label: 'Organize', title: 'Save as a typed resource', run: (entry) => organizeResource(entry) },
       { label: '✎', title: 'View or update this drawing', run: openLibEditor },
@@ -6288,8 +6376,6 @@ async function deleteLibEntry(entry) {
     const res = await fetch(`/api/library/${encodeURIComponent(entry.name)}`, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
-    const url = libPreviews.get(entry.name);
-    if (url) { URL.revokeObjectURL(url); libPreviews.delete(entry.name); }
     lib = lib.filter((e) => e.name !== entry.name);
     libSay(`deleted "${entry.name}"`);
     renderLibraryPage();
@@ -6476,63 +6562,33 @@ async function openLibEditor(entry) {
   $('libEditor').hidden = false;
   $('libEditName').focus();
   updateLibPreview();
-  if (entry?.kind === 'dxf') loadDxfEntryPreview(entry);
 }
 
 function closeLibEditor() {
+  clearTimeout(libPreviewTimer);
+  $('libEditPreview').source = null;
   $('libEditor').hidden = true;
   libEditEntry = null;
   libEditFile = null;
 }
 
-/** The tiny rendered preview under the editor, from the current SVG text. */
+/** Inspect the current editor content, including an unsaved DXF upload. */
 let libPreviewTimer = null;
 function scheduleLibPreview() {
   clearTimeout(libPreviewTimer);
   libPreviewTimer = setTimeout(updateLibPreview, 350);
 }
 
-/** An existing DXF entry's outline preview in the editor (server-rendered). */
-function loadDxfEntryPreview(entry) {
-  const box = $('libEditPreview');
-  box.textContent = 'drawing the preview…';
-  box.style.color = '#9aa3af';
-  const img = document.createElement('img');
-  img.alt = '';
-  img.onload = () => {
-    box.textContent = '';
-    box.style.color = '';
-    box.append(img);
-  };
-  img.onerror = () => {
-    box.textContent = 'this DXF could not be previewed';
-    box.style.color = '#9aa3af';
-  };
-  img.src = `/api/library/${encodeURIComponent(entry.name)}/preview`;
-}
-
 function updateLibPreview() {
-  const box = $('libEditPreview');
-  box.textContent = '';
+  const preview = $('libEditPreview');
   if ($('libEditKind').value !== 'svg') {
-    box.textContent = 'DXF — load a file to see or edit it';
-    box.style.background = '';
+    preview.source = libEditFile && /\.dxf$/i.test(libEditFile.name) ? filePreview(libEditFile)
+      : libEditEntry?.kind === 'dxf' ? libraryPreviewSource(libEditEntry) : null;
     return;
   }
-  box.style.background = '#fff';
   const src = $('libEditSource').value.trim();
-  if (!src) {
-    box.textContent = 'paste SVG to see it here';
-    box.style.color = '#9aa3af';
-    return;
-  }
-  box.style.color = '';
-  const url = URL.createObjectURL(new Blob([src], { type: 'image/svg+xml' }));
-  const img = document.createElement('img');
-  img.alt = '';
-  img.onload = () => { box.textContent = ''; box.append(img); URL.revokeObjectURL(url); };
-  img.onerror = () => { URL.revokeObjectURL(url); box.textContent = 'not a readable SVG yet'; };
-  img.src = url;
+  const name = ($('libEditName').value.trim() || 'Drawing').replace(/\.svg$/i, '') + '.svg';
+  preview.source = src ? filePreview(new File([src], name, { type: 'image/svg+xml' })) : null;
 }
 
 /** The body multipart for save: a loaded file wins over the pasted text. */
@@ -6584,12 +6640,6 @@ async function saveLibEditor() {
           ? `"${name}" already exists — pick another name, or open it and update instead`
           : data.error ?? res.statusText, true);
       }
-    }
-    const stale = new Set([original, name].filter(Boolean));
-    for (const n of stale) {
-      const url = libPreviews.get(n);
-      if (url) URL.revokeObjectURL(url);
-      libPreviews.delete(n);
     }
     closeLibEditor();
     await refreshLibrary();
@@ -6732,22 +6782,13 @@ async function organizeResource(entry) {
   } catch (e) { resourceMessage(e); }
 }
 function appendResourceThumbnail(container, record) {
-  const img = document.createElement('img');
-  img.alt = `${record.name} preview`;
-  img.loading = 'lazy';
-  // SVGs retain their own appearance; DXFs use the converter's outline preview.
-  container.style.background = record.files.drawing.name.toLowerCase().endsWith('.svg') ? '#fff' : '#101216';
-  img.onerror = () => {
-    container.replaceChildren();
-    const retry = document.createElement('button');
-    retry.className = 'ghost'; retry.textContent = 'Preview unavailable · Retry';
-    retry.onclick = (event) => {
-      event.stopPropagation(); container.replaceChildren(); appendResourceThumbnail(container, record);
-    };
-    container.append(retry);
+  const preview = document.createElement('asset-preview');
+  preview.source = {
+    src: `/api/resources/${record.id}/preview?revision=${encodeURIComponent(record.revision)}`,
+    name: record.name, dark: /\.dxf$/i.test(record.files.drawing.name),
+    detail: () => resourceFile(record, 'drawing'),
   };
-  img.src = `/api/resources/${record.id}/preview?revision=${encodeURIComponent(record.revision)}`;
-  container.append(img);
+  container.append(preview);
 }
 async function refreshResources() {
   try {
@@ -6882,7 +6923,7 @@ function setupWorkflowPanels() {
   }
   const sweeps=document.createElement('fieldset'); sweeps.id='sweepInputs';
   const legend=document.createElement('legend');legend.textContent='Sweep profiles & cusp paths';sweeps.append(legend);
-  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('grooveInputs'),$('cuspInputs'),$('gothicExample'),$('spitzbogenExample')])sweeps.append(node);
+  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('profileEditor'),$('profileDimensions'),$('profileScaleRow'),$('grooveInputs'),$('cuspInputs'),$('gothicExample'),$('spitzbogenExample')])sweeps.append(node);
   const sweepDetails=document.createElement('details');sweepDetails.id='sweepDetails';
   const sweepSummary=document.createElement('summary');sweepSummary.textContent='Sweep profiles & cusp paths';sweepDetails.append(sweepSummary,sweeps);
   $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
@@ -6923,6 +6964,7 @@ async function newWorkflow(mode) {
   restoreCylinder(null);
   resetLayers();picked=null;clearTrace();
   cuspPicked=cuspProfilePicked=null;
+  clearTimeout(profileScaleTimer);profileScales.restore();
   await setProfile(null);await setBoundary(null);
   $('projectName').value='';$('roundEnds').checked=false;
   $('confineWalls').checked=mode!=='gothic';
@@ -6931,6 +6973,9 @@ async function newWorkflow(mode) {
   setWorkflow(mode);updateCuspLabels();setStatus('Choose inputs to begin.');
 }
 function updateCuspLabels() {
+  $('cuspPreview').source = filePreview(cuspPicked);
+  profileEditor?.sync();
+  profileScales.sync();
   $('cuspName').textContent=cuspPicked?.name??'No cusp paths';
   $('cuspProfileName').textContent=cuspProfilePicked?.name??'Reduced main profile';
 }
@@ -6950,12 +6995,13 @@ $('cuspProfileClear').onclick=()=>setCuspFile('cuspProfile',null);
 $('cuspLibrary').onclick=()=>openPicker('cusps');
 $('cuspProfileLibrary').onclick=()=>openPicker('cuspProfile');
 $('workflowMode').onchange=()=>{setWorkflow($('workflowMode').value);refit('Workflow updated.');};
-for (const id of ['cuspWidth','cuspHeight','cuspZ','roundEnds','endAngle','endSide','frameOnly']) $(id).onchange=()=>{updateWorkflowProgress();refit('Tracery shape updated.');};
+for (const id of ['roundEnds','endAngle','endSide','frameOnly']) $(id).onchange=()=>{updateWorkflowProgress();refit('Tracery shape updated.');};
 $('startGothic').onclick=async()=>{await newWorkflow('gothic');showScreen('model');showModelStep('inputs');};
 $('gothicExample').onclick=async()=>{
   try{
     const get=async(name)=>{const r=await fetch('/api/gothic-example/'+name);if(!r.ok)throw new Error('Could not load gothic reference');return new File([await r.blob()],name);};
     const [frame,cusps,profile,cuspProfile]=await Promise.all(['frame.dxf','cusps.dxf','frame-profile.svg','cusp-profile.svg'].map(get));
+    clearTimeout(profileScaleTimer);profileScales.restore();
     await setBoundary(null);grooveProfilePicked=null;await setProfile(profile);cuspPicked=cusps;cuspProfilePicked=cuspProfile;
     $('profileScale').value=1;$('cuspWidth').value=1;$('cuspHeight').value=1;$('cuspZ').value=0;$('roundEnds').checked=true;$('endAngle').value=90;$('endSide').value=1;
     setWorkflow('gothic');updateCuspLabels();$('projectName').value='Gothic reference';
@@ -6990,6 +7036,8 @@ filamentManager=initFilaments({changed:()=>rangeChanged(),layerHeight:()=>Number
 $('startFilaments').onclick=() => filamentManager.open();
 $('modelFilaments').onclick=() => filamentManager.open();
 setupWorkflowPanels();
+profileEditor = new ProfileEditor({ host: $('profileEditor'), read: profileEditorState, change: editProfileSection });
+$('sagitta').addEventListener('change', () => profileEditor.sync());
 </script>
 </body>
 </html>
