@@ -13,6 +13,16 @@ of a hand-drawn sketch** — traced to an SVG right in the page first.
 
 Use the **Inputs → Shape → Paint → Export** panels for stained glass, or start
 **Gothic tracery** for separate frame/cusp profiles and revolved endings.
+**Additions**, between Shape and Export (or Paint), adds a perpendicular shelf
+from a closed SVG/DXF outline, with adjustable thickness, placement and a rotated
+decorative edge profile. The supplied gothic bat shelf outline is available
+in that panel. Its **Shelf placement** editor shows the frame and shelf together:
+drag and resize in **Top · X/Y**, or switch to **Front · X/Z** to adjust height.
+Use **Expand** for a larger workspace.
+Shelf edge profiles have independent width/height scales and can mirror across
+their source drawing's bottom baseline. **Keep original sweep too** fuses the original and mirrored
+sweeps together. **Trim flush to frame back** cuts the shelf's rear projections
+to the bed plane so the frame can lie flat.
 **Filaments & calibration** provides numbered thickness coupons and saved
 backlit-color measurements. Tracing can preserve large black eyes and spots
 as closed shapes. See the [workflow guide](docs/workflows.md) for each path,
@@ -36,6 +46,14 @@ arrow keys and the light/dark background button help inspect details. Escape
 closes the inspector and returns to the underlying picker or editor. Preview
 navigation does not change artwork placement or model settings. DXF uploads
 can be previewed before saving or generating a model.
+
+**Shader preview** in the model toolbar, or **Shader** beside a vector preview,
+turns any loaded DXF/SVG drawing or cross-section into an animated GPU distance
+field. Choose among 60 visual styles, switch between outlines and filled shapes,
+adjust curve detail and line width, pause or scrub the animation, and save a PNG
+or a complete GLSL shader bundle. It includes stacked drawings, sweep/groove/cusp
+profiles, boundaries, lid sketches and shelf inputs. Preview settings travel with
+the project. See [shader previews](docs/shader-previews.md) for formats and limits.
 
 **Profile alignment**, under **Inputs → Sweep profiles & cusp paths**, shows
 the main profile (blue), groove cutter (pink) and cusp section (green) together

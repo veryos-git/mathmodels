@@ -26,6 +26,11 @@
 .profile-editor-dialog .profile-editor-legend { padding-right: 10px; max-width: 500px; }
 .profile-editor-dialog .profile-editor-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .profile-editor-dialog .profile-editor-view span { font-size: 12px; }
+.shelf-editor-key { display: flex; gap: 16px; padding: 0 10px 8px; font-size: 11px; color: #60a5fa; }
+.shelf-editor-key span + span { color: #fbbf24; }
+.shelf-editor .profile-editor-stage { height: 310px; }
+.shelf-editor.profile-editor-dialog .profile-editor-stage { height: auto; }
+.shelf-editor.profile-editor-dialog .shelf-editor-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 600px) {
   .profile-editor-dialog .profile-editor-fields { grid-template-columns: 1fr 1fr; }
   .profile-editor-dialog button.ghost { min-height: 36px; }

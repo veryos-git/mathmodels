@@ -26,7 +26,7 @@ asset-preview .file-preview-message {
   background: #edf1f7; overflow: auto;
 }
 asset-preview[data-tone="dark"] .file-preview-message { background: #101216; color: #b8c5d8; }
-asset-preview .file-preview-toolbar { display: flex; align-items: center; gap: 3px; padding: 6px; border-top: 1px solid #354052; }
+asset-preview .file-preview-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 6px; border-top: 1px solid #354052; }
 asset-preview button.ghost {
   margin: 0 !important; padding: 5px 7px !important; width: auto !important; flex: none !important;
   min-height: 28px; font: 12px/1.3 system-ui, sans-serif !important; color: #c5d2e4;

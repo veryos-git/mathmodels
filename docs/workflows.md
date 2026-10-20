@@ -127,6 +127,124 @@ Keep it off for a swept frame with paintable infill. The input files, settings,
 workflow selection and material calibrations all travel inside project files.
 Imported project resources include cusp paths and cusp profiles.
 
+### Additions: perpendicular shelves
+
+Use **Inputs → Shape → Additions → Export** for a frame-only model.
+Models with painted faces also retain a **Paint** step before Export.
+
+In **Additions**, upload or choose a closed SVG/DXF **Shelf outline**. This is
+the shelf seen from above. **Use gothic shelf outline** loads the supplied
+scalloped example. Loading an outline enables the shelf; disable **Enable shelf**
+to keep its settings without including it in the model.
+
+The outline is extruded **0.2–20 mm** thick (default **5 mm**) and placed at
+**90°** to the base swept frame. Width and depth are independent; **0** preserves
+that dimension from the source drawing. The longest horizontal edge at the
+drawing's top or bottom faces the frame. **Flip front / back** reverses this.
+Holes in the outline remain holes.
+
+**Shelf placement** shows the shelf outline in yellow against the swept frame
+in blue, using shelf coordinates: **X = left/right, Y = depth, Z = height**.
+Choose **Top · X/Y** to drag the shelf across the plane. The square handles
+resize width, depth or both, keeping the rear centre fixed. **Keep proportions**
+preserves the width/depth ratio. Choose **Front · X/Z** to drag the shelf
+up/down against the bat's face; this changes only its Z height.
+
+Use **Expand** for a larger workspace. Scroll to zoom at the pointer, drag
+empty space to pan, and **Fit all** to see both outlines. Arrow keys move by
+0.1 mm (Shift: 1 mm); front view accepts only up/down movement. Escape cancels
+the current drag. Exact dimensions and X/Y/Z positions are editable below
+the canvas. Changes appear immediately in 2D and rebuild the 3D model on release.
+The decorative edge is excluded from the shelf's placement outline.
+
+Offsets are finished millimetres relative to the base frame centre and its
+front surface. The shelf's top starts at the centre's height, its thickness
+extends downward, and the back overlaps the frame by up to 0.2 mm.
+Move it downward to place it near the bottom of a bat. A detached shelf reports
+an error when rebuilding; its outline stays editable so it can be moved back.
+The frame projections stay fixed as the shelf moves.
+
+**Sweep along shelf edges** decorates the complete outer perimeter. By default
+it uses the main sweep profile's source drawing. Upload a separate
+**Edge cross-section** to use another drawing. **Profile width ×** and
+**Profile height ×** size the shelf section independently; 1× uses the source's
+drawn dimensions. These scales apply before rotation. **Copy main profile size**
+copies the two main-profile scales once when sharing its drawing. Subsequent
+main-profile edits do not resize the shelf edge. Older projects capture their
+previously shared main scales when opened, preserving the shelf section's size.
+**90°, 180°, 270° and 360°** rotate that cross-section around the edge;
+360° is the original orientation. The source profile's bottom baseline has its
+midpoint anchored on the slab edge at half its thickness. Main-profile elevation and
+groove cutters are specific to the frame and do not alter the shelf edge.
+
+**Mirror across horizontal baseline** reflects the source section through its
+bottom edge (Y=0). **Flip left / right in source profile** reflects it through
+its vertical centreline (X=0). Both act before rotation, around the same fixed
+anchor. The baseline follows the selected rotation; it is horizontal in the
+source drawing, not necessarily in the finished model. Check the resulting
+toolpaths in the slicer; arbitrary profiles are not guaranteed to become support-free.
+
+Enable **Keep original sweep too · both profiles** to add the mirrored sweep
+alongside the original instead of replacing it. With the baseline mirror enabled,
+the two sections meet along their flat bases on opposite sides of the baseline,
+as in the supplied CAD example. They are never centred separately. The optional
+left/right flip also applies to the reflected copy. Both sections share the shelf
+profile's size, rotation and anchor. Their swept solids are fused into the shelf, so overlapping
+areas do not leave duplicate shells; the bed-plane trim then cuts the combined
+result. The setting is saved with the project. Older projects retain a single
+sweep until this option is enabled.
+
+This corrects the earlier mirror about the rotated bounding-box centre. Existing
+mirror settings now use the source axes above; the baseline anchor replaces
+bounding-box centring for all shelf edge sweeps. The main frame is unchanged.
+
+**Trim flush to frame back · bed plane** cuts the placed shelf and its decorative
+edge at the main frame's rear plane, with a closed planar cap. This assumes the
+frame's back lies on the bed. It removes projections behind that plane without
+moving or cutting the frame. It is enabled by default in the UI, including when
+opening older shelf projects, and can be disabled to retain the full sweep.
+
+Changes rebuild an existing model automatically. **Update 3D model** also
+generates it from scratch. Shelves require a main sweep profile and a flat
+model surface. The shelf is fused with the base frame and travels with it in
+STL, colour-separated exports, 3MF and slice SVGs. Other stacked drawings keep
+their original elevations. Projects embed both drawings and all shelf settings;
+older projects reopen with additions disabled.
+Placement and the proportions lock are saved with the project.
+
+The [transcribed sketch notes](../hgc/object_additions/gothic_Shelf/notes.md)
+record the original design and link to the supplied CAD examples.
+
+CLI example:
+
+```bash
+.venv/bin/python tools/dxf2stl.py frame.dxf shelf.stl --profile profile.dxf \
+  --frame-only \
+  --addition-outline "hgc/object_additions/gothic_Shelf/examples/shelf - shelf_profile_path.dxf" \
+  --addition-thickness 5 --addition-y -25 \
+  --addition-edge-sweep --addition-rotation 90 \\
+  --addition-profile-scale 1 --addition-profile-height-scale 1 \\
+  --addition-mirror-profile --addition-trim-back
+```
+
+The build routes accept `additionOutline` and optional `additionProfile` uploads,
+numeric `additionThickness`, `additionWidth`, `additionDepth`, `additionX`,
+`additionY`, `additionZ`, `additionRotation`, `additionProfileScale`,
+`additionProfileHeightScale`, and boolean `additionEdgeSweep=1`,
+`additionFlip=1`, `additionMirrorProfile=1`, `additionFlipProfile=1`,
+`additionKeepOriginalProfile=1`, `additionTrimBack=1`. Use
+`--addition-keep-original-profile` with either mirror flag on the CLI to sweep
+both orientations. Without a mirror flag, it keeps just the original.
+CLI/API profile scales default to 1 independently of the
+main profile; trim and mirrors are opt-in flags. Omit `additionOutline` to build
+without a shelf.
+`POST /api/additions/preview` returns the normalized shelf outline and top/front
+projections of the base frame using the same geometry pipeline. It deliberately
+ignores shelf position, size and flip, allowing the browser to edit those locally.
+For compatibility, stored/API `additionY` is still the model's upright direction
+(editor **Z**), and `additionZ` is still its outward direction (editor **Y**).
+Existing projects retain their exact placement.
+
 ### Reference example and derivation
 
 **Load reference gothic example** loads the provided complex tracery, including

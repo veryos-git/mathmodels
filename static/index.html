@@ -437,6 +437,7 @@
   @media(max-width:650px) { .filament-layout { grid-template-columns:1fr; } }
 </style>
 <link rel="stylesheet" href="/file-preview.css">
+<link rel="stylesheet" href="/shader-inspector.css">
 <link rel="stylesheet" href="/profile-editor.css">
 </head>
 <body>
@@ -699,7 +700,7 @@
   <select id="workflowMode"><option value="glass">Stained glass / relief</option><option value="gothic">Gothic tracery</option></select>
   <p id="workflowHint" class="muted"></p>
   <nav id="modelSteps" aria-label="Model workflow">
-    <button data-step="inputs">1 · Inputs</button><button data-step="shape">2 · Shape</button><button data-step="paint">3 · Paint</button><button data-step="export">4 · Export</button>
+    <button data-step="inputs">1 · Inputs</button><button data-step="shape">2 · Shape</button><button data-step="additions">3 · Additions</button><button data-step="paint">4 · Paint</button><button data-step="export">5 · Export</button>
   </nav>
   <div id="workflowProgress" class="muted" role="status"></div>
 
@@ -1037,6 +1038,7 @@
   <canvas id="viewer"></canvas>
   <div id="hint">generate a model to preview it here</div>
   <div id="tools">
+    <button class="ghost" id="shaderPreview">Shader preview</button>
     <button class="ghost" id="top" hidden>Top view</button>
     <button class="ghost" id="reset" hidden>Reset view</button>
     <button class="ghost" id="wire" hidden>Wireframe</button>
@@ -1147,6 +1149,8 @@ import { remapPaint } from './region-paint.js';
 import { filePreview } from './file-preview.js';
 import { bindProfileScales, PROFILE_SCALE_GROUPS, PROFILE_POSITION_FIELDS, PROFILE_TRANSFORM_FIELDS } from './profile-scales.js';
 import { ProfileEditor } from './profile-editor.js';
+import { ShelfEditor } from './shelf-editor.js';
+import { ShaderInspector } from './shader-inspector.js';
 import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
@@ -1160,6 +1164,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
 let profileEditor = null;
+let shelfEditor = null;
+let additionKeepProportions = false;
+const shaderInspector = new ShaderInspector(projectShaderSources);
+document.addEventListener('shader-preview', event => shaderInspector.open(event.detail.source, event.detail.opener));
+$('shaderPreview').onclick = () => shaderInspector.open();
 let filamentManager = null;
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 const round3 = (v) => Math.round(v * 1000) / 1000;
@@ -2406,7 +2415,10 @@ function resize() {
     camera.updateProjectionMatrix();
   }
 }
-renderer.setAnimationLoop(() => { resize(); controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => {
+  if (shaderInspector.dialog?.open) return;
+  resize(); controls.update(); renderer.render(scene, camera);
+});
 
 $('reset').onclick = resetView;
 $('wire').onclick = () => {
@@ -2744,6 +2756,11 @@ async function loadStacked(l, fit = true) {
 // Advanced mode: a second drawing holding one closed cross-section. The server
 // sweeps it along every path, so the frame's width and height come from the
 // profile and the wall width/height boxes step aside.
+let additionOutlinePicked = null;
+let additionProfilePicked = null;
+const ADDITION_DEFAULTS = {additionThickness:5, additionWidth:0, additionDepth:0,
+  additionX:0, additionY:0, additionZ:0, additionRotation:90,
+  additionProfileScale:1, additionProfileHeightScale:1};
 let cuspPicked = null;
 let cuspProfilePicked = null;
 let profilePicked = null;  // the profile drawing (File), null in standard mode
@@ -4745,8 +4762,28 @@ function mulberry32(a) {
   };
 }
 
-function shapeForm() {
+function shapeForm({ placement = false } = {}) {
   const form = new FormData();
+  if (placement) {
+    if (additionOutlinePicked) form.append('additionOutline', additionOutlinePicked);
+  } else if ($('additionEnabled').checked) {
+    if (!additionOutlinePicked) throw new Error('Choose a closed shelf outline in Additions.');
+    if (!profilePicked) throw new Error('Choose a main sweep profile in Inputs before adding a shelf.');
+    if (cylinderEnabled()) throw new Error('Perpendicular additions require a flat model surface.');
+    for (const id of Object.keys(ADDITION_DEFAULTS)) {
+      if (!$(id).checkValidity() || !Number.isFinite(Number($(id).value))) {
+        throw new Error(`Check the shelf setting: ${$(id).labels?.[0]?.textContent ?? id}`);
+      }
+      form.append(id, $(id).value);
+    }
+    form.append('additionOutline', additionOutlinePicked);
+    if (additionProfilePicked) form.append('additionProfile', additionProfilePicked);
+    if ($('additionEdgeSweep').checked) form.append('additionEdgeSweep', '1');
+    if ($('additionFlip').checked) form.append('additionFlip', '1');
+    for (const id of ['additionMirrorProfile','additionFlipProfile','additionKeepOriginalProfile','additionTrimBack']) {
+      if ($(id).checked) form.append(id, '1');
+    }
+  }
   if (cylinderEnabled()) form.append('cylinder', JSON.stringify(readCylinderSettings()));
   if(cylinderEnabled()&&$('cylinderLid').checked&&lidSketchPicked)form.append('lidSketch',lidSketchPicked);
   // The drawings go in stacking order, base first; everything else about the
@@ -4900,6 +4937,7 @@ async function generate(keep = null, { lenient = false } = {}) {
     return false;
   } finally {
     $('go').disabled = false;
+    shelfEditor?.sync();
   }
 }
 
@@ -4936,6 +4974,7 @@ let refitLenient = false;   // placement, not shape: never fail on paint
  * one more pass instead of racing each other into the viewer.
  */
 async function refit(note, lenient = false) {
+  shelfEditor?.sync();
   refitNote = note;
   refitLenient = lenient;
   if (!picked || !baseModel()) return;  // nothing to rebuild before the first Generate
@@ -5126,6 +5165,18 @@ async function buildProject() {
     version: stacked ? 2 : 1,
     saved: new Date().toISOString(),
     workflow: $('workflowMode').value,
+    shaderPreview: shaderInspector.snapshot(),
+    additions: {
+      enabled: $('additionEnabled').checked,
+      outline: additionOutlinePicked ? {name:additionOutlinePicked.name,data:await fileBase64(additionOutlinePicked),resource:additionOutlinePicked.resource??null} : null,
+      profile: additionProfilePicked ? {name:additionProfilePicked.name,data:await fileBase64(additionProfilePicked),resource:additionProfilePicked.resource??null} : null,
+      settings: Object.fromEntries(Object.keys(ADDITION_DEFAULTS).map(id=>[id,$(id).value])),
+      edgeSweep: $('additionEdgeSweep').checked, flip: $('additionFlip').checked,
+      mirrorProfile: $('additionMirrorProfile').checked, flipProfile: $('additionFlipProfile').checked,
+      keepOriginalProfile: $('additionKeepOriginalProfile').checked,
+      trimBack: $('additionTrimBack').checked,
+      keepProportions: additionKeepProportions,
+    },
     slices: slicePreview.snapshot(),
     filaments: filamentManager?.snapshot(),
     tracery: {
@@ -5294,7 +5345,9 @@ async function applyProject(project) {
   setWorkflow(project.workflow ?? 'glass', false);
   restoreCylinder(project.cylinder);
   filamentManager?.restore(project.filaments);
+  shaderInspector.restore(project.shaderPreview);
   const embeddedFile = (value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
+  restoreAdditions(project.additions, embeddedFile, project.settings);
   lidSketchPicked=embeddedFile(project.lidSketch); lidSketchRevision++; lidSketchUI();
   cuspPicked = embeddedFile(project.tracery?.cusps);
   cuspProfilePicked = embeddedFile(project.tracery?.profile);
@@ -6390,6 +6443,8 @@ let pickerResources = [];
 let pickerSlot = null;   // 'subject' | 'boundary' | 'stack' | 'profile'
 
 const PICKER_INFO = {
+  additionOutline: {title:'Shelf outline',note:'A closed top-view outline, extruded perpendicular to the main frame'},
+  additionProfile: {title:'Shelf edge profile',note:'A closed decorative section swept around the shelf perimeter'},
   template: { title: 'Add a line-art template', note: 'Choose an SVG to place over the image. Each template stays editable.' },
   cusps: {title:'Cusp paths',note:'Uses the same coordinates as the main frame'},
   cuspProfile: {title:'Cusp profile',note:'An independent closed cross-section for the finer paths'},
@@ -6438,7 +6493,7 @@ function closePicker() {
 }
 
 function renderPickerGrid() {
-  const kind = ['subject', 'stack', 'cusps', 'lidSketch'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
+  const kind = ['subject', 'stack', 'cusps', 'lidSketch', 'additionOutline'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile', 'additionProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
   const resources = pickerResources.filter((r) => pickerSlot === 'template' || r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
@@ -6454,6 +6509,7 @@ function renderPickerGrid() {
 
 /** Feed a chosen library drawing to the slot it was picked for. */
 async function applyFileToSlot(slot, file) {
+  if (slot === 'additionOutline' || slot === 'additionProfile') return setAdditionFile(slot, file);
   if (slot === 'lidSketch') return applyLidSketchFile(file);
   if (slot === 'template') return addTemplateFile(file);
   if (slot === 'cusps' || slot === 'cuspProfile') return setCuspFile(slot, file);
@@ -6903,10 +6959,167 @@ $('savePattern').onclick = async () => {
 // A compact, persistent workflow navigator keeps inputs, modelling, painting,
 // and exports in their own panels without changing their existing controls.
 let workflowStep = 'inputs';
+function setupAdditions() {
+  $('modelPanel-additions').innerHTML = `
+    <fieldset>
+      <legend>Add shelf</legend>
+      <p class="muted">Extrude a top-view outline at 90° to the main swept model.</p>
+      <label class="check"><input id="additionEnabled" type="checkbox"> Enable shelf</label>
+      <div id="shelfPlacementEditor"></div>
+      <div class="resource-slot"><strong>Shelf outline · top view</strong><span id="additionOutlineName" class="muted">No shelf outline</span>
+        <div><button id="additionOutlinePick" class="ghost">Upload…</button><button id="additionOutlineLibrary" class="ghost">Library…</button><button id="additionOutlineClear" class="ghost">Clear</button></div>
+        <input id="additionOutlineFile" type="file" accept=".svg,.dxf" hidden>
+        <asset-preview id="additionOutlinePreview" hidden></asset-preview>
+      </div>
+      <button id="additionExample" class="ghost">Use gothic shelf outline</button>
+      <p class="muted">The longest straight horizontal edge faces the frame. Flip front/back if needed.</p>
+      <label class="check"><input id="additionFlip" type="checkbox"> Flip front / back</label>
+      <label class="check"><input id="additionTrimBack" type="checkbox" checked> Trim flush to frame back · bed plane</label>
+      <p class="muted">Cuts away shelf and edge-sweep material behind the frame so its back can lie flat on the bed.</p>
+      <label for="additionThickness">Thickness (mm)</label>
+      <div class="profile-scale-axis"><input id="additionThicknessSlider" aria-label="Shelf thickness" type="range" min="0.2" max="20" step="0.1" value="5"><input id="additionThickness" type="number" min="0.2" max="20" step="0.1" value="5" required></div>
+      <div class="row">
+        <div><label for="additionWidth">Width (mm)</label><input id="additionWidth" type="number" min="0" step="any" value="0" required></div>
+        <div><label for="additionDepth">Depth (mm)</label><input id="additionDepth" type="number" min="0" step="any" value="0" required></div>
+      </div>
+      <p class="muted">0 keeps the outline’s original dimension. Width and depth exclude the decorative edge.</p>
+      <details><summary>Position on the frame</summary>
+        <label for="additionX">X · left / right (mm)</label><input id="additionX" type="number" step="0.1" value="0" required>
+        <label for="additionZ">Y · depth / outward (mm)</label><input id="additionZ" type="number" step="0.1" value="0" required>
+        <label for="additionY">Z · height / up (mm)</label><input id="additionY" type="number" step="0.1" value="0" required>
+        <p class="muted">Shelf coordinates: X left/right, Y depth, Z height. The shelf’s top starts at the frame centre; its rear edge overlaps the frame slightly.</p>
+      </details>
+    </fieldset>
+    <fieldset>
+      <legend>Sweep profile</legend>
+      <label class="check"><input id="additionEdgeSweep" type="checkbox" checked> Sweep along shelf edges</label>
+      <div class="resource-slot"><strong>Edge cross-section</strong><span id="additionProfileName" class="muted">Same as main sweep profile</span>
+        <div><button id="additionProfilePick" class="ghost">Upload…</button><button id="additionProfileLibrary" class="ghost">Library…</button><button id="additionProfileClear" class="ghost">Use main</button></div>
+        <input id="additionProfileFile" type="file" accept=".svg,.dxf" hidden>
+        <asset-preview id="additionProfilePreview" hidden></asset-preview>
+      </div>
+      <label for="additionProfileScale">Profile width ×</label>
+      <div class="profile-scale-axis"><input id="additionProfileScaleSlider" aria-label="Shelf profile width scale" type="range" min="0.01" max="5" step="0.01" value="1"><input id="additionProfileScale" type="number" min="0.001" step="any" value="1" required></div>
+      <label for="additionProfileHeightScale">Profile height ×</label>
+      <div class="profile-scale-axis"><input id="additionProfileHeightScaleSlider" aria-label="Shelf profile height scale" type="range" min="0.01" max="5" step="0.01" value="1"><input id="additionProfileHeightScale" type="number" min="0.001" step="any" value="1" required></div>
+      <p class="muted">Size the source cross-section before rotation. 1× uses its drawn size. These scales are independent of the main profile.</p>
+      <button id="additionMatchProfile" class="ghost">Copy main profile size</button>
+      <label for="additionRotation">Edge profile rotation</label>
+      <select id="additionRotation"><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option><option value="360">360°</option></select>
+      <label class="check"><input id="additionMirrorProfile" type="checkbox"> Mirror across horizontal baseline</label>
+      <label class="check"><input id="additionFlipProfile" type="checkbox"> Flip left / right in source profile</label>
+      <label class="check"><input id="additionKeepOriginalProfile" type="checkbox"> Keep original sweep too · both profiles</label>
+      <p class="muted">The mirror uses the bottom horizontal baseline of the source drawing, before rotation. Keep the original too to place the two profiles on opposite sides of that baseline.</p>
+      <p class="muted">The baseline’s midpoint stays on the shelf edge at half its thickness. Both profiles share the same size, rotation and anchor, and fuse into the shelf before the bed-plane trim.</p>
+    </fieldset>
+    <button id="additionGenerate">Update 3D model</button>`;
+  for (const slot of ['additionOutline', 'additionProfile']) {
+    $(slot+'Pick').onclick=()=>$(slot+'File').click();
+    $(slot+'Library').onclick=()=>openPicker(slot);
+    $(slot+'Clear').onclick=()=>setAdditionFile(slot,null);
+    $(slot+'File').onchange=e=>{if(e.target.files[0])setAdditionFile(slot,e.target.files[0]);e.target.value='';};
+  }
+  for (const id of [...Object.keys(ADDITION_DEFAULTS),'additionEnabled','additionEdgeSweep','additionFlip',
+    'additionMirrorProfile','additionFlipProfile','additionKeepOriginalProfile','additionTrimBack']) {
+    $(id).onchange=()=>{additionUI();refit('Shelf updated.');};
+  }
+  $('additionThicknessSlider').oninput=()=>{$('additionThickness').value=$('additionThicknessSlider').value;shelfEditor?.render();};
+  $('additionThicknessSlider').onchange=()=>refit('Shelf thickness updated.');
+  for (const id of ['additionProfileScale','additionProfileHeightScale']) {
+    $(id+'Slider').oninput=()=>{$(id).value=$(id+'Slider').value;rebuildFailed=true;};
+    $(id+'Slider').onchange=()=>{additionUI();refit('Shelf profile size updated.');};
+  }
+  $('additionMatchProfile').onclick=()=>{
+    $('additionProfileScale').value=$('profileScale').value;
+    $('additionProfileHeightScale').value=$('profileHeightScale').value;
+    additionUI();refit('Main profile size copied to shelf.');
+  };
+  $('additionGenerate').onclick=()=>$('go').click();
+  $('additionExample').onclick=async()=>{
+    try {
+      const response=await fetch('/api/additions/shelf-example.dxf');
+      if(!response.ok)throw new Error('Could not load the gothic shelf outline.');
+      await setAdditionFile('additionOutline',new File([await response.blob()],'gothic-shelf-outline.dxf'));
+    } catch(e) {setStatus(e.message,true);}
+  };
+  shelfEditor = new ShelfEditor({ host:$('shelfPlacementEditor'), read:shelfPlacementState, change:editShelfPlacement });
+}
+function shelfPlacementState() {
+  const values = {
+    x:Number($('additionX').value)||0, y:Number($('additionZ').value)||0,
+    z:Number($('additionY').value)||0, width:Number($('additionWidth').value)||0,
+    depth:Number($('additionDepth').value)||0, thickness:Number($('additionThickness').value)||5,
+    flip:$('additionFlip').checked, locked:additionKeepProportions,
+  };
+  const message = !picked ? 'Choose a main-frame drawing in Inputs.'
+    : !profilePicked ? 'Choose a main sweep profile in Inputs.'
+    : cylinderEnabled() ? 'Shelf placement requires a flat model surface.' : '';
+  return { values, enabled:$('additionEnabled').checked, message,
+    form:message ? null : shapeForm({placement:true}) };
+}
+function editShelfPlacement(value, commit) {
+  if (![value.x,value.y,value.z,value.width,value.depth].every(Number.isFinite)) return;
+  let changed=false;
+  for (const [id,key] of Object.entries({additionX:'x',additionZ:'y',additionY:'z',additionWidth:'width',additionDepth:'depth'})) {
+    const next=Number(value[key].toFixed(6));
+    changed ||= Number($(id).value)!==next;
+    $(id).value=next;
+  }
+  additionKeepProportions=value.locked;
+  shelfEditor?.render();
+  // Keep exports from using the last model while a placement is still being edited.
+  if(changed)rebuildFailed=true;
+  if(commit&&rebuildFailed)refit('Shelf placement updated.');
+}
+function additionUI() {
+  $('additionOutlineName').textContent=additionOutlinePicked?.name??'No shelf outline';
+  $('additionProfileName').textContent=additionProfilePicked?.name??'Same as main sweep profile';
+  $('additionOutlinePreview').source=filePreview(additionOutlinePicked);
+  $('additionProfilePreview').source=filePreview(additionProfilePicked??profilePicked);
+  $('additionThicknessSlider').value=$('additionThickness').value;
+  for (const id of ['additionProfileScale','additionProfileHeightScale']) {
+    $(id+'Slider').min=String(Math.min(.01,Number($(id).value)||.01));
+    $(id+'Slider').max=String(Math.max(5,Number($(id).value)||5));
+    $(id+'Slider').value=$(id).value;
+  }
+  $('additionMatchProfile').disabled=!!additionProfilePicked||!profilePicked;
+  $('additionKeepOriginalProfile').disabled=!$('additionMirrorProfile').checked&&!$('additionFlipProfile').checked;
+  shelfEditor?.sync();
+}
+async function setAdditionFile(slot,file) {
+  if(file&&!/\.(svg|dxf)$/i.test(file.name))return setStatus('Choose a DXF or SVG drawing.',true);
+  if(slot==='additionOutline') {
+    additionOutlinePicked=file;
+    $('additionEnabled').checked=!!file;
+  } else additionProfilePicked=file;
+  additionUI();
+  await refit('Shelf updated.');
+}
+function restoreAdditions(saved=null,embeddedFile=()=>null,mainSettings={}) {
+  additionKeepProportions=!!saved?.keepProportions;
+  additionOutlinePicked=embeddedFile(saved?.outline);
+  additionProfilePicked=embeddedFile(saved?.profile);
+  $('additionEnabled').checked=!!saved?.enabled;
+  $('additionEdgeSweep').checked=saved?.edgeSweep??true;
+  $('additionFlip').checked=!!saved?.flip;
+  $('additionMirrorProfile').checked=!!saved?.mirrorProfile;
+  $('additionFlipProfile').checked=!!saved?.flipProfile;
+  $('additionKeepOriginalProfile').checked=!!saved?.keepOriginalProfile;
+  $('additionTrimBack').checked=saved?.trimBack??true;
+  for(const [id,value] of Object.entries(ADDITION_DEFAULTS))$(id).value=saved?.settings?.[id]??value;
+  // Old shared profiles borrowed the main scales. Capture them once on load
+  // so reopening preserves size and subsequent main-profile edits are independent.
+  if(saved&&!saved.profile?.data) {
+    for(const [id,main] of [['additionProfileScale','profileScale'],['additionProfileHeightScale','profileHeightScale']]) {
+      if(saved.settings?.[id]===undefined)$(id).value=mainSettings?.[main]??1;
+    }
+  }
+  additionUI();
+}
 function setupWorkflowPanels() {
   const aside = document.querySelector('#modelScreen .model-layout > aside');
   let phase='inputs';
-  const grouped={inputs:[],shape:[],paint:[],export:[]};
+  const grouped={inputs:[],shape:[],additions:[],paint:[],export:[]};
   let collect=false;
   for(const node of [...aside.children]) {
     if(node.id==='drop')collect=true;
@@ -6928,12 +7141,14 @@ function setupWorkflowPanels() {
   const sweepSummary=document.createElement('summary');sweepSummary.textContent='Sweep profiles & cusp paths';sweepDetails.append(sweepSummary,sweeps);
   $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
   $('modelPanel-shape').append($('holeBox'));
+  setupAdditions();
   for(const button of $('modelSteps').querySelectorAll('button'))button.onclick=()=>showModelStep(button.dataset.step);
   showModelStep('inputs');setWorkflow('glass',false);
 }
 function showModelStep(step) {
   workflowStep=step;
   for(const panel of document.querySelectorAll('.model-panel'))panel.hidden=panel.id!=='modelPanel-'+step;
+  if(step==='additions')additionUI();
   for(const button of $('modelSteps').querySelectorAll('button')) {
     if(button.dataset.step===step)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
   }
@@ -6942,7 +7157,7 @@ function showModelStep(step) {
 function updateWorkflowProgress() {
   if(!$('workflowProgress'))return;
   $('modelSteps').querySelector('[data-step=paint]').hidden=$('frameOnly').checked;
-  $('modelSteps').querySelector('[data-step=export]').textContent=$('frameOnly').checked?'3 · Export':'4 · Export';
+  $('modelSteps').querySelector('[data-step=export]').textContent=$('frameOnly').checked?'4 · Export':'5 · Export';
   const missing=!picked?'Choose a pattern or main-frame drawing.':$('workflowMode').value==='gothic'&&!profilePicked?'Choose the main sweep profile.':!baseModel()?'Set dimensions, then Generate 3D.':$('frameOnly').checked?'Frame ready. Save the project or export STL / 3MF.':'Model ready. Paint the faces, then save and export.';
   $('workflowProgress').textContent=missing;
 }
@@ -6950,7 +7165,7 @@ function setWorkflow(mode, defaults=true) {
   $('workflowMode').value=mode==='gothic'?'gothic':'glass';
   const gothic=$('workflowMode').value==='gothic';
   $('workflowTitle').textContent=gothic?'Gothic tracery':'Stained glass / relief';
-  $('workflowHint').textContent=gothic?'Main frame → profile → finer cusp paths → rounded endings → export':'Pattern → fitting boundary → thickness & filament → paint → export';
+  $('workflowHint').textContent=gothic?'Main frame → profile → finer cusp paths → additions → export':'Pattern → fitting boundary → thickness → additions → paint → export';
   $('gothicOptions').open=gothic;
   if ($('sweepDetails')) $('sweepDetails').open=gothic||!!profilePicked;
   if(defaults){$('frameOnly').checked=gothic;if(gothic){$('blackFrame').checked=true;$('confineWalls').checked=false;}}
@@ -6961,6 +7176,8 @@ function updateGothicConfineWarning() {
   $('gothicConfineWarning').hidden = $('workflowMode').value !== 'gothic' || !$('confineWalls').checked;
 }
 async function newWorkflow(mode) {
+  shaderInspector.restore();
+  restoreAdditions();
   restoreCylinder(null);
   resetLayers();picked=null;clearTrace();
   cuspPicked=cuspProfilePicked=null;
@@ -6978,6 +7195,26 @@ function updateCuspLabels() {
   profileScales.sync();
   $('cuspName').textContent=cuspPicked?.name??'No cusp paths';
   $('cuspProfileName').textContent=cuspProfilePicked?.name??'Reduced main profile';
+}
+
+function projectShaderSources() {
+  const sources = [];
+  const add = (id, label, file, mode = 'filled', selected = '') => {
+    if (file) sources.push({ id, label, file, mode, layers: selected ? selected.split(',') : null });
+  };
+  add('drawing', 'Main drawing', picked, 'outline', selectedLayers());
+  layers.slice(1).forEach((layer, i) =>
+    add(`drawing-${i + 1}`, `Drawing ${i + 2}`, layer.file, 'outline', layerFilter(i + 1)));
+  add('profile', 'Sweep cross-section', profilePicked);
+  add('grooveProfile', 'Groove cross-section', grooveProfilePicked);
+  add('boundary', 'Boundary', boundaryPicked);
+  add('cusps', 'Cusp paths', cuspPicked, 'outline');
+  add('cuspProfile', 'Cusp cross-section', cuspProfilePicked);
+  add('lidSketch', 'Lid sketch', lidSketchPicked, 'outline');
+  add('additionOutline', 'Shelf outline', additionOutlinePicked);
+  add('additionProfile', additionProfilePicked ? 'Shelf edge cross-section' : 'Shelf edge · main cross-section',
+    additionOutlinePicked ? additionProfilePicked || profilePicked : additionProfilePicked);
+  return sources;
 }
 function setCuspFile(slot,file) {
   if(file&&!DRAWING.test(file.name))throw new Error('Choose an SVG or DXF');

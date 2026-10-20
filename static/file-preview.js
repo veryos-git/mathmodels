@@ -118,6 +118,7 @@ export class AssetPreview extends HTMLElement {
       <button type="button" class="ghost" data-action="in" aria-label="Zoom in" title="Zoom in (+)">+</button>
       <button type="button" class="ghost" data-action="fit" title="Fit preview (0)">Fit</button>
       <button type="button" class="ghost" data-action="background" aria-label="Toggle light or dark preview background" title="Toggle light / dark background">◐</button>
+      <button type="button" class="ghost" data-action="shader" title="Visualize these paths with a shader">Shader</button>
       <button type="button" class="ghost file-preview-expand" data-action="expand" title="Open a larger preview">Expand ↗</button>
       </div><div class="file-preview-hint">Scroll to zoom · Drag to pan</div>`;
     this.viewport = this.querySelector('.file-preview-viewport');
@@ -137,6 +138,9 @@ export class AssetPreview extends HTMLElement {
       if (action === 'out') this.zoomAt(1 / 1.4);
       if (action === 'background') this.dataset.tone = this.dataset.tone === 'dark' ? 'light' : 'dark';
       if (action === 'expand') inspectPreview(this.source, event.target.closest('button'));
+      if (action === 'shader') this.dispatchEvent(new CustomEvent('shader-preview', {
+        bubbles: true, detail: { source: this.source, opener: event.target.closest('button') },
+      }));
     });
     this.viewport.addEventListener('wheel', event => {
       if (this.dataset.state !== 'ready') return;
@@ -225,7 +229,13 @@ export class AssetPreview extends HTMLElement {
     this.message.querySelector('span').textContent = text;
     this.retry.hidden = state !== 'error';
     this.viewport.setAttribute('aria-busy', String(state === 'loading'));
-    for (const button of this.querySelectorAll('[data-action]')) button.disabled = state !== 'ready' && button.dataset.action !== 'expand';
+    for (const button of this.querySelectorAll('[data-action]')) {
+      button.disabled = state !== 'ready' && !['expand', 'shader'].includes(button.dataset.action);
+      if (button.dataset.action === 'shader') {
+        button.hidden = !/\.(svg|dxf)$/i.test(this.source?.file?.name || this.source?.name || '')
+          || !(this.source?.file || this.source?.detail || this.source?.loadFile);
+      }
+    }
   }
 
   fit() { this.zoom = 1; this.x = this.y = 0; this.paint(); }

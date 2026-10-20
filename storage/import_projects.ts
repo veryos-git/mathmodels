@@ -8,6 +8,7 @@ type Project = {
   profile?: Embedded;
   grooveProfile?: Embedded;
   tracery?: { cusps?: Embedded; profile?: Embedded };
+  additions?: { outline?: Embedded; profile?: Embedded };
   trace?: {
     source?: Embedded;
     original?: Embedded;
@@ -51,6 +52,8 @@ export async function importProjectResources(
           ["boundary", project.boundary],
           ["profile", project.profile],
           ["profile", project.grooveProfile],
+          ["subject", project.additions?.outline],
+          ["profile", project.additions?.profile],
         ];
         const idFor = async (
           kind: string,

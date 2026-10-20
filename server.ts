@@ -230,6 +230,35 @@ function handlePreview(req: Request): Promise<Response> {
   });
 }
 
+/** Shelf inputs use the same validated uploads for preview and every export. */
+async function additionFlags(form: FormData, dir: string): Promise<string[]> {
+  const outline = await takeExtra(form, "additionOutline", "shelf outline", dir);
+  const profile = await takeExtra(form, "additionProfile", "shelf edge profile", dir);
+  if (!outline) {
+    if (profile) throw new HttpError(400, "A shelf edge profile requires a shelf outline");
+    return [];
+  }
+  if (form.has("cylinder")) throw new HttpError(400, "Perpendicular additions require a flat model surface");
+  return [
+    "--addition-outline", outline,
+    ...(profile ? ["--addition-profile", profile] : []),
+    ...numericFlags(form, {
+      additionThickness: "--addition-thickness", additionWidth: "--addition-width",
+      additionDepth: "--addition-depth", additionX: "--addition-x",
+      additionY: "--addition-y", additionZ: "--addition-z",
+      additionRotation: "--addition-rotation",
+      additionProfileScale: "--addition-profile-scale",
+      additionProfileHeightScale: "--addition-profile-height-scale",
+    }),
+    ...(form.get("additionEdgeSweep") === "1" ? ["--addition-edge-sweep"] : []),
+    ...(form.get("additionFlip") === "1" ? ["--addition-flip"] : []),
+    ...(form.get("additionMirrorProfile") === "1" ? ["--addition-mirror-profile"] : []),
+    ...(form.get("additionFlipProfile") === "1" ? ["--addition-flip-profile"] : []),
+    ...(form.get("additionKeepOriginalProfile") === "1" ? ["--addition-keep-original-profile"] : []),
+    ...(form.get("additionTrimBack") === "1" ? ["--addition-trim-back"] : []),
+  ];
+}
+
 /** The shape flags shared by /api/regions and /api/convert. */
 function shapeFlags(form: FormData, boundaryPath: string | null = null): string[] {
   const args = numericFlags(form, {
@@ -297,13 +326,14 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
  * POST /api/regions — the wall and face outlines, so the browser can extrude
  * them itself and repaint a region without a round trip.
  */
-function handleRegions(req: Request): Promise<Response> {
+function handleRegions(req: Request, placement = false): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
     return Response.json(await runScript([
       paths[0],
-      "--regions",
+      placement ? "--addition-preview" : "--regions",
       ...shapeFlags(form, boundaryPath),
+      ...await additionFlags(form, dir),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
@@ -436,6 +466,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
       paths[0],
       output,
       ...shapeFlags(form, boundaryPath),
+      ...await additionFlags(form, dir),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
@@ -483,6 +514,7 @@ function handleExport(req: Request): Promise<Response> {
       output,
       "--split",
       ...shapeFlags(form, boundaryPath),
+      ...await additionFlags(form, dir),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
@@ -1190,6 +1222,7 @@ function handleExport3mf(req: Request): Promise<Response> {
       "--variations",
       ...await mapFlag(form, "slicerOptions", "--slicer-options", dir),
       ...shapeFlags(form, boundaryPath),
+      ...await additionFlags(form, dir),
       ...(profilePath ? ["--profile", profilePath] : []),
       ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
       ...(cuspPath ? ["--cusps", cuspPath] : []),
@@ -1272,6 +1305,7 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
     if (url.pathname === "/api/profiles/preview" && req.method === "POST") return await handleProfileSections(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);
+    if (url.pathname === "/api/additions/preview" && req.method === "POST") return await handleRegions(req, true);
     if (url.pathname === "/api/cylinder/defaults" && req.method === "GET") {
       const { defaults, design, parameters } = readThreadedDefaults();
       return Response.json({ defaults, design, automaticNeck: parameters.neck_height === 0 });
@@ -1324,6 +1358,10 @@ Deno.serve({ port: PORT }, async (req) => {
     }
 
     if (req.method === "GET") {
+      if (url.pathname === "/api/additions/shelf-example.dxf") {
+        return new Response(await Deno.readFile("hgc/object_additions/gothic_Shelf/examples/shelf - shelf_profile_path.dxf"),
+          { headers: { "content-type": "application/dxf" } });
+      }
       if (url.pathname.startsWith("/api/spitzbogen-example/")) {
         const name = url.pathname.slice("/api/spitzbogen-example/".length);
         if (!["frame.dxf", "profile.svg"].includes(name)) throw new HttpError(404, "Unknown Spitzbogen reference");

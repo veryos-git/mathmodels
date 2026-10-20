@@ -2160,6 +2160,30 @@ def main():
                     help="Cylinder settings and OpenSCAD shell paths as JSON")
     ap.add_argument("--lid-sketch", default=None, metavar="FILE",
                     help="Separate lid-top sketch swept with --profile and fitted to the cylinder lid")
+    ap.add_argument("--addition-outline", metavar="FILE", help="Closed shelf outline, perpendicular to the base frame")
+    ap.add_argument("--addition-preview", action="store_true", help="Top/front placement outlines without fusing a shelf")
+    ap.add_argument("--addition-profile", metavar="FILE", help="Shelf edge section; defaults to the main sweep profile")
+    ap.add_argument("--addition-thickness", type=float, default=5)
+    ap.add_argument("--addition-width", type=float, default=0)
+    ap.add_argument("--addition-depth", type=float, default=0)
+    ap.add_argument("--addition-x", type=float, default=0)
+    ap.add_argument("--addition-y", type=float, default=0)
+    ap.add_argument("--addition-z", type=float, default=0)
+    ap.add_argument("--addition-rotation", type=int, default=90)
+    ap.add_argument("--addition-edge-sweep", action="store_true")
+    ap.add_argument("--addition-flip", action="store_true")
+    ap.add_argument("--addition-profile-scale", type=float, default=1,
+                    help="Shelf section source-width scale, independent of the main profile")
+    ap.add_argument("--addition-profile-height-scale", type=float, default=1,
+                    help="Shelf section source-height scale, independent of the main profile")
+    ap.add_argument("--addition-mirror-profile", action="store_true",
+                    help="Reflect the shelf section across its source bottom baseline before rotation")
+    ap.add_argument("--addition-flip-profile", action="store_true",
+                    help="Flip the shelf section left/right about its source centreline before rotation")
+    ap.add_argument("--addition-keep-original-profile", action="store_true",
+                    help="Sweep both the original section and its selected mirrored orientation")
+    ap.add_argument("--addition-trim-back", action="store_true",
+                    help="Cut the placed shelf and its rim flush to the main frame's rear bed plane")
     ap.add_argument("--stacks", default=None, metavar="FILE",
                     help='JSON file mapping face id to its layer stack, e.g. '
                          '{"0": [{"t": 0.65, "g": "1-orange"}, {"t": 1.1, "g": "3-violet"}]}')
@@ -2297,7 +2321,7 @@ def main():
                    for key, poly in sections.items()}, sys.stdout)
         return
 
-    if not args.output and not args.regions:
+    if not args.output and not args.regions and not args.addition_preview:
         raise ConvertError("an output path is required unless --inspect is given")
 
     positive("wall width", args.wall_width)
@@ -2393,6 +2417,17 @@ def main():
         drawing["cutter"] = hole_cutter(drawing["holes"])
         drawing["effect"] = effect        # one effect for the whole model
         z += drawing["wall_height"]
+
+    if args.addition_outline or args.addition_preview:
+        from additions import attach_shelf, placement_preview
+        from dxf2stl import ConvertError as ShelfInputError
+        try:
+            if args.addition_preview:
+                json.dump(placement_preview(layers[0]["frame_mesh"], args), sys.stdout)
+                return
+            layers[0]["frame_mesh"] = attach_shelf(layers[0]["frame_mesh"], args)
+        except ShelfInputError as error:
+            raise ConvertError(str(error)) from error
 
     def region_payload(i, poly, cutter, drawing):
         # area and centroid describe the whole face, not the cut pieces, so
