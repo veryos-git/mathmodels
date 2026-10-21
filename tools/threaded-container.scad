@@ -1,5 +1,5 @@
 // Adapter only: the supplied SCAD file owns all container design defaults.
-use <../hgc/cylinder_shell_mode/threaded_container.scad>;
+use <../hgc_requirements_documentation/cylinder_shell_mode/threaded_container.scad>;
 
 app_part = "container";
 app_lid_z = 0;

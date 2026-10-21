@@ -1,5 +1,5 @@
 const sourceUrl = new URL(
-  "../hgc/cylinder_shell_mode/threaded_container.scad",
+  "../hgc_requirements_documentation/cylinder_shell_mode/threaded_container.scad",
   import.meta.url,
 );
 

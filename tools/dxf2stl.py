@@ -41,7 +41,7 @@ drawing is centred on the base drawing and sits on the frame top of the one
 below; colour groups are shared, so split and 3MF exports merge the layers.
 """
 
-from gothic import (solid_union, revolved_ending, stepped_profile_sweep,
+from gothic import (solid_union, revolved_ending, dome_ending, stepped_profile_sweep,
                     segmented_profile_sweep, path_frames)
 import argparse
 import base64
@@ -1100,6 +1100,25 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
     if args.frame_only and connection_polys:
         wall_polys = wall_polys + connection_polys
 
+    # Open path endpoints (only meaningful when a sweep profile is loaded).
+    open_endpoints = []
+    if profile is not None:
+        for chain in chain_curves(list(swept)):
+            if chain[0] == chain[-1] or len(chain) < 2:
+                continue
+            for idx in (0, -1):
+                pt = chain[idx]
+                open_endpoints.append([round(float(pt[0]), 4), round(float(pt[1]), 4)])
+
+    # Dome endings: load the target coordinates once (closure for build_frame).
+    dome_ends_coords = []
+    if args.dome_ends:
+        try:
+            with open(args.dome_ends) as _fp:
+                dome_ends_coords = [np.asarray(pt, dtype=float) for pt in json.load(_fp)]
+        except (OSError, ValueError, TypeError) as _e:
+            raise ConvertError(f"Could not read dome-ends file: {_e}") from _e
+
     def build_frame(offsets=None, trim=None):
         """The swept frame and its connection ribs; None for flat walls.
 
@@ -1113,7 +1132,7 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         paths = repeat_paths(swept, offsets)
         frame_mesh = sweep_profile(profile, chain_curves(paths))
 
-        if args.cusps or args.round_ends:
+        if args.cusps or args.round_ends or dome_ends_coords:
             solids = [frame_mesh]
             cusps = repeat_paths(cusp_curves, offsets, merge=False)
             end_section = cusp_section if args.cusps else profile
@@ -1135,6 +1154,21 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                         normal = np.array([-tangent[1], tangent[0]])
                         solids.append(revolved_ending(end_section, point, normal, forward,
                                                       args.end_angle, args.end_side))
+            if dome_ends_coords:
+                dome_chains = chain_curves(paths, min_dot=-0.5)
+                tol = max(1e-2, args.sagitta * 2)
+                for chain in dome_chains:
+                    if chain[0] == chain[-1] or len(chain) < 2:
+                        continue
+                    for index, neighbour in ((0, 1), (-1, -2)):
+                        point = np.asarray(chain[index], dtype=float)
+                        if not any(np.linalg.norm(point - t) <= tol for t in dome_ends_coords):
+                            continue
+                        forward = point - np.asarray(chain[neighbour], dtype=float)
+                        forward /= max(np.linalg.norm(forward), 1e-12)
+                        tangent = -forward if index == 0 else forward
+                        normal = np.array([-tangent[1], tangent[0]])
+                        solids.append(dome_ending(profile, point, normal, forward))
             try:
                 frame_mesh = solid_union(solids)
             except (ValueError, RuntimeError) as error:
@@ -1188,6 +1222,7 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         "wall_height": wall_height,
         "frame_mesh": frame_mesh,
         "build_frame": build_frame,
+        "open_endpoints": open_endpoints,
         "sketch_bounds": (min(xs), min(ys), max(xs), max(ys)) if xs else None,
         "summary": summary,
     }
@@ -2281,6 +2316,8 @@ def main():
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
     ap.add_argument("--cylinder", default=None, metavar="FILE",
                     help="Cylinder settings and OpenSCAD shell paths as JSON")
+    ap.add_argument("--ring", default=None, metavar="FILE",
+                    help="Ring settings JSON: profilePath and offset (mm) for a revolved profile")
     ap.add_argument("--sketch-repeat", type=int, nargs=2, default=None, metavar=("X", "Y"),
                     help="sweep the frame along X × Y copies of the sketch, for a cylinder "
                          "(--cylinder settings imply this unless sweepThenRepeat is set)")
@@ -2379,6 +2416,8 @@ def main():
     ap.add_argument("--round-ends", action="store_true")
     ap.add_argument("--end-angle", type=float, default=90.0)
     ap.add_argument("--end-side", type=int, choices=[-1, 1], default=1)
+    ap.add_argument("--dome-ends", default=None, metavar="FILE",
+                    help="JSON file listing [[x,y],...] endpoint positions to cap with a dome ending")
     ap.add_argument("--frame-only", action="store_true", help="Generate tracery without glass faces")
     ap.add_argument("--boundary", default=None, metavar="FILE",
                     help="DXF/SVG holding a closed polygon that bounds the "
@@ -2430,7 +2469,11 @@ def main():
     if args.lid_sketch and (not args.cylinder or not args.profile):
         raise ConvertError("A lid-top sketch requires cylinder settings and a sweep profile")
 
-    if (args.cylinder or args.sketch_repeat) and (args.addition_outline or args.addition_preview):
+    if args.cylinder and args.ring:
+        raise ConvertError("Cylinder and ring modes cannot be combined")
+
+
+    if (args.cylinder or args.sketch_repeat or args.ring) and (args.addition_outline or args.addition_preview):
         raise ConvertError("Perpendicular additions require a flat model surface")
     # By default a cylinder repeats the sketch before sweeping it; the older
     # "first sweep then repeat" copies the finished relief instead.
@@ -2637,6 +2680,8 @@ def main():
             # so it travels as a ready-made binary STL.
             payload["wallMesh"] = base64.b64encode(
                 drawing["frame_mesh"].export(file_type="stl")).decode("ascii")
+        if drawing["open_endpoints"]:
+            payload["openEndpoints"] = drawing["open_endpoints"]
         return payload
 
     if args.regions:
@@ -2712,6 +2757,22 @@ def main():
             result = export_cylinder(args.output, buckets, cylinder, bool(args.split or args.groups),
                                      lid_art, tiling)
         except ValueError as error:
+            raise ConvertError(str(error)) from error
+        json.dump({**layers[0]["summary"], **result, "walls": n_walls,
+                   "regions": n_regions, "holes": n_holes}, sys.stdout)
+        return
+
+    if args.ring:
+        from ring import ring_extrude, export_ring
+        if args.slice_height is not None or args.variations or args.slicer_options or (args.output and args.output.lower().endswith(".3mf")):
+            raise ConvertError("Ring mode exports STL; switch to flat mode for SVG slices or 3MF variations")
+        try:
+            with open(args.ring) as fp:
+                ring_settings = json.load(fp)
+            buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=ring_extrude)
+            result = export_ring(args.output, buckets, ring_settings, args.sagitta,
+                                 split=bool(args.split or args.groups))
+        except (OSError, ValueError) as error:
             raise ConvertError(str(error)) from error
         json.dump({**layers[0]["summary"], **result, "walls": n_walls,
                    "regions": n_regions, "holes": n_holes}, sys.stdout)

@@ -80,6 +80,7 @@ async function takeUpload(
   cuspPath: string | null;
   cuspProfilePath: string | null;
   boundaryPath: string | null;
+  ringProfilePath: string | null;
 }> {
   if (Number(req.headers.get("content-length") ?? 0) > MAX_UPLOAD * MAX_LAYERS) {
     throw new HttpError(413, "those files are too large (16 MB each max)");
@@ -123,7 +124,8 @@ async function takeUpload(
   const boundaryPath = await takeExtra(form, "boundary", "boundary", dir);
   const cuspPath = await takeExtra(form, "cusps", "cusp paths", dir);
   const cuspProfilePath = await takeExtra(form, "cuspProfile", "cusp profile", dir);
-  return { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath };
+  const ringProfilePath = await takeExtra(form, "ringProfile", "ring profile", dir);
+  return { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath, ringProfilePath };
 }
 
 /**
@@ -340,8 +342,39 @@ function handleRegions(req: Request, placement = false): Promise<Response> {
       ...(cuspPath ? ["--cusps", cuspPath] : []),
       ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "holes", "--holes", dir),
+      ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await layerSpecs(form, dir, paths),
     ]));
+  });
+}
+
+/** POST /api/ring — build the ring shell and return its STL + ring dimensions. */
+function handleRingShell(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    let form: FormData;
+    try { form = await req.formData(); } catch { throw new HttpError(400, "expected a multipart form"); }
+    const ringProfileFile = form.get("ringProfile");
+    const ext = ringProfileFile instanceof File && ringProfileFile.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf";
+    const profilePath = `${dir}/ring_profile${ext}`;
+    if (ringProfileFile instanceof File && ringProfileFile.size > 0) {
+      if (!DRAWING.test(ringProfileFile.name)) throw new HttpError(400, "ring profile must be a .dxf or .svg file");
+      await Deno.writeFile(profilePath, new Uint8Array(await ringProfileFile.arrayBuffer()));
+    } else {
+      await Deno.copyFile(DEFAULT_RING_PROFILE, profilePath);
+    }
+    const offset = Number(form.get("ringOffset") ?? 9.0);
+    if (!Number.isFinite(offset) || offset < 0 || offset > 500) {
+      throw new HttpError(400, "Ring offset must be a finite number between 0 and 500 mm");
+    }
+    const config = `${dir}/ring_config.json`;
+    await Deno.writeTextFile(config, JSON.stringify({ profilePath, offset }));
+    const output = `${dir}/ring_shell.stl`;
+    try {
+      const info = await runScript([config, output, "--sagitta", "0.02"], "tools/ring.py");
+      return Response.json({ shell: (await Deno.readFile(output)).toBase64(), info });
+    } catch (error) {
+      throw new HttpError(422, error instanceof Error ? error.message : String(error));
+    }
   });
 }
 
@@ -400,6 +433,34 @@ async function takeCylinder(form: FormData, dir: string, profilePath: string | n
       ...(lidSketch ? ["--lid-sketch", lidSketch] : [])];
   }
   catch (error) { throw new HttpError(422, error instanceof Error ? error.message : String(error)); }
+}
+
+const DEFAULT_RING_PROFILE = "reverse_engeneering/ring/default_profile.dxf";
+
+/** Produce --ring flags when the form includes ring mode. */
+async function ringFlags(
+  form: FormData,
+  dir: string,
+  ringProfilePath: string | null,
+): Promise<string[]> {
+  if (!form.has("ring")) return [];
+  if (form.has("cylinder")) throw new HttpError(400, "Ring and cylinder modes cannot be combined");
+  let profilePath = ringProfilePath;
+  if (!profilePath) {
+    profilePath = `${dir}/ring_profile.dxf`;
+    await Deno.copyFile(DEFAULT_RING_PROFILE, profilePath);
+  }
+  const offset = Number(form.get("ringOffset") ?? 9.0);
+  if (!Number.isFinite(offset) || offset < 0 || offset > 500) {
+    throw new HttpError(400, "Ring offset must be a finite number between 0 and 500 mm");
+  }
+  const repeatX = Math.trunc(Number(form.get("ringRepeatX") ?? 1));
+  if (!Number.isFinite(repeatX) || repeatX < 1 || repeatX > 12) {
+    throw new HttpError(400, "Ring repeat count must be 1–12");
+  }
+  const config = `${dir}/ring.json`;
+  await Deno.writeTextFile(config, JSON.stringify({ profilePath, offset, repeatX }));
+  return ["--ring", config];
 }
 
 /**
@@ -465,8 +526,8 @@ async function layerSpecs(
 /** POST /api/convert — the DXF plus settings in, an STL out. */
 function handleConvert(req: Request, slice = false): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
-    if (slice && form.has("cylinder")) throw new HttpError(400, "Slice SVG export is available in flat mode. Use STL for a cylinder.");
+    const { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath, ringProfilePath } = await takeUpload(req, dir);
+    if (slice && (form.has("cylinder") || form.has("ring"))) throw new HttpError(400, "Slice SVG export is available in flat mode. Use STL for a cylinder or ring.");
     const height = form.get("sliceHeight");
     if (slice && (typeof height !== "string" || height.trim() === "" ||
       !Number.isFinite(Number(height)) || Number(height) < 0)) {
@@ -487,9 +548,11 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
       ...await mapFlag(form, "stacks", "--stacks", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
+      ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await layerSpecs(form, dir, paths),
       ...(slice ? ["--slice-height", String(height)] : []),
       ...await takeCylinder(form, dir, profilePath),
+      ...await ringFlags(form, dir, ringProfilePath),
     ];
 
     const stats = await runScript(args);
@@ -512,7 +575,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
  */
 function handleExport(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
-    const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath, ringProfilePath } = await takeUpload(req, dir);
     // Colours travel either per layer (stacks) or per face (groups).
     const stacks = await mapFlag(form, "stacks", "--stacks", dir);
     const groups = await mapFlag(form, "groups", "--groups", dir);
@@ -533,11 +596,13 @@ function handleExport(req: Request): Promise<Response> {
       ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
       ...await mapFlag(form, "heights", "--heights", dir),
       ...await mapFlag(form, "holes", "--holes", dir),
+      ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...stacks,
       ...groups,
       ...await layerSpecs(form, dir, paths),
       ...await takeCylinder(form, dir, profilePath),
+      ...await ringFlags(form, dir, ringProfilePath),
     ]);
 
     const listed = (stats.files ?? []) as Array<Record<string, unknown>>;
@@ -1224,7 +1289,7 @@ async function deleteLibrary(name: string): Promise<Response> {
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
-    if (form.has("cylinder")) throw new HttpError(400, "Colour-variation 3MF export is available in flat mode. Use cylinder STL exports.");
+    if (form.has("cylinder") || form.has("ring")) throw new HttpError(400, "Colour-variation 3MF export is available in flat mode. Use cylinder or ring STL exports.");
     const output = `${dir}/variations`;
     // Legacy callers may specify one pattern; the dialog sends slicerOptions.
     const patterns = form.get("patterns");
@@ -1324,6 +1389,7 @@ Deno.serve({ port: PORT }, async (req) => {
     }
     if (url.pathname === "/api/cylinder" && req.method === "POST") return await handleCylinder(req);
     if (url.pathname === "/api/cylinder/lid-art" && req.method === "POST") return await handleLidArt(req);
+    if (url.pathname === "/api/ring" && req.method === "POST") return await handleRingShell(req);
     if (url.pathname === "/api/convert" && req.method === "POST") return await handleConvert(req);
     if (url.pathname === "/api/slice" && req.method === "POST") return await handleConvert(req, true);
     if (url.pathname === "/api/export" && req.method === "POST") return await handleExport(req);
@@ -1371,18 +1437,18 @@ Deno.serve({ port: PORT }, async (req) => {
 
     if (req.method === "GET") {
       if (url.pathname === "/api/additions/shelf-example.dxf") {
-        return new Response(await Deno.readFile("hgc/object_additions/gothic_Shelf/examples/shelf - shelf_profile_path.dxf"),
+        return new Response(await Deno.readFile("hgc_requirements_documentation/object_additions/gothic_Shelf/examples/shelf - shelf_profile_path.dxf"),
           { headers: { "content-type": "application/dxf" } });
       }
       if (url.pathname.startsWith("/api/spitzbogen-example/")) {
         const name = url.pathname.slice("/api/spitzbogen-example/".length);
         if (!["frame.dxf", "profile.svg"].includes(name)) throw new HttpError(404, "Unknown Spitzbogen reference");
-        return new Response(await Deno.readFile(`examples/spitzbogen/${name}`), {headers:{"content-type":name.endsWith(".svg")?"image/svg+xml":"application/dxf"}});
+        return new Response(await Deno.readFile(`hgc_requirements_documentation/examples/spitzbogen/${name}`), {headers:{"content-type":name.endsWith(".svg")?"image/svg+xml":"application/dxf"}});
       }
       if (url.pathname.startsWith("/api/gothic-example/")) {
         const name = url.pathname.slice("/api/gothic-example/".length);
         if (!["frame.dxf", "cusps.dxf", "frame-profile.svg", "cusp-profile.svg"].includes(name)) throw new HttpError(404, "Unknown gothic reference");
-        return new Response(await Deno.readFile(`examples/gothic/${name}`), {headers:{"content-type":name.endsWith(".svg")?"image/svg+xml":"application/dxf"}});
+        return new Response(await Deno.readFile(`hgc_requirements_documentation/examples/gothic/${name}`), {headers:{"content-type":name.endsWith(".svg")?"image/svg+xml":"application/dxf"}});
       }
       if (url.pathname === "/api/example.dxf") {
         return new Response(await Deno.readFile(EXAMPLE), {
@@ -1403,6 +1469,14 @@ Deno.serve({ port: PORT }, async (req) => {
         } catch {
           return Response.json({ error: "no default profile" }, { status: 404 });
         }
+      }
+      if (url.pathname === "/api/default-ring-profile.dxf") {
+        return new Response(await Deno.readFile(DEFAULT_RING_PROFILE), {
+          headers: {
+            "content-type": "application/dxf",
+            "content-disposition": `attachment; filename="simple_ring.dxf"`,
+          },
+        });
       }
       const asset = await serveStatic(url.pathname);
       if (asset) return asset;

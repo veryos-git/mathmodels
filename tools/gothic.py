@@ -171,6 +171,63 @@ def segmented_profile_sweep(profile, chains, miter_limit=4.0, overlap=.001):
     return manifold3d.Manifold.batch_boolean(solids, manifold3d.OpType.Add).simplify(.0001)
 
 
+def dome_ending(profile, point, normal, outward, segments=24):
+    """Cap a sweep endpoint by rolling the profile 90° around its base line.
+
+    The profile cross-section is swept from its upright position (coinciding
+    with the sweep end face) through 90° around the horizontal axis at the
+    base of the profile (z = 0, running in the *normal* direction across the
+    path).  The result is a dome-shaped cap: the profile's silhouette turns
+    outward and lays flat, producing a smooth hemisphere-like ending rather
+    than an abrupt flat cut.
+
+    For each profile point (x, z_prof) the 3D position at angle t is:
+        xy = point + x * normal + z_prof * sin(t) * outward
+        height = z_prof * cos(t)
+    At t=0 this is the profile in its swept position; at t=90° it lies flat.
+    """
+    ring = np.asarray(profile.exterior.coords[:-1])
+    point = np.asarray(point, dtype=float)
+    normal = np.asarray(normal, dtype=float)
+    outward = np.asarray(outward, dtype=float)
+
+    theta = np.linspace(0, math.pi / 2, max(2, segments) + 1)
+    k = len(ring)
+    verts = []
+    for t in theta:
+        cos_t, sin_t = math.cos(t), math.sin(t)
+        for x, z in ring:
+            xy = point + x * normal + z * sin_t * outward
+            verts.append([xy[0], xy[1], float(z * cos_t)])
+
+    faces = []
+    for i in range(len(theta) - 1):
+        for j in range(k):
+            a, b = i * k + j, i * k + (j + 1) % k
+            faces.extend([(a, b, b + k), (a, b + k, a + k)])
+
+    cap_v, cap_f = trimesh.creation.triangulate_polygon(profile)
+    # Cap at t=0: the profile in its upright position at the sweep endpoint.
+    offset0 = len(verts)
+    for x, z in cap_v:
+        verts.append([*(point + x * normal), float(z)])
+    faces.extend((cap_f[:, ::-1] + offset0).tolist())
+
+    # Cap at t=90°: the profile footprint lying flat at z = 0.
+    offset90 = len(verts)
+    for x, z in cap_v:
+        xy = point + x * normal + z * outward
+        verts.append([xy[0], xy[1], 0.0])
+    faces.extend((cap_f + offset90).tolist())
+
+    mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=True)
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.remove_unreferenced_vertices()
+    mesh.merge_vertices()
+    mesh.fix_normals()
+    return mesh
+
+
 def revolved_ending(profile, point, normal, outward, angle=90, side=1, segments=24):
     """Revolve an end cross-section about its side's vertical axis.
 

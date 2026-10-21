@@ -40,6 +40,11 @@
   #cylinderSuggestions button[aria-pressed=true] { border-color: #60a5fa; background: #243a53; }
   #cylinderSuggestions small { display: block; margin-top: 4px; color: #b6c1d0; }
   #cylinderOptions label[hidden] { display: none; }
+  #ringOptions { margin-top: 8px; }
+  #ringSuggestions { max-height: 200px; overflow-y: auto; display: grid; gap: 6px; }
+  #ringSuggestions button { text-align: left; margin: 0; padding: 8px; font-size: 12px; }
+  #ringSuggestions button[aria-pressed=true] { border-color: #60a5fa; background: #243a53; }
+  #ringSuggestions small { display: block; margin-top: 4px; color: #b6c1d0; }
 
   /* file drop zone */
   #drop { margin-top: 4px; padding: 18px 12px; border: 1px dashed #3a4049; border-radius: 8px;
@@ -783,7 +788,7 @@
   <fieldset id="sizeBox">
     <legend>size &amp; walls</legend>
     <label for="surfaceMode">model surface</label>
-    <select id="surfaceMode"><option value="flat">Flat relief</option><option value="cylinder">Cylinder shell</option></select>
+    <select id="surfaceMode"><option value="flat">Flat relief</option><option value="cylinder">Cylinder shell</option><option value="ring">Ring (revolved profile)</option></select>
     <div id="cylinderOptions" hidden>
       <div class="row"><label>Desired diameter (mm)<input id="cylinderDiameter" type="number" value="60" min="10" max="500" step="1"></label><label>Desired container height (mm)<input id="cylinderHeight" type="number" value="60" min="5" max="500" step="1"></label></div>
       <label for="cylinderSizing">Artwork sizing</label>
@@ -811,6 +816,20 @@
         <p id="lidSketchNote" class="muted">Fits a separate sketch to the circular lid, then sweeps it with the current profile. The profile's section stays unchanged.</p>
       </div>
       <p class="muted">Suggestions are ranked by closeness to your desired diameter and height. The artwork can repeat around the cylinder (X) and up its height (Y), with up to 12 repeats each and 64 copies total. The sketch repeats before the profile is swept, so neighbouring copies share the paths at its ends: one wall, with its groove running through. <b>First sweep then repeat</b> places finished copies side by side instead. Each copy shares its painting. Relief depths stay in mm. The lid seam splits the artwork.</p>
+    </div>
+    <div id="ringOptions" hidden>
+      <label>Center offset (mm) <input id="ringOffset" type="number" value="9" min="0" max="500" step="0.5" title="Distance from the ring axis to the inner edge of the profile"></label>
+      <div class="seed-row" style="margin-top:6px">
+        <button class="ghost" id="ringProfilePick">Upload ring profile…</button>
+        <button class="ghost" id="ringProfileDefault" title="Use the built-in simple ring profile">Default profile</button>
+        <button class="ghost" id="ringProfileClear" hidden title="Go back to default ring profile">✕</button>
+      </div>
+      <input type="file" id="ringProfileFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
+      <span id="ringProfileName" class="muted">default ring profile</span>
+      <asset-preview id="ringProfilePreview" hidden></asset-preview>
+      <p id="ringSummary" class="muted" aria-live="polite">Generate 3D to calculate ring dimensions.</p>
+      <div id="ringSuggestions" role="group" aria-label="Suggested ring repeat counts"></div>
+      <p class="muted">Suggestions are ranked by how closely the artwork's proportions match the ring surface. Generate 3D first to see them. The artwork repeats around the ring (circumference direction only). Relief depths stay in mm.</p>
     </div>
     <div class="row">
       <div><label for="wallWidth">wall width (mm)</label>
@@ -855,6 +874,11 @@
     <label class="check"><input id="profileScaleLock" type="checkbox"> Lock main X/Y proportions</label>
     <label for="profileZ">Main vertical offset (mm)</label><input id="profileZ" type="number" step="0.1" value="0">
     <p class="muted">Scales this section only. X runs across the path; profile Y becomes the model's vertical height. Lock keeps the current width/height ratio.</p>
+  </div>
+  <div id="domeEndsSection" hidden>
+    <strong>Open path endings</strong>
+    <p class="muted">Click an endpoint marker in the 3D view to toggle a dome cap. <span id="domeEndCount"></span></p>
+    <button id="domeClearAll" class="ghost" hidden>Clear all dome endings</button>
   </div>
   <details id="gothicOptions">
     <summary>Cusp paths &amp; rounded endings</summary>
@@ -981,7 +1005,7 @@
     <button id="exportBambu" hidden>Download .3mf (BambuStudio)</button>
     <button id="export3mf" hidden>Download .3mf (Snapmaker Orca)</button>
     <div id="flatExportNote" class="muted">Choose colour variations before downloading. Includes single hue, frame only, black frame + one hue, and the flat silhouette plate.</div>
-    <p id="cylinderExportNote" class="muted" hidden>Cylinder exports use STL. Download STL joins the relief to each shell. Colour STLs keep body and lid parts registered; import each part's files together. 3MF variations and CNC slices are available in flat mode.</p>
+    <p id="cylinderExportNote" class="muted" hidden>Cylinder/ring exports use STL. Download STL joins the relief to the shell. Colour STLs keep parts registered; import each file together. 3MF variations and CNC slices are available in flat mode.</p>
     <div id="flatSlices">
     <hr>
     <strong>CNC slices</strong>
@@ -1161,6 +1185,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { cylinderDimensions, cylinderFit, cylinderSuggestions, wrapCylinderTriangles } from './cylinder.js';
+import { wrapRingTriangles, ringFit, ringSuggestions, RING_MAX_REPEAT } from './ring.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1613,10 +1638,11 @@ function cylinderUI() {
   for(const key of ['bottom','lidTop','neck','pitch','clearance'])cylinderControl(key).closest('label').hidden=screw;
   $('cylinderThreadDefaults').hidden=!screw;
   if(screw)$('cylinderThreadDefaults').textContent=`Lid ${c.threadedDesign.lidHeight} mm high · neck ${c.neck.toFixed(2)} mm · thread pitch ${c.pitch} mm. Thread fit and chamfers use the container design defaults. Bottom and lid top match the shell thickness.`;
-  for (const id of ['exportBambu','export3mf']) $(id).hidden = enabled || !baseModel();
-  $('flatExportNote').hidden = $('flatSlices').hidden = enabled;
-  $('cylinderExportNote').hidden = !enabled;
-  $('holeBox').hidden = enabled || !baseModel();
+  const wrapped = enabled || (typeof ringEnabled === 'function' && ringEnabled());
+  for (const id of ['exportBambu','export3mf']) $(id).hidden = wrapped || !baseModel();
+  $('flatExportNote').hidden = $('flatSlices').hidden = wrapped;
+  $('cylinderExportNote').hidden = !wrapped;
+  $('holeBox').hidden = wrapped || !baseModel();
   if (enabled) setHoleMode(false);
   lidSketchUI();
 }
@@ -1640,6 +1666,102 @@ $('lidSketchFile').onchange=e=>{
   if(file)applyLidSketchFile(file).catch(error=>setStatus(error.message,true));
 };
 $('lidSketchClear').onclick=()=>applyLidSketchFile(null).catch(error=>setStatus(error.message,true));
+
+/* --------------------------------------------------- ring mode */
+const ringEnabled = () => $('surfaceMode').value === 'ring';
+let ringProfilePicked = null;  // null = use default
+let ringProfileRevision = 0;
+let ringRepeatChoice = null;   // chosen [repeatX] or null (auto-pick best)
+let ringFlatBounds = null;     // flat artwork bounds set after Generate 3D
+
+function updateRingFits() {
+  const list = $('ringSuggestions'), summary = $('ringSummary');
+  list.replaceChildren();
+  const info = ringContext?.info;
+  if (!info) { summary.textContent = 'Generate 3D to calculate ring dimensions.'; return; }
+  const base = `Outer Ø ${(info.r_outer*2).toFixed(2)} mm · inner Ø ${(info.r_inner*2).toFixed(2)} mm · height ${info.ring_height.toFixed(2)} mm`;
+  if (!ringFlatBounds) { summary.textContent = base; return; }
+  const fits = ringSuggestions(ringFlatBounds, info);
+  const chosen = ringRepeatChoice ? ringFit(ringFlatBounds, info, ringRepeatChoice) : null;
+  const active = chosen ?? fits[0] ?? null;
+  if (!active) { summary.textContent = base; return; }
+  summary.textContent = `${base} · ${active.repeatX}× around · ${(active.scale*100).toFixed(1)}% scale`;
+  for (const [i, fit] of fits.entries()) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'ghost';
+    button.setAttribute('aria-pressed', String(fit.repeatX === active.repeatX));
+    button.textContent = `${i === 0 ? 'Best fit · ' : ''}${fit.repeatX}× around`;
+    const detail = document.createElement('small');
+    detail.textContent = `${(fit.scale*100).toFixed(1)}% scale · ${fit.widthOnRing.toFixed(2)} mm per copy · error ${(fit.error*100).toFixed(1)}%`;
+    button.append(detail);
+    button.onclick = () => {
+      ringRepeatChoice = fit.repeatX; updateRingFits();
+      if (!$('go').disabled) refit('Ring repeat updated — your painting is kept');
+    };
+    list.append(button);
+  }
+}
+
+function ringRepeatX() {
+  const info = ringContext?.info;
+  if (!info || !ringFlatBounds) return 1;
+  if (ringRepeatChoice) return ringRepeatChoice;
+  const fits = ringSuggestions(ringFlatBounds, info);
+  return fits[0]?.repeatX ?? 1;
+}
+
+function ringUI() {
+  const enabled = ringEnabled();
+  $('ringOptions').hidden = !enabled;
+  $('ringProfileClear').hidden = !ringProfilePicked;
+  $('ringProfileName').textContent = ringProfilePicked ? ringProfilePicked.name : 'default ring profile';
+  $('ringProfilePreview').source = filePreview(ringProfilePicked);
+  updateRingFits();
+  // Export notes shared with cylinder are managed by cylinderUI().
+  cylinderUI();
+}
+
+async function applyRingProfileFile(file) {
+  if (file && !DRAWING.test(file.name)) throw new Error('The ring profile must be a .dxf or .svg file');
+  ringProfilePicked = file; ringProfileRevision++;
+  ringUI();
+  if (file) libraryRemember(file);
+  if (!$('go').disabled) await refit(file ? 'Ring profile updated — your painting is kept' : 'Using default ring profile');
+}
+
+$('ringProfilePick').onclick = () => $('ringProfileFile').click();
+$('ringProfileFile').onchange = e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (file) applyRingProfileFile(file).catch(err => setStatus(err.message, true));
+};
+$('ringProfileClear').onclick = () => applyRingProfileFile(null).catch(err => setStatus(err.message, true));
+$('ringProfileDefault').onclick = async () => {
+  try {
+    const res = await fetch('/api/default-ring-profile.dxf');
+    if (!res.ok) throw new Error('Could not load default ring profile');
+    const blob = await res.blob();
+    const file = new File([blob], 'simple_ring.dxf', { type: 'application/dxf' });
+    await applyRingProfileFile(file);
+  } catch(err) { setStatus(err.message, true); }
+};
+
+function restoreRing(saved) {
+  ringProfilePicked = null; ringProfileRevision++;
+  ringRepeatChoice = saved?.repeatX ?? null;
+  ringFlatBounds = null;
+  if (saved) {
+    $('ringOffset').value = saved.offset ?? 9;
+    $('surfaceMode').value = 'ring';
+    if (saved.profile?.data) {
+      ringProfilePicked = Object.assign(
+        new File([fromBase64(saved.profile.data)], saved.profile.name),
+        { resource: saved.profile.resource ?? null }
+      );
+    }
+  }
+  ringUI();
+}
+
+$('ringOffset').oninput = () => { if (ringEnabled() && !$('go').disabled) refit('Ring offset updated'); };
 function clearCylinderPreview() {
   cylinderContext = null;
   lidArtInfo=null;
@@ -1647,6 +1769,68 @@ function clearCylinderPreview() {
     cylinderShell.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
     group.remove(cylinderShell); cylinderShell = null;
   }
+}
+let ringContext = null;   // { bounds, info } — set when ring preview is active
+let ringShellObj = null;  // THREE.Group holding the ring shell mesh
+function clearRingPreview() {
+  ringContext = null;
+  if (ringShellObj) {
+    ringShellObj.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    group.remove(ringShellObj); ringShellObj = null;
+  }
+}
+function wrapRingPreviewMesh(mesh, layer, repeatX, tileBounds, totalBounds) {
+  if (!ringContext || mesh.userData.cylinderWrapped) return;
+  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const attribute = source.getAttribute('position');
+  if (!attribute?.count) { if (source !== mesh.geometry) source.dispose(); return; }
+  const n = attribute.count;
+  const w = tileBounds[2] - tileBounds[0];
+  // Build tiled positions: one copy per repeat, offset in X.
+  const tiled = new Float64Array(n * repeatX * 3);
+  for (let rep = 0; rep < repeatX; rep++) {
+    const ox = rep * w;
+    for (let i = 0; i < n; i++) {
+      const base = (rep * n + i) * 3;
+      tiled[base]   = attribute.getX(i) + ox;
+      tiled[base+1] = attribute.getY(i);
+      tiled[base+2] = attribute.getZ(i) * mesh.scale.z + mesh.position.z + layer.zBase;
+    }
+  }
+  if (source !== mesh.geometry) source.dispose();
+  const wrapped = wrapRingTriangles(tiled, totalBounds, ringContext.info);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(wrapped, 3));
+  geometry.computeVertexNormals();
+  mesh.geometry = geometry; mesh.scale.z = 1; mesh.position.z = 0;
+  mesh.userData.cylinderWrapped = true;
+}
+function buildRingPreview(shellB64, ringInfo) {
+  const box = new THREE.Box3().setFromObject(group);
+  const tileBounds = [box.min.x, box.min.y, box.max.x, box.max.y];
+  ringFlatBounds = tileBounds;
+  // Apply the current repeat count to compute total wrapping bounds.
+  const N = ringRepeatX();
+  const w = tileBounds[2] - tileBounds[0];
+  const totalBounds = [tileBounds[0], tileBounds[1], tileBounds[0] + N * w, tileBounds[3]];
+  ringContext = { bounds: totalBounds, tileBounds, info: ringInfo };
+  for (const layer of layers) {
+    layer.group.position.z = 0;
+    // Tile each mesh N times in X before wrapping for the preview.
+    for (const mesh of [...layer.wallMeshes, ...layer.regionMeshes.flat()]) {
+      wrapRingPreviewMesh(mesh, layer, N, tileBounds, totalBounds);
+    }
+    if (layer.holeMarkers) layer.holeMarkers.visible = false;
+  }
+  ringShellObj = new THREE.Group();
+  const geometry = new STLLoader().parse(fromBase64(shellB64).buffer);
+  const shellMesh = new THREE.Mesh(geometry,
+    new THREE.MeshStandardMaterial({ color: 0x687582, roughness: 0.8, wireframe }));
+  shellMesh.userData.cylinderShell = true;
+  ringShellObj.add(shellMesh);
+  group.add(ringShellObj);
+  ringUI();
+  frameModel();
 }
 function disposeWrapped(mesh) {
   if (mesh.userData.cylinderWrapped) mesh.geometry.dispose();
@@ -1795,6 +1979,8 @@ function disposeLayer(l) {
 /** Geometry of every layer gone, ahead of a rebuild. */
 function disposeModels() {
   clearCylinderPreview();
+  clearRingPreview();
+  clearDomeMarkers();
   for (const l of layers) disposeLayer(l);
   slicePreview.syncModel();
   selected = hovered = null;
@@ -1811,6 +1997,7 @@ function dropLayer(li) {
 /** Back to a blank single layer — a new base drawing replaces everything. */
 function resetLayers() {
   clearCylinderPreview();
+  clearRingPreview();
   cylinderFlatBounds=null;
   cylinderTiling=null;
   cylinderAppliedFit=null;
@@ -2044,6 +2231,8 @@ function buildModel(data, lo, hi, rng, keep = null) {
   const drawings = data.drawings ?? [data];
   drawings.forEach((d, li) => buildLayer(li, d, lo, hi, rng, keep ? keep[li] : null));
 
+  // Collect open sweep profile endpoints from the base drawing layer.
+  setDomeEndpoints((data.drawings?.[0] ?? data).openEndpoints ?? []);
   drawHoleMarkers();
   if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
   $('hint').hidden = true;
@@ -2129,6 +2318,82 @@ async function applyHoles() {
     select(null);
     setStatus(n ? `${count(n, 'hole')} cut through the model` : 'holes removed');
   }
+}
+
+/* --------------------------------------------------------- dome endings */
+
+let domeEndpoints = [];      // [[x, y], ...] from the regions response
+let domeEndSelected = new Set();  // indices into domeEndpoints
+let domeEndMarkers = null;   // THREE.Group of marker meshes
+
+function clearDomeMarkers() {
+  if (domeEndMarkers) {
+    domeEndMarkers.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    scene.remove(domeEndMarkers);
+    domeEndMarkers = null;
+  }
+}
+
+function drawDomeMarkers() {
+  clearDomeMarkers();
+  if (!domeEndpoints.length || !baseModel()) return;
+  domeEndMarkers = new THREE.Group();
+  const r = 1.2;
+  domeEndpoints.forEach(([x, y], i) => {
+    const selected = domeEndSelected.has(i);
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 16, 8),
+      new THREE.MeshBasicMaterial({
+        color: selected ? 0x60a5fa : 0x6b7280,
+        transparent: true, opacity: selected ? 0.9 : 0.5, depthTest: false,
+      }),
+    );
+    mesh.position.set(x + (layers[0]?.offset[0] ?? 0), y + (layers[0]?.offset[1] ?? 0), 0.5);
+    mesh.renderOrder = 2;
+    mesh.userData.domeEndIndex = i;
+    domeEndMarkers.add(mesh);
+  });
+  scene.add(domeEndMarkers);
+}
+
+function domeEndsUI() {
+  const hasEndpoints = domeEndpoints.length > 0 && profilePicked;
+  $('domeEndsSection').hidden = !hasEndpoints;
+  const n = domeEndSelected.size;
+  $('domeEndCount').textContent = n
+    ? `${n} of ${domeEndpoints.length} selected.`
+    : domeEndpoints.length ? `${domeEndpoints.length} endpoints — click to select.` : '';
+  $('domeClearAll').hidden = n === 0;
+  drawDomeMarkers();
+}
+
+function setDomeEndpoints(eps) {
+  domeEndpoints = eps ?? [];
+  domeEndSelected = new Set();
+  domeEndsUI();
+}
+
+$('domeClearAll').onclick = () => {
+  domeEndSelected.clear();
+  domeEndsUI();
+  if (!$('go').disabled) refit('Dome endings cleared — your painting is kept');
+};
+
+/** Toggle dome selection when the user clicks an endpoint marker. */
+function tryToggleDomeEnd(event) {
+  if (!domeEndMarkers) return false;
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(domeEndMarkers.children, false);
+  if (!hits.length) return false;
+  const idx = hits[0].object.userData.domeEndIndex;
+  if (domeEndSelected.has(idx)) domeEndSelected.delete(idx);
+  else domeEndSelected.add(idx);
+  domeEndsUI();
+  if (!$('go').disabled) refit('Dome ending updated — your painting is kept');
+  return true;
 }
 
 /** Where in the model a click landed: on the solid, or on its base plane. */
@@ -2327,7 +2592,7 @@ function drawFaceCard(sel, event) {
 }
 
 function updateReadout() {
-  if (!cylinderEnabled()) slicePreview.syncModel();
+  if (!cylinderEnabled() && !ringEnabled()) slicePreview.syncModel();
   if (!baseModel()) return;
   const totals = layers.flatMap((l) => l.stacks.map(totalHeight));
   // A drawing can hold no closed faces at all, and so nothing to measure.
@@ -2482,6 +2747,8 @@ canvas.addEventListener('pointerup', (e) => {
   const moved = pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 4;
   pressAt = null;
   if (moved || !baseModel()) return;    // that was an orbit/pan/zoom drag
+
+  if (e.button === 0 && tryToggleDomeEnd(e)) return;
 
   if (holeMode) {
     if (e.button !== 0) return;
@@ -2820,6 +3087,8 @@ async function setProfile(file) {
     holeList();
   }
   profileUI();
+  if (!file) { setDomeEndpoints([]); }
+  domeEndsUI();
   return true;
 }
 
@@ -4778,7 +5047,7 @@ function shapeForm({ placement = false } = {}) {
   } else if ($('additionEnabled').checked) {
     if (!additionOutlinePicked) throw new Error('Choose a closed shelf outline in Additions.');
     if (!profilePicked) throw new Error('Choose a main sweep profile in Inputs before adding a shelf.');
-    if (cylinderEnabled()) throw new Error('Perpendicular additions require a flat model surface.');
+    if (cylinderEnabled() || ringEnabled()) throw new Error('Perpendicular additions require a flat model surface.');
     for (const id of Object.keys(ADDITION_DEFAULTS)) {
       if (!$(id).checkValidity() || !Number.isFinite(Number($(id).value))) {
         throw new Error(`Check the shelf setting: ${$(id).labels?.[0]?.textContent ?? id}`);
@@ -4795,6 +5064,12 @@ function shapeForm({ placement = false } = {}) {
   }
   if (cylinderEnabled()) form.append('cylinder', JSON.stringify(readCylinderSettings()));
   if(cylinderEnabled()&&$('cylinderLid').checked&&lidSketchPicked)form.append('lidSketch',lidSketchPicked);
+  if (ringEnabled()) {
+    form.append('ring', '1');
+    form.append('ringOffset', $('ringOffset').value);
+    form.append('ringRepeatX', String(ringRepeatX()));
+    if (ringProfilePicked) form.append('ringProfile', ringProfilePicked);
+  }
   // The drawings go in stacking order, base first; everything else about the
   // shape is shared, so it is sent once.
   for (const l of layers) form.append('file', l.file);
@@ -4828,6 +5103,8 @@ function shapeForm({ placement = false } = {}) {
     if (!$('boundaryWall').checked) form.append('boundaryWall', '0');
   }
   if (layers[0].holes.length) form.append('holes', JSON.stringify(layers[0].holes));
+  const activeEnds = [...domeEndSelected].map(i => domeEndpoints[i]);
+  if (activeEnds.length) form.append('domeEnds', JSON.stringify(activeEnds));
 
   // Stacked drawings carry their own scale, sublayer filter and holes under
   // the field name plus their 1-based place in the stack.
@@ -4937,7 +5214,18 @@ async function generate(keep = null, { lenient = false, resweep = false } = {}) 
       }
       buildCylinderPreview(shell,lidArt);
     }
+    if (ringEnabled()) {
+      setStatus('building ring shell…');
+      const ringForm = new FormData();
+      ringForm.append('ringOffset', $('ringOffset').value);
+      if (ringProfilePicked) ringForm.append('ringProfile', ringProfilePicked);
+      const ringRes = await fetch('/api/ring', { method: 'POST', body: ringForm });
+      const ringData = await ringRes.json();
+      if (!ringRes.ok) throw new Error(ringData.error ?? ringRes.statusText);
+      buildRingPreview(ringData.shell, ringData.info);
+    }
     cylinderUI();
+    ringUI();
     buildPalette(lo, hi);
     select(null);
     modelThumb = captureModelThumbnail();   // the 3D object just generated
@@ -5027,8 +5315,9 @@ for (const control of [$('surfaceMode'), $('cylinderSizing'), ...Object.keys(cyl
     cylinderChoice=null;
     updateCylinderFits();
     cylinderUI();
+    ringUI();
     // Existing planes describe the flat model and cannot follow a wrap.
-    if (cylinderEnabled()) slicePreview.clear();
+    if (cylinderEnabled() || ringEnabled()) slicePreview.clear();
     if(!$('go').disabled)refit('Surface updated — your painting is kept');
   });
 }
@@ -5234,6 +5523,7 @@ async function buildProject() {
     ),
     profileScaleLocks: profileScales.snapshotLocks(),
     cylinder: cylinderEnabled() ? {...readCylinderSettings(),fit:{diameter:Number($('cylinderDiameter').value),height:Number($('cylinderHeight').value),mode:$('cylinderSizing').value}} : null,
+    ring: ringEnabled() ? {offset:Number($('ringOffset').value),repeatX:ringRepeatX(),profile:ringProfilePicked?{name:ringProfilePicked.name,data:await fileBase64(ringProfilePicked),resource:ringProfilePicked.resource??null}:null} : null,
     lidSketch: lidSketchPicked ? {name:lidSketchPicked.name,data:await fileBase64(lidSketchPicked),resource:lidSketchPicked.resource??null} : null,
     layers: selectedLayers(),
     palette: [...HUES],
@@ -5362,6 +5652,7 @@ async function applyProject(project) {
   showScreen('model');
   setWorkflow(project.workflow ?? 'glass', false);
   restoreCylinder(project.cylinder);
+  if (!project.cylinder) restoreRing(project.ring);
   filamentManager?.restore(project.filaments);
   shaderInspector.restore(project.shaderPreview);
   const embeddedFile = (value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
@@ -5448,7 +5739,7 @@ async function applyProject(project) {
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
   await pickFile(Object.assign(new File([bytes], project.drawing.name || 'drawing.dxf'), { resource: project.drawing.resource ?? null }), false);
-  slicePreview.restore(cylinderEnabled() ? [] : project.slices);
+  slicePreview.restore((cylinderEnabled() || ringEnabled()) ? [] : project.slices);
   if (profilePicked) profilePicked.resource = project.profile?.resource ?? null;
   if (boundaryPicked) boundaryPicked.resource = project.boundary?.resource ?? null;
   await restoreTrace(project);
@@ -7197,6 +7488,7 @@ async function newWorkflow(mode) {
   shaderInspector.restore();
   restoreAdditions();
   restoreCylinder(null);
+  restoreRing(null);
   resetLayers();picked=null;clearTrace();
   cuspPicked=cuspProfilePicked=null;
   clearTimeout(profileScaleTimer);profileScales.restore();
