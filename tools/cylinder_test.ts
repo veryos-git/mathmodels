@@ -26,6 +26,7 @@ Deno.test("cylinder settings validate dimensions against the current SCAD defaul
       { repeatX: 13 },
       { repeatX: 9, repeatY: 8 },
       { repeatX: "2" },
+      { sweepThenRepeat: "true" },
       { topChamfer: -0.1 },
       { topChamfer: Infinity },
       { topChamfer: "0.3" },
@@ -47,6 +48,9 @@ Deno.test("cylinder settings validate dimensions against the current SCAD defaul
   const repeated = cylinderSettings({ repeatX: 4, repeatY: 3 });
   if (repeated.repeatX !== 4 || repeated.repeatY !== 3) {
     throw new Error("Lost repeats");
+  }
+  if (repeated.sweepThenRepeat || !cylinderSettings({ sweepThenRepeat: true }).sweepThenRepeat) {
+    throw new Error("Sketch repeats are the default; sweeping first must be kept");
   }
 });
 

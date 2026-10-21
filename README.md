@@ -231,6 +231,21 @@ per direction and 64 copies total. **Keep original size · repeat only** offers
 sizes that preserve each motif's current dimensions. Painting a face updates
 that face in every copy. Relief depths remain in millimetres.
 
+The sketch is repeated before anything is swept. Copies follow each other at
+the sketch's own size, so the paths at its ends coincide: neighbouring copies
+share one wall, and the profile and its groove are swept along the whole
+repeated network instead of once per copy. Around the cylinder the network
+closes on itself, so the wrap seam is as continuous as any other join.
+**First sweep then repeat** restores the earlier behaviour: each copy is the
+finished, separately swept relief, so copies stand side by side with their
+own outer walls and grooves. It is off by default, also for older projects.
+
+With sketch repeats the server sweeps the repeated sketch, so choosing a size
+with other repeats sweeps the frame again. The frame is built as one column, a
+sketch wide and every row tall, cut partway across the sketch, checked at STL
+precision and joined to its own copies with exactly matching faces; checking a
+whole network at once fails far more often at grazing groove junctions.
+
 **Add lid** adds a matching neck and lid; **Screw thread** selects
 `hgc/cylinder_shell_mode/threaded_container.scad`. The app reads the script's
 Customizer defaults directly. Only requested diameter, container height and
@@ -275,9 +290,10 @@ If that happens, the app rebuilds it from closed, mitred sections with a
 0.001 mm overlap at their joins and checks the result at STL precision after
 placing it on the lid. The profile height and the SCAD chamfers are preserved.
 
-Size suggestions include the lid's assembled height. Artwork overlaps by
-0.05 mm at each repeat boundary and the vertical wrap seam to join matching tips;
-this overlap is included when calculating the uniform scale and suggested sizes.
+Size suggestions include the lid's assembled height. With **First sweep then
+repeat**, artwork overlaps by 0.05 mm at each repeat boundary and the vertical
+wrap seam to join matching tips; this overlap is included when calculating the
+uniform scale and suggested sizes. Sketch repeats join exactly and need none.
 The shell stays solid beneath the relief, including beneath holes in the artwork.
 Artwork crossing the lid seam is split with the selected gap, so it cannot lock
 the two parts together. Projects retain requested dimensions, the chosen repeats,

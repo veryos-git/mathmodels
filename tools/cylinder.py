@@ -56,11 +56,21 @@ def printable_mesh(solid):
     A boolean can keep two surfaces as separate vertex fans at one edge.
     STL loses that distinction: a slicer welds the equal coordinates into a
     four-face edge. Only when conversion fails, simplify below a micron and
-    join those contacts with a local, sub-micron overlap. Do not fill holes
-    in an invalid input or discard small, real disconnected solids.
+    join those contacts with a local, sub-micron overlap. Grazing junctions
+    can keep producing new contacts; then merge details below 1 µm, and then
+    10 µm, both far under print resolution. Do not fill holes in an invalid
+    input or discard small, real disconnected solids.
     """
     if solid.status() != mf.Error.NoError or solid.is_empty():
         raise ValueError("The wrapped export did not form closed printable parts")
+    for detail in (None, .001, .01):
+        mesh = _closed_mesh(solid if detail is None else solid.simplify(detail))
+        if mesh is not None:
+            return mesh
+    raise ValueError("The wrapped export did not form closed printable parts")
+
+
+def _closed_mesh(solid):
     mesh = mesh_of(solid)
     if mesh.is_volume:
         return mesh
@@ -75,8 +85,8 @@ def printable_mesh(solid):
             local.apply_translation(-local.vertices.mean(axis=0))
             if not piece.is_watertight and np.linalg.matrix_rank(local.vertices, tol=1e-7) < 3:
                 continue  # A collapsed boolean sliver left a planar scrap.
-            if piece.is_watertight and abs(local.volume) <= tolerance**3:
-                continue
+            if piece.is_watertight and abs(local.volume) <= tolerance*local.area:
+                continue  # Thinner on average than the tolerance: a flat sliver.
             pieces.append(piece)
         if not pieces:
             break
@@ -100,7 +110,7 @@ def printable_mesh(solid):
             overlaps.append(mf.Manifold.cylinder(length+2*tolerance, tolerance,
                                                  tolerance, 8).transform(transform))
         solid = union([solid, *overlaps]).simplify(tolerance)
-    raise ValueError("The wrapped export did not form closed printable parts")
+    return None
 
 
 def union(solids):
@@ -176,10 +186,28 @@ def bevel_bands(poly, levels):
     return bands
 
 
-def wrap_solid(solid, bounds, c, part):
+def repeat_counts(c):
     nx, ny = c.get('repeatX', 1), c.get('repeatY', 1)
     if any(type(n) is not int or not 1 <= n <= 12 for n in (nx, ny)) or nx*ny > 64:
         raise ValueError("Use 1–12 repeats per direction, with at most 64 copies")
+    return nx, ny
+
+
+def fold_strip(solid, x0, x1):
+    """Move whatever lies past either end of a full turn onto the other end."""
+    lo, hi = solid.bounding_box()[0], solid.bounding_box()[3]
+    if lo >= x0-1e-6 and hi <= x1+1e-6:
+        return [solid]  # Cutting exactly along an end face would leave slivers.
+    width = x1-x0
+    pieces = [solid.trim_by_plane((1, 0, 0), x0).trim_by_plane((-1, 0, 0), -x1),
+              solid.trim_by_plane((-1, 0, 0), -x0).translate((width, 0, 0)),
+              solid.trim_by_plane((1, 0, 0), x1).translate((-width, 0, 0))]
+    return [piece for piece in pieces if not piece.is_empty()]
+
+
+def wrap_solid(solid, bounds, c, part):
+    """First sweep then repeat: copies of the finished relief, bonded at their tips."""
+    nx, ny = repeat_counts(c)
     x0, y0, x1, y1 = bounds
     width, height = x1-x0, y1-y0
     if min(width, height) <= 1e-8:
@@ -194,7 +222,12 @@ def wrap_solid(solid, bounds, c, part):
                   for ix in range(nx) for iy in range(ny)])
 
 
-def _wrap_tile(solid, bounds, c, part):
+def _wrap_tile(solid, bounds, c, part, seam=SEAM_OVERLAP, middle=None):
+    """Bend one closed solid; `bounds` map to a full turn and the shell height.
+
+    `seam` stretches the turn so its ends overlap; `middle` is where the
+    solid is split into two half-turns, by default halfway along.
+    """
     x0, y0, x1, y1 = bounds
     width, height = x1-x0, y1-y0
     if min(width, height) <= 1e-8:
@@ -213,7 +246,7 @@ def _wrap_tile(solid, bounds, c, part):
     # strips creates coincident cap faces on swept profiles. Only split the
     # two half-turns into closed solids; subdivide their existing triangles.
     halves = []
-    for half in solid.split_by_plane((1, 0, 0), (x0+x1)/2):
+    for half in solid.split_by_plane((1, 0, 0), (x0+x1)/2 if middle is None else middle):
         if half.is_empty():
             continue
         data = half.to_mesh64()
@@ -224,7 +257,9 @@ def _wrap_tile(solid, bounds, c, part):
             first = max(0, min(SEGMENTS-1, math.floor((triangle[:, 0].min()-x0)/dx)))
             last = max(0, min(SEGMENTS-1, math.floor((triangle[:, 0].max()-x0)/dx)))
             for i in range(first, last+1):
-                poly = clip_x(clip_x(list(triangle), x0+i*dx, True), x0+(i+1)*dx, False)
+                # The outer strips also keep rounding just past the bounds.
+                poly = clip_x(clip_x(list(triangle), x0+i*dx if i else -math.inf, True),
+                              x0+(i+1)*dx if i < SEGMENTS-1 else math.inf, False)
                 for band in bevel_bands(poly, levels):
                     for k in range(1, len(band)-1):
                         output.extend((band[0], band[k], band[k+1]))
@@ -234,7 +269,7 @@ def _wrap_tile(solid, bounds, c, part):
         vertices = mesh.vertices
         # A small overlap avoids a non-manifold edge where a drawing's two
         # outer tips would otherwise merely touch after one complete turn.
-        angle = ((vertices[:, 0]-x0)/width-.5)*(2*math.pi+SEAM_OVERLAP/(c["diameter"]/2))+math.pi
+        angle = ((vertices[:, 0]-x0)/width-.5)*(2*math.pi+seam/(c["diameter"]/2))+math.pi
         z = (vertices[:, 1]-y0)/height*assembled_height
         radius = c["diameter"]/2-surface_inset(z, c, part)-EMBED+vertices[:, 2]
         cx, cy = np.cos(angle), np.sin(angle)
@@ -260,13 +295,32 @@ def print_position(solid, c, part, gap, decorated=False):
     return solid.rotate((180, 0, 0)).translate((gap, 0, height))
 
 
-def export_cylinder(output, buckets, c, split=False, lid_art=None):
+def export_cylinder(output, buckets, c, split=False, lid_art=None, tiling=None):
+    """Wrap the colour buckets onto the shell and write the STL file(s).
+
+    With sketch repeats (`tiling`, from dxf2stl.repeat_sketch) the buckets
+    hold one periodic column with every row. Its copies around the shell
+    meet at exactly coincident faces, so they are joined flat and the strip
+    wraps exactly once, its ends meeting in one plane. Whatever reaches past
+    either end continues on the other.
+    """
     flat = [mesh for _, mesh, _ in buckets if len(mesh.faces)]
     if not flat:
         raise ValueError("Generate a non-empty relief before wrapping it")
     lo = np.min([m.bounds[0] for m in flat], axis=0)
     hi = np.max([m.bounds[1] for m in flat], axis=0)
-    bounds = [lo[0], lo[1], hi[0], hi[1]]
+    bounds = [lo[0], lo[1], hi[0], hi[1]] if tiling is None else tiling["bounds"]
+
+    def wrap(solid, part):
+        if tiling is None:
+            return wrap_solid(solid, bounds, c, part)
+        nx, step = tiling["repeatX"], tiling["period"][0]
+        strip = union([solid.translate((ix*step, 0, 0)) for ix in range(nx)])
+        # Split the turn mid-column, away from the faces where columns meet.
+        middle = bounds[0]+(nx//2+.5)*step
+        return union([_wrap_tile(piece, bounds, c, part, 0, middle)
+                      for piece in fold_strip(strip, bounds[0], bounds[2])])
+
     if lo[2] < -EMBED:
         raise ValueError("Cylinder relief must lie above its base plane")
     gap = c["diameter"] + 2*max(0, hi[2]) + 10
@@ -284,7 +338,7 @@ def export_cylinder(output, buckets, c, split=False, lid_art=None):
     if split:
         os.makedirs(output, exist_ok=True)
     for part, shell in parts:
-        art = [(label, union([wrap_solid(solid, bounds, c, part) for solid in solids]))
+        art = [(label, union([wrap(solid, part) for solid in solids]))
                for label, solids in sources]
         if part == 'lid' and lid_art is not None:
             art.append(('top-art', manifold(lid_art)))

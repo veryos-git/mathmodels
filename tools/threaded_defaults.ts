@@ -64,6 +64,7 @@ export function readThreadedDefaults() {
       topChamfer: 0,
       lid: false,
       threaded: true,
+      sweepThenRepeat: false,
     },
   };
 }

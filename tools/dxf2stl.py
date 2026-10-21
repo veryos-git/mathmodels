@@ -61,10 +61,10 @@ import numpy as np
 import svgelements
 import trimesh
 from ezdxf.path import make_path
-from shapely import STRtree
+from shapely import STRtree, union_all
 from shapely.affinity import scale as aff_scale
 from shapely.affinity import translate
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import nearest_points, polygonize, unary_union
 from shapely.prepared import prep
 
@@ -616,6 +616,23 @@ def chain_curves(curves, min_dot=-0.95):
     return chains
 
 
+def repeat_paths(paths, offsets, merge=True):
+    """Copies of the paths at each offset; the paths themselves without offsets.
+
+    Neighbouring copies redraw the same edges, often as parts of different
+    polylines. Merging nodes the copies together on a micron grid so each
+    shared stretch is swept once, and chain_curves rejoins the pieces.
+    """
+    if offsets is None:
+        return paths
+    copies = [[(x + dx, y + dy) for x, y in path] for dx, dy in offsets for path in paths]
+    if not merge or not copies:
+        return copies
+    merged = union_all([LineString(path) for path in copies], grid_size=1e-6)
+    return [list(line.coords) for line in getattr(merged, "geoms", [merged])
+            if line.geom_type == "LineString" and not line.is_empty]
+
+
 def sweep_profile(profile, chains):
     """The frame as one mesh: the profile swept along every path.
 
@@ -701,19 +718,25 @@ def _ring_profile_sweep(profile, chains):
     return solid_union(meshes)
 
 
-def subtract_groove(mesh, profile, chains, z_offset=0):
+def subtract_groove(mesh, profile, chains, z_offset=0, trim=None):
     """Subtract the whole cutter network after the positive sweeps are fused.
 
     Cutting the 2D section first leaves material from neighbouring sweeps
     inside the groove at junctions. A final solid difference clears it there.
+    `trim` keeps only x between its two values, cut before the result is
+    checked at STL precision so only the part that is kept must pass.
     """
-    from cylinder import manifold, mesh_of
+    from cylinder import manifold, mesh_of, printable_mesh
 
     cutter = sweep_profile(profile, chains)
     if z_offset:
         cutter.apply_translation((0, 0, z_offset))
     try:
-        result = mesh_of((manifold(mesh) - manifold(cutter)).simplify(.0001))
+        solid = manifold(mesh) - manifold(cutter)
+        if trim is not None:
+            solid = solid.trim_by_plane((1, 0, 0), trim[0]).trim_by_plane((-1, 0, 0), -trim[1])
+        solid = solid.simplify(.0001)
+        result = mesh_of(solid)
         # Tangencies can leave zero-volume fragments; keep only closed solids
         # that remain valid after float32 STL vertices have been welded.
         parts = []
@@ -726,10 +749,19 @@ def subtract_groove(mesh, profile, chains, z_offset=0):
                 parts.append(part)
         if not parts:
             raise ValueError("the groove profile removes the entire frame")
-        if any(not p.is_volume for p in parts):
-            raise ValueError("the grooved frame is not closed at STL precision; "
-                             "adjust the profile or curve tolerance")
-        return trimesh.util.concatenate(parts)
+        # Split parts can each be closed yet touch at an edge, which an STL
+        # reader welds into one shared by four faces; check them together.
+        mesh = trimesh.util.concatenate(parts)
+        mesh.merge_vertices()
+        if not mesh.is_volume:
+            # Grazing junctions can leave two surfaces meeting at one welded
+            # edge; printable_mesh joins or merges those tiny contacts.
+            try:
+                return printable_mesh(solid)
+            except ValueError:
+                raise ValueError("the grooved frame is not closed at STL precision; "
+                                 "adjust the profile or curve tolerance") from None
+        return mesh
     except (ValueError, RuntimeError) as error:
         raise ConvertError(f"Could not subtract the groove: {error}") from error
 
@@ -925,13 +957,14 @@ def frame_connections(wall_polys, crop, wall_width):
     return ribs
 
 
-def plan_drawing(path, scale, layers_csv, args, boundary=None):
+def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False):
     """One drawing read and planned into walls and faces.
 
     This is the whole per-drawing pipeline: curves in, the boundary crop and
     the profile sweep if there are any, then the wall ribbons and the regions
     they enclose. Stacking several drawings means calling this once per
-    drawing and offsetting the results.
+    drawing and offsetting the results. `defer_frame` leaves the sweep to the
+    returned `build_frame`, for sketch repeats.
     """
     layers = None
     if layers_csv:
@@ -1028,40 +1061,10 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
     # A swept frame is a mesh, and a mesh cannot be cut here, so the sweep
     # follows only what lies inside the boundary. With the boundary walled the
     # curves are already trimmed to it.
-    if profile:
-        swept = curves if crop is None or args.boundary_wall \
-            else clip_curves(curves, crop)
-        frame_mesh = sweep_profile(profile, chain_curves(swept))
-    else:
-        frame_mesh = None
-
-    if profile is not None and (args.cusps or args.round_ends):
-        solids = [frame_mesh]
-        if crop is not None and cusp_curves:
-            cusp_curves = clip_curves(cusp_curves, crop)
-        end_section = cusp_section if args.cusps else profile
-        end_chains = chain_curves(cusp_curves if args.cusps else swept, min_dot=-0.5)
-        if cusp_curves:
-            solids.append(sweep_profile(cusp_section, end_chains))
-        if args.round_ends:
-            for chain in end_chains:
-                if chain[0] == chain[-1] or len(chain) < 2:
-                    continue
-                for index, neighbour in ((0, 1), (-1, -2)):
-                    point = np.asarray(chain[index], dtype=float)
-                    forward = point - np.asarray(chain[neighbour], dtype=float)
-                    forward /= max(np.linalg.norm(forward), 1e-12)
-                    # Avoid rolling an ending at a connection to the main frame.
-                    if args.cusps and any(LineString(c).distance(Point(point)) <= max(1e-4, args.sagitta*2) for c in swept):
-                        continue
-                    tangent = -forward if index == 0 else forward
-                    normal = np.array([-tangent[1], tangent[0]])
-                    solids.append(revolved_ending(end_section, point, normal, forward,
-                                                  args.end_angle, args.end_side))
-        try:
-            frame_mesh = solid_union(solids)
-        except (ValueError, RuntimeError) as error:
-            raise ConvertError(f"Could not fuse tracery: {error}") from error
+    swept = curves if crop is None or args.boundary_wall \
+        else clip_curves(curves, crop)
+    if crop is not None and cusp_curves:
+        cusp_curves = clip_curves(cusp_curves, crop)
 
     # Where the model is allowed to reach. A walled boundary is a curve like
     # any other, so its wall straddles the line with half of it outside, just
@@ -1085,35 +1088,86 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
     # subject that floats inside the boundary would come off the bed as a loose
     # second part. Ribs bridge every floating piece to the boundary; the full
     # model keeps the clean frame and lets the painted faces do the joining.
-    connection_curves, connection_polys, connection_mesh = [], [], None
+    connection_curves, connection_polys = [], []
     if crop is not None:
         connection_curves = frame_connections(wall_polys, crop, wall_width)
-        if connection_curves:
-            if profile is not None:
-                connection_mesh = sweep_profile(
-                    profile,
-                    chain_curves([list(rib.coords) for rib in connection_curves]))
-            else:
-                connection_polys = [
-                    rib.buffer(wall_width / 2.0, cap_style="round",
-                               join_style="round")
-                    for rib in connection_curves
-                ]
-    if args.frame_only:
-        if connection_polys:
-            wall_polys = wall_polys + connection_polys
-        if connection_mesh is not None:
+        if connection_curves and profile is None:
+            connection_polys = [
+                rib.buffer(wall_width / 2.0, cap_style="round",
+                           join_style="round")
+                for rib in connection_curves
+            ]
+    if args.frame_only and connection_polys:
+        wall_polys = wall_polys + connection_polys
+
+    def build_frame(offsets=None, trim=None):
+        """The swept frame and its connection ribs; None for flat walls.
+
+        `offsets` sweeps copies of the drawing instead, and `trim` keeps
+        only x between its two values, for the sketch repeats on a cylinder
+        (see repeat_sketch). A cylinder never uses separate ribs, so trimmed
+        frames return none.
+        """
+        if profile is None:
+            return None, None
+        paths = repeat_paths(swept, offsets)
+        frame_mesh = sweep_profile(profile, chain_curves(paths))
+
+        if args.cusps or args.round_ends:
+            solids = [frame_mesh]
+            cusps = repeat_paths(cusp_curves, offsets, merge=False)
+            end_section = cusp_section if args.cusps else profile
+            end_chains = chain_curves(cusps if args.cusps else paths, min_dot=-0.5)
+            if cusps:
+                solids.append(sweep_profile(cusp_section, end_chains))
+            if args.round_ends:
+                for chain in end_chains:
+                    if chain[0] == chain[-1] or len(chain) < 2:
+                        continue
+                    for index, neighbour in ((0, 1), (-1, -2)):
+                        point = np.asarray(chain[index], dtype=float)
+                        forward = point - np.asarray(chain[neighbour], dtype=float)
+                        forward /= max(np.linalg.norm(forward), 1e-12)
+                        # Avoid rolling an ending at a connection to the main frame.
+                        if args.cusps and any(LineString(c).distance(Point(point)) <= max(1e-4, args.sagitta*2) for c in paths):
+                            continue
+                        tangent = -forward if index == 0 else forward
+                        normal = np.array([-tangent[1], tangent[0]])
+                        solids.append(revolved_ending(end_section, point, normal, forward,
+                                                      args.end_angle, args.end_side))
+            try:
+                frame_mesh = solid_union(solids)
+            except (ValueError, RuntimeError) as error:
+                raise ConvertError(f"Could not fuse tracery: {error}") from error
+
+        ribs = repeat_paths([list(rib.coords) for rib in connection_curves], offsets)
+        connection_mesh = sweep_profile(profile, chain_curves(ribs)) if ribs else None
+        if args.frame_only and connection_mesh is not None:
             try:
                 frame_mesh = solid_union([frame_mesh, connection_mesh])
             except (ValueError, RuntimeError) as error:
                 raise ConvertError(f"Could not fuse the frame connections: {error}") from error
 
-    if groove_profile is not None:
-        groove_paths = swept + [list(rib.coords) for rib in connection_curves]
-        groove_chains = chain_curves(groove_paths)
-        frame_mesh = subtract_groove(frame_mesh, groove_profile, groove_chains)
-        if connection_mesh is not None:
-            connection_mesh = subtract_groove(connection_mesh, groove_profile, groove_chains)
+        if trim is not None:
+            connection_mesh = None
+        if groove_profile is not None:
+            groove_chains = chain_curves(paths + ribs)
+            frame_mesh = subtract_groove(frame_mesh, groove_profile, groove_chains, trim=trim)
+            if connection_mesh is not None:
+                connection_mesh = subtract_groove(connection_mesh, groove_profile, groove_chains)
+        elif trim is not None:
+            from cylinder import manifold, printable_mesh
+            try:
+                frame_mesh = printable_mesh(manifold(frame_mesh).trim_by_plane((1, 0, 0), trim[0])
+                                            .trim_by_plane((-1, 0, 0), -trim[1]))
+            except ValueError as error:
+                raise ConvertError(f"Could not cut the repeated frame: {error}") from error
+        return frame_mesh, connection_mesh
+
+    # Sketch repeats sweep the frame later, once every drawing is placed.
+    frame_mesh, connection_mesh = (None, None) if defer_frame else build_frame()
+    xs = [x for c in swept for x, _ in c]
+    ys = [y for c in swept for _, y in c]
 
     summary = {
         "curves": n_curves,
@@ -1133,8 +1187,73 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None):
         "connection_mesh": connection_mesh,
         "wall_height": wall_height,
         "frame_mesh": frame_mesh,
+        "build_frame": build_frame,
+        "sketch_bounds": (min(xs), min(ys), max(xs), max(ys)) if xs else None,
         "summary": summary,
     }
+
+
+def repeat_sketch(layers, nx, ny):
+    """Rebuild every frame from nx × ny copies of the sketch, for a cylinder.
+
+    The copies follow each other at the base drawing's sketch size, so the
+    paths at its ends coincide and are swept, and grooved, once as a single
+    network instead of once per copy. The frame is made periodic: one column
+    one sketch wide and ny copies tall is cut from the network and checked
+    at STL precision once, then joined to its own copies around the shell.
+    A large network checked whole fails far more often at grazing junctions.
+
+    The cut sits partway across the sketch rather than on its outer paths,
+    where a planar cut through a sweep's centreline leaves slivers. Sizes
+    are rounded to a 2^-30 mm grid so the copies' cut faces coincide exactly.
+    Faces stay a single copy; they repeat at the same spacing when wrapped,
+    so every copy shares its paint.
+
+    Returns the layout the wrap needs: the repeat period and the flat bounds
+    that cover the shell exactly once, starting at the column.
+    """
+    def on_grid(value):
+        return round(value * 2**30) / 2**30
+
+    if layers[0]["sketch_bounds"] is None:
+        raise ConvertError("Sketch repeats need a drawing with paths to sweep")
+    x0, y0, x1, y1 = layers[0]["sketch_bounds"]
+    width, height = on_grid(x1 - x0), on_grid(y1 - y0)
+    if min(width, height) <= 1e-6:
+        raise ConvertError("Sketch repeats need a drawing with positive width and height")
+    start = on_grid(x0 + 0.3819660112501051 * width)
+    end = start + width
+    # The column spans two copies; one more either side reaches across it.
+    offsets = [(ix * width, iy * height) for iy in range(ny) for ix in range(-1, 3)]
+    # Float32 rounding moves the cut faces by a few ULPs; put them back.
+    snap = max(1e-5, abs(start) * 2**-22, abs(end) * 2**-22)
+
+    lo, hi = math.inf, -math.inf
+    for drawing in layers:
+        dx, dy = drawing["offset"]
+        frame, drawing["connection_mesh"] = drawing["build_frame"](offsets, (start - dx, end - dx))
+        if frame is not None:
+            frame.apply_translation((dx, dy, 0.0))
+            vertices = frame.vertices.copy()
+            x = vertices[:, 0]
+            vertices[:, 0] = np.where(np.abs(x - start) < snap, start,
+                                      np.where(np.abs(x - end) < snap, end, x))
+            frame.vertices = vertices
+            drawing["frame_mesh"] = frame
+            frame_lo, frame_hi = frame.bounds[:, 1]
+        else:
+            # Flat walls are the buffered paths, so their copies simply merge.
+            walls = unary_union([translate(p, ox, oy) for p in drawing["wall_polys"]
+                                 for ox, oy in offsets])
+            frame_lo, frame_hi = walls.bounds[1], walls.bounds[3]
+            column = box(start, frame_lo - 1, end, frame_hi + 1)
+            drawing["wall_polys"] = list(polygons_of(walls.intersection(column)))
+        lo, hi = min(lo, frame_lo), max(hi, frame_hi)
+        for poly in drawing["region_polys"]:
+            lo = min(lo, poly.bounds[1])
+            hi = max(hi, poly.bounds[3] + (ny - 1) * height)
+    return {"period": [width, height], "bounds": [start, lo, start + nx * width, hi],
+            "repeatX": nx, "repeatY": ny}
 
 
 def shift_holes(holes, dx, dy):
@@ -1384,12 +1503,13 @@ def safe_name(name):
     return cleaned or "group"
 
 
-def colour_buckets(layers, wall_stack, extrude=None):
+def colour_buckets(layers, wall_stack, extrude=None, face_offsets=None):
     """Every solid, gathered under the colour group that prints it.
 
     A layered frame has its slabs filed under their own colours; a plain frame
     keeps a group of its own. Group labels are shared across drawing layers,
-    so stacked drawings merge into the same buckets.
+    so stacked drawings merge into the same buckets. `face_offsets` repeats
+    every face at those offsets, for sketch repeats on a cylinder.
     """
     buckets = defaultdict(list)
     n_walls, n_regions = 0, 0
@@ -1403,7 +1523,10 @@ def colour_buckets(layers, wall_stack, extrude=None):
         for solid, group in region_solids(drawing["region_polys"],
                                           drawing["stacks"], drawing["cutter"],
                                           drawing["z_base"], drawing["effect"], extrude=extrude):
-            buckets[group or "ungrouped"].append(solid)
+            if face_offsets is None:
+                buckets[group or "ungrouped"].append(solid)
+            for dx, dy in face_offsets or []:
+                buckets[group or "ungrouped"].append(solid.copy().apply_translation((dx, dy, 0.0)))
             n_regions += 1
 
     merged = [(label, trimesh.util.concatenate(buckets[label]), len(buckets[label]))
@@ -2158,6 +2281,9 @@ def main():
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
     ap.add_argument("--cylinder", default=None, metavar="FILE",
                     help="Cylinder settings and OpenSCAD shell paths as JSON")
+    ap.add_argument("--sketch-repeat", type=int, nargs=2, default=None, metavar=("X", "Y"),
+                    help="sweep the frame along X × Y copies of the sketch, for a cylinder "
+                         "(--cylinder settings imply this unless sweepThenRepeat is set)")
     ap.add_argument("--lid-sketch", default=None, metavar="FILE",
                     help="Separate lid-top sketch swept with --profile and fitted to the cylinder lid")
     ap.add_argument("--addition-outline", metavar="FILE", help="Closed shelf outline, perpendicular to the base frame")
@@ -2304,6 +2430,24 @@ def main():
     if args.lid_sketch and (not args.cylinder or not args.profile):
         raise ConvertError("A lid-top sketch requires cylinder settings and a sweep profile")
 
+    if (args.cylinder or args.sketch_repeat) and (args.addition_outline or args.addition_preview):
+        raise ConvertError("Perpendicular additions require a flat model surface")
+    # By default a cylinder repeats the sketch before sweeping it; the older
+    # "first sweep then repeat" copies the finished relief instead.
+    cylinder, sketch_repeat = None, None
+    try:
+        if args.cylinder:
+            with open(args.cylinder) as fp:
+                cylinder = json.load(fp)
+            if not cylinder.get("sweepThenRepeat"):
+                from cylinder import repeat_counts
+                sketch_repeat = repeat_counts(cylinder)
+        elif args.sketch_repeat:
+            from cylinder import repeat_counts
+            sketch_repeat = repeat_counts(dict(zip(("repeatX", "repeatY"), args.sketch_repeat)))
+    except (OSError, ValueError) as error:
+        raise ConvertError(str(error)) from error
+
     if args.inspect:
         json.dump(inspect(args.input, args.sagitta, args.scale), sys.stdout)
         return
@@ -2374,13 +2518,14 @@ def main():
         boundary = load_boundary(args.boundary, args.sagitta)
 
     # Every drawing is planned on its own first; stacking shifts them after.
+    defer = sketch_repeat is not None
     layers = [dict(plan_drawing(args.input, args.scale, args.layers, args,
-                                boundary),
+                                boundary, defer),
                    holes=holes, spec=None)]
     for spec in specs:
         layers.append(dict(
             plan_drawing(spec["file"], spec.get("scale", 1.0),
-                         spec.get("layers"), args, boundary),
+                         spec.get("layers"), args, boundary, defer),
             holes=spec.get("holes", []), spec=spec))
 
     # Added drawings are centred on the base drawing's centre; the base keeps
@@ -2417,6 +2562,8 @@ def main():
         drawing["cutter"] = hole_cutter(drawing["holes"])
         drawing["effect"] = effect        # one effect for the whole model
         z += drawing["wall_height"]
+
+    tiling = repeat_sketch(layers, *sketch_repeat) if sketch_repeat is not None else None
 
     if args.addition_outline or args.addition_preview:
         from additions import attach_shelf, placement_preview
@@ -2494,7 +2641,8 @@ def main():
 
     if args.regions:
         json.dump({**layers[0]["summary"], **layer_payload(layers[0]),
-                   "drawings": [layer_payload(d) for d in layers]}, sys.stdout)
+                   "drawings": [layer_payload(d) for d in layers],
+                   **({"cylinderRepeat": tiling} if tiling else {})}, sys.stdout)
         return
 
     assigned = {k: as_float(k, v) for k, v in load_map(args.heights, "height").items()}
@@ -2547,10 +2695,13 @@ def main():
         from cylinder import cylinder_extrude, export_cylinder
         if args.slice_height is not None or args.variations or args.slicer_options or args.output.lower().endswith(".3mf"):
             raise ConvertError("Cylinder mode exports STL; switch to flat mode for SVG slices or 3MF variations")
-        buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=cylinder_extrude)
+        face_offsets = None
+        if tiling:
+            # The frame column already holds every row; faces repeat up here.
+            face_offsets = [(0.0, iy * tiling["period"][1]) for iy in range(tiling["repeatY"])]
+        buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=cylinder_extrude,
+                                                     face_offsets=face_offsets)
         try:
-            with open(args.cylinder) as fp:
-                cylinder = json.load(fp)
             lid_art = None
             if args.lid_sketch:
                 from lid_art import lid_art_mesh
@@ -2558,7 +2709,8 @@ def main():
                                          args.profile_scale, args.sagitta, args.groove_profile,
                                          args.profile_height_scale, args.groove_width, args.groove_height,
                                          args.profile_z, args.groove_z)
-            result = export_cylinder(args.output, buckets, cylinder, bool(args.split or args.groups), lid_art)
+            result = export_cylinder(args.output, buckets, cylinder, bool(args.split or args.groups),
+                                     lid_art, tiling)
         except ValueError as error:
             raise ConvertError(str(error)) from error
         json.dump({**layers[0]["summary"], **result, "walls": n_walls,

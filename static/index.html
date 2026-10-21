@@ -790,6 +790,7 @@
       <select id="cylinderSizing"><option value="proportional">Keep proportions · allow uniform scaling</option><option value="original">Keep original size · repeat only</option><option value="stretch">Stretch to exact dimensions (legacy)</option></select>
       <p id="cylinderFitSummary" class="muted" aria-live="polite">Generate 3D to calculate size suggestions.</p>
       <div id="cylinderSuggestions" role="group" aria-label="Suggested cylinder sizes"></div>
+      <label class="check" title="Copy the finished relief instead: each copy keeps its own outer walls and grooves, side by side with its neighbours'"><input id="cylinderSweepThenRepeat" type="checkbox"> First sweep then repeat</label>
       <div class="row"><label title="Minimum wall thickness; screw lids use a smooth neck and a short threaded band">Shell thickness (mm)<input id="cylinderThickness" type="number" value="2.4" min="0.4" step="0.1"></label><label>Bottom thickness (mm)<input id="cylinderBottom" type="number" value="2.4" min="0.4" step="0.1"></label></div>
       <label class="check"><input id="cylinderLid" type="checkbox"> Add lid</label>
       <div id="cylinderTopChamferOptions">
@@ -809,7 +810,7 @@
         <asset-preview id="lidSketchPreview" hidden></asset-preview>
         <p id="lidSketchNote" class="muted">Fits a separate sketch to the circular lid, then sweeps it with the current profile. The profile's section stays unchanged.</p>
       </div>
-      <p class="muted">Suggestions are ranked by closeness to your desired diameter and height. The artwork can repeat around the cylinder (X) and up its height (Y), with up to 12 repeats each and 64 copies total. Each copy shares its painting. Relief depths stay in mm. The lid seam splits the artwork.</p>
+      <p class="muted">Suggestions are ranked by closeness to your desired diameter and height. The artwork can repeat around the cylinder (X) and up its height (Y), with up to 12 repeats each and 64 copies total. The sketch repeats before the profile is swept, so neighbouring copies share the paths at its ends: one wall, with its groove running through. <b>First sweep then repeat</b> places finished copies side by side instead. Each copy shares its painting. Relief depths stay in mm. The lid seam splits the artwork.</p>
     </div>
     <div class="row">
       <div><label for="wallWidth">wall width (mm)</label>
@@ -1515,6 +1516,7 @@ let holeMode = false;
 let cylinderContext = null;
 let cylinderShell = null;
 let cylinderFlatBounds = null;
+let cylinderTiling = null;      // sketch repeats: the server's layout of the swept frame
 let cylinderAppliedFit = null;
 let cylinderChoice = null;
 let lidSketchPicked = null;
@@ -1557,14 +1559,15 @@ function updateCylinderFits() {
   cylinderAppliedFit=null;
   if(!cylinderFlatBounds) { summary.textContent='Generate 3D to calculate size suggestions.'; return; }
   const target=readCylinderTargets(), mode=$('cylinderSizing').value;
+  const tiling=target.sweepThenRepeat?null:cylinderTiling;
   if(mode==='stretch') {
     cylinderAppliedFit={...target,repeatX:1,repeatY:1};
     summary.textContent=`Applied: Ø ${target.diameter.toFixed(2)} × ${target.height.toFixed(2)} mm. Width and height scale independently in this legacy mode.`
       +(target.lid?` Assembled height: ${cylinderDimensions(target).height.toFixed(2)} mm.`:'');
     return;
   }
-  const fits=cylinderSuggestions(cylinderFlatBounds,target,mode);
-  const chosen=cylinderChoice?cylinderFit(cylinderFlatBounds,target,...cylinderChoice,mode):null;
+  const fits=cylinderSuggestions(cylinderFlatBounds,target,mode,10,tiling);
+  const chosen=cylinderChoice?cylinderFit(cylinderFlatBounds,target,...cylinderChoice,mode,tiling):null;
   cylinderAppliedFit=chosen??fits[0]??null;
   if(!cylinderAppliedFit) { summary.textContent='No printable size fits these settings. Adjust the desired size or shell dimensions.'; return; }
   if(chosen&&!fits.some(f=>f.repeatX===chosen.repeatX&&f.repeatY===chosen.repeatY))fits.push(chosen);
@@ -1588,6 +1591,7 @@ function restoreCylinder(saved) {
   lidSketchUI();
   cylinderAppliedFit=null;
   cylinderFlatBounds=null;
+  cylinderTiling=null;
   cylinderChoice=saved?.fit?[saved.repeatX??1,saved.repeatY??1]:null;
   $('cylinderSizing').value=saved?(saved.fit?.mode??'stretch'):'proportional';
   $('surfaceMode').value = saved ? 'cylinder' : 'flat';
@@ -1647,7 +1651,8 @@ function clearCylinderPreview() {
 function disposeWrapped(mesh) {
   if (mesh.userData.cylinderWrapped) mesh.geometry.dispose();
 }
-function wrapPreviewMesh(mesh, layer) {
+/** `frame`: the mesh is the frame, which sketch repeats sweep on the server. */
+function wrapPreviewMesh(mesh, layer, frame = false) {
   if (!cylinderContext || mesh.userData.cylinderWrapped) return;
   const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
   const attribute = source.getAttribute('position');
@@ -1659,7 +1664,8 @@ function wrapPreviewMesh(mesh, layer) {
     positions[3*i+2]=attribute.getZ(i)*mesh.scale.z+mesh.position.z+layer.zBase;
   }
   if (source !== mesh.geometry) source.dispose();
-  const parts = wrapCylinderTriangles(positions, cylinderContext.bounds, cylinderContext.settings);
+  const parts = wrapCylinderTriangles(positions, cylinderContext.bounds, cylinderContext.settings,
+    { tiling: cylinderContext.tiling, frame });
   const merged = new Float32Array(parts.body.length+parts.lid.length);
   merged.set(parts.body); merged.set(parts.lid,parts.body.length);
   const geometry = new THREE.BufferGeometry();
@@ -1670,10 +1676,12 @@ function wrapPreviewMesh(mesh, layer) {
 }
 function buildCylinderPreview(shell, lidArt = null) {
   const box=new THREE.Box3().setFromObject(group);
-  cylinderContext={ settings:shell.settings, bounds:[box.min.x,box.min.y,box.max.x,box.max.y] };
+  cylinderContext={ settings:shell.settings, bounds:[box.min.x,box.min.y,box.max.x,box.max.y],
+    tiling:shell.settings.sweepThenRepeat?null:cylinderTiling };
   for(const layer of layers) {
     layer.group.position.z=0;
-    for(const mesh of [...layer.wallMeshes,...layer.regionMeshes.flat()]) wrapPreviewMesh(mesh,layer);
+    for(const mesh of layer.wallMeshes) wrapPreviewMesh(mesh,layer,true);
+    for(const mesh of layer.regionMeshes.flat()) wrapPreviewMesh(mesh,layer);
     if(layer.holeMarkers)layer.holeMarkers.visible=false;
   }
   cylinderShell=new THREE.Group();
@@ -1804,6 +1812,7 @@ function dropLayer(li) {
 function resetLayers() {
   clearCylinderPreview();
   cylinderFlatBounds=null;
+  cylinderTiling=null;
   cylinderAppliedFit=null;
   updateCylinderFits();
   while (layers.length) dropLayer(0);
@@ -1858,7 +1867,7 @@ function rebuildFrame(li) {
     mesh.userData = { layer: li, region: null };
     l.group.add(mesh);
     l.wallMeshes.push(mesh);
-    wrapPreviewMesh(mesh,l);
+    wrapPreviewMesh(mesh,l,true);
     return;
   }
 
@@ -1879,7 +1888,7 @@ function rebuildFrame(li) {
       mesh.userData = { layer: li, region: null };
       l.group.add(mesh);
       l.wallMeshes.push(mesh);
-      wrapPreviewMesh(mesh,l);
+      wrapPreviewMesh(mesh,l,true);
       z += layer.t;
     }
   }
@@ -4849,7 +4858,7 @@ let paintLossNote = '';   // faces a placement rebuild could not carry over
  * Returns 'restored' only when `keep` was actually applied — a caller must not
  * claim a project loaded when its paint could not be restored.
  */
-async function generate(keep = null, { lenient = false } = {}) {
+async function generate(keep = null, { lenient = false, resweep = false } = {}) {
   if (!picked) { setStatus('pick a .dxf or .svg file first', true); return false; }
   const lo = Number($('regionMin').value), hi = Number($('regionMax').value);
   if (!(hi >= lo)) { setStatus('tallest face must be at least the lowest', true); return false; }
@@ -4895,9 +4904,18 @@ async function generate(keep = null, { lenient = false } = {}) {
       ? seed : (Math.random() * 1e9) | 0), keep);
     const box=new THREE.Box3().setFromObject(group);
     cylinderFlatBounds=[box.min.x,box.min.y,box.max.x,box.max.y];
+    cylinderTiling=data.cylinderRepeat??null;
     updateCylinderFits();
     if (cylinderEnabled()) {
       if(!cylinderAppliedFit)throw new Error($('cylinderFitSummary').textContent);
+      // The server sweeps the repeated sketch, so a fit with other repeats
+      // needs the frame swept again. The fit itself does not depend on them.
+      const fit=cylinderAppliedFit;
+      if(cylinderTiling&&(cylinderTiling.repeatX!==fit.repeatX||cylinderTiling.repeatY!==fit.repeatY)) {
+        if(resweep)throw new Error('The cylinder repeats did not settle. Choose a size suggestion.');
+        setStatus('sweeping the repeated sketch…');
+        return await generate(keep, { lenient, resweep: true });
+      }
       setStatus('building cylinder shell…');
       const response=await fetch('/api/cylinder',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(readCylinderSettings())});
       const shell=await response.json();

@@ -1,3 +1,4 @@
+import base64
 import math
 import os
 import io
@@ -150,7 +151,8 @@ class CylinderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'closed printable parts'):
             printable_mesh(invalid)
 
-    def test_grooved_elven_cylinder_survives_stl_welding(self):
+    def wrap_elven_fixture(self, **settings):
+        """Export the saved grooved elven project with these cylinder settings."""
         fixture = json.loads((Path(__file__).parent/'fixtures/groove-cylinder-precision.json').read_text())
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -163,7 +165,7 @@ class CylinderTests(unittest.TestCase):
                 doc = ezdxf.new()
                 doc.modelspace().add_lwpolyline(fixture[key], close=True)
                 doc.saveas(root/(key+'.dxf'))
-            c = fixture['cylinder']
+            c = {**fixture['cylinder'], **settings}
             radius, height = c['diameter']/2, c['height']
             shell = (mf.Manifold.cylinder(height, radius, radius, 128)
                      - mf.Manifold.cylinder(height, radius-c['thickness'], radius-c['thickness'], 128)
@@ -180,11 +182,65 @@ class CylinderTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             loaded = trimesh.load_mesh(target)
             self.assertTrue(loaded.is_volume)
-            # The analytic shell avoids OpenSCAD's coordinate rounding; the
-            # volume must still match the saved project to ten parts per million.
-            self.assertAlmostEqual(loaded.volume/35318.7446, 1, delta=1e-5)
             self.assertAlmostEqual(loaded.bounds[0, 2], 0, delta=.00011)
             self.assertAlmostEqual(loaded.bounds[1, 2], height, delta=.00011)
+            return loaded
+
+    def test_grooved_elven_cylinder_survives_stl_welding(self):
+        loaded = self.wrap_elven_fixture(sweepThenRepeat=True)
+        # The analytic shell avoids OpenSCAD's coordinate rounding; the
+        # volume must still match the saved project to ten parts per million.
+        self.assertAlmostEqual(loaded.volume/35318.7446, 1, delta=1e-5)
+
+    def test_grooved_elven_sketch_repeats_survive_stl_welding(self):
+        # Six copies of a sketch with grazing groove junctions: the network
+        # is checked one column at a time and the columns join exactly.
+        for repeats in ({}, {'repeatX': 4, 'repeatY': 2}):
+            with self.subTest(**repeats):
+                loaded = self.wrap_elven_fixture(**repeats)
+                volumes = sorted(part.volume for part in loaded.split())
+                self.assertGreater(volumes[-1], .9999*loaded.volume)
+
+    def test_sketch_repeats_share_edge_walls_and_grooves(self):
+        # A 100 × 50 mm frame repeated 3 × 2: neighbouring copies share one
+        # wall along each common edge, and its groove runs through.
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            doc = ezdxf.new()
+            doc.modelspace().add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True)
+            doc.modelspace().add_circle((50, 25), 15)
+            doc.saveas(root/'frame.dxf')
+            for name, section in (('profile', [(-2, 0), (2, 0), (2, 2), (-2, 2)]),
+                                  ('groove', [(-.7, 1.21), (.7, 1.21), (.7, 2.5), (-.7, 2.5)])):
+                doc = ezdxf.new()
+                doc.modelspace().add_lwpolyline(section, close=True)
+                doc.saveas(root/f'{name}.dxf')
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('dxf2stl.py')),
+                str(root/'frame.dxf'), '--regions', '--profile', str(root/'profile.dxf'),
+                '--groove-profile', str(root/'groove.dxf'), '--sketch-repeat', '3', '2'],
+                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        tiling = data['cylinderRepeat']
+        self.assertEqual(tiling['period'], [100, 50])
+        start, low, end, high = tiling['bounds']
+        self.assertAlmostEqual(end-start, 300)
+        self.assertAlmostEqual(low, -2, places=4)
+        self.assertAlmostEqual(high, 102, places=4)
+        self.assertEqual(len(data['regions']), 2)  # Faces stay one copy.
+        column = trimesh.load(io.BytesIO(base64.b64decode(data['wallMesh'])), file_type='stl')
+        self.assertTrue(column.is_volume)
+        np.testing.assert_allclose(column.bounds[:, 0], [start, start+100], atol=1e-5)
+        solid = manifold(column)
+
+        def top(x0, x1, y0, y1):
+            probe = solid ^ mf.Manifold.cube((x1-x0, y1-y0, 10)).translate((x0, y0, -1))
+            return None if probe.is_empty() else probe.bounding_box()[5]
+
+        for centre, beside in ((top(99.9, 100.1, 24, 26), (top(102.5, 103.5, 24, 26), top(96.5, 97.5, 24, 26))),
+                               (top(69, 71, 49.9, 50.1), (top(69, 71, 52.5, 53.5), top(69, 71, 46.5, 47.5)))):
+            self.assertAlmostEqual(centre, 1.21, places=4)
+            self.assertEqual(beside, (None, None))
 
     def test_exports_are_closed_and_lid_is_print_oriented(self):
         # Analytic shells isolate wrapping/export checks from OpenSCAD startup.
@@ -230,7 +286,8 @@ class CylinderTests(unittest.TestCase):
             stacks.write_text(json.dumps({str(i):[{'g':f'{i%2+1}-colour','t':.6}] for i in range(4)}))
             frame = root/'frame.json'
             frame.write_text(json.dumps([{'g':'1-colour','t':1}]))
-            for split in (False, True):
+            for split, legacy in ((False, False), (True, False), (False, True)):
+                config.write_text(json.dumps({**c, 'sweepThenRepeat': legacy}))
                 output = root/('colours' if split else 'combined.stl')
                 result = subprocess.run([sys.executable, str(Path(__file__).with_name('dxf2stl.py')),
                     str(drawing), str(output), '--confine-walls', '--cylinder', str(config),

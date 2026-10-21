@@ -74,6 +74,36 @@ for(const [part,positions] of Object.entries(beveled))for(let i=0;i<positions.le
 }
 console.log('Cylinder preview: proportions, suggestions, repetitions, curvature, default chamfers and lid seam passed');
 
+// Sketch repeats: the server sends one frame column holding every row. Copies
+// meet exactly, so a full turn has no seam overlap, and the frame's overhang
+// above and below the sketch counts once.
+const tiling={period:[100,50],bounds:[38.2,-2,338.2,102],repeatX:3,repeatY:2};
+const open={...c,lid:false};
+for(const f of cylinderSuggestions(bounds,open,'proportional',10,tiling)) {
+  const sx=Math.PI*f.diameter/(100*f.repeatX), sy=cylinderDimensions({...open,...f}).height/(50*f.repeatY+4);
+  assert.ok(Math.abs(sx-sy)<1e-12&&Math.abs(sx-f.scale)<1e-12,'sketch copies keep one scale without seam overlap');
+}
+const sketchNative=cylinderFit(bounds,{...open,diameter:300/Math.PI,height:104},3,2,'original',tiling);
+assert.ok(Math.abs(sketchNative.diameter-300/Math.PI)<1e-12&&Math.abs(sketchNative.height-104)<1e-12);
+const sketchShell={...open,diameter:300/Math.PI,height:104,repeatX:3,repeatY:2};
+const column=new Float64Array([50,0,1,60,0,1,60,100,1]);
+const aroundOnly=wrapCylinderTriangles(column,bounds,sketchShell,{tiling,frame:true});
+const aroundAndUp=wrapCylinderTriangles(column,bounds,sketchShell,{tiling});
+assert.equal(aroundAndUp.body.length,2*aroundOnly.body.length,'the frame column already holds every row');
+const ends=[38.2,338.2].map(x=>cylinderPoint([x,50,1],tiling.bounds,sketchShell,'body',0));
+assert.ok(Math.hypot(...ends[0].map((v,i)=>v-ends[1][i]))<1e-9,'the strip closes exactly once around');
+// A face reaching past the start of the strip continues before its end.
+const crossing=wrapCylinderTriangles(new Float64Array([30,10,1,45,10,1,45,20,1]),bounds,
+  {...sketchShell,repeatX:1,repeatY:1},{tiling:{...tiling,repeatX:1,repeatY:1,bounds:[38.2,-2,138.2,102]}});
+const crossingAngles=[];
+for(let i=0;i<crossing.body.length;i+=3) {
+  crossingAngles.push(Math.atan2(crossing.body[i+1],crossing.body[i]));
+  assert.ok(Math.abs(Math.hypot(crossing.body[i],crossing.body[i+1])-(sketchShell.diameter/2+.95))<1e-4);
+}
+assert.ok(crossingAngles.some(a=>a<-1e-6)&&crossingAngles.some(a=>a>1e-6),'both sides of the seam are covered');
+assert.throws(()=>wrapCylinderTriangles(column,bounds,{...sketchShell,repeatX:2},{tiling}),/other repeats/);
+console.log('Sketch repeats: shared period, exact seam, frame column and folded faces passed');
+
 const openRim={...c,lid:false,topChamfer:.4};
 assert.equal(cylinderSurfaceInset(59,openRim,'body'),0);
 assert.ok(Math.abs(cylinderSurfaceInset(59.8,openRim,'body')-.2)<1e-9);

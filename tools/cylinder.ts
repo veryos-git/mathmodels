@@ -17,6 +17,8 @@ export type CylinderSettings = {
   topChamfer: number;
   repeatX: number;
   repeatY: number;
+  // Copy the finished relief instead of sweeping the repeated sketch.
+  sweepThenRepeat: boolean;
   threadedDesign?: ReturnType<typeof readThreadedDefaults>["design"];
 };
 
@@ -26,13 +28,23 @@ export function cylinderSettings(raw: unknown): CylinderSettings {
   }
   const input = { ...raw } as Record<string, unknown>;
   const scad = readThreadedDefaults();
-  const { lid: _lid, threaded: _threaded, topChamfer, ...defaults } = scad.defaults;
+  const {
+    lid: _lid,
+    threaded: _threaded,
+    sweepThenRepeat: _sweepThenRepeat,
+    topChamfer,
+    ...defaults
+  } = scad.defaults;
   const result = {
     lid: input.lid ?? false,
     threaded: input.threaded ?? true,
+    sweepThenRepeat: input.sweepThenRepeat ?? false,
   } as CylinderSettings;
-  if (typeof result.lid !== "boolean" || typeof result.threaded !== "boolean") {
-    throw new Error("Lid and thread options must be booleans");
+  if (
+    typeof result.lid !== "boolean" || typeof result.threaded !== "boolean" ||
+    typeof result.sweepThenRepeat !== "boolean"
+  ) {
+    throw new Error("Lid, thread and repeat options must be booleans");
   }
   if (result.lid && result.threaded) {
     const thickness = input.thickness ?? defaults.thickness;
@@ -194,7 +206,12 @@ const cache = new Map<
   Promise<{ body: Uint8Array; lid?: Uint8Array }>
 >();
 export async function cylinderMeshes(c: CylinderSettings, dir: string) {
-  const { repeatX: _repeatX, repeatY: _repeatY, ...shellSettings } = c;
+  const {
+    repeatX: _repeatX,
+    repeatY: _repeatY,
+    sweepThenRepeat: _sweepThenRepeat,
+    ...shellSettings
+  } = c;
   const key = JSON.stringify(shellSettings) +
     (c.lid && c.threaded ? readThreadedDefaults().source : "");
   let pending = cache.get(key);

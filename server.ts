@@ -332,6 +332,7 @@ function handleRegions(req: Request, placement = false): Promise<Response> {
     return Response.json(await runScript([
       paths[0],
       placement ? "--addition-preview" : "--regions",
+      ...(placement ? [] : sketchRepeatFlags(form)),
       ...shapeFlags(form, boundaryPath),
       ...await additionFlags(form, dir),
       ...(profilePath ? ["--profile", profilePath] : []),
@@ -376,6 +377,17 @@ function handleLidArt(req: Request): Promise<Response> {
     ], "tools/lid_art.py");
     return Response.json({ ...info, stl: (await Deno.readFile(output)).toBase64() });
   });
+}
+
+/** A cylinder sweeps its frame along the repeated sketch unless told otherwise. */
+function sketchRepeatFlags(form: FormData): string[] {
+  if (!form.has("cylinder")) return [];
+  try {
+    const c = cylinderSettings(JSON.parse(String(form.get("cylinder"))));
+    return c.sweepThenRepeat ? [] : ["--sketch-repeat", String(c.repeatX), String(c.repeatY)];
+  } catch (error) {
+    throw new HttpError(422, error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function takeCylinder(form: FormData, dir: string, profilePath: string | null) {

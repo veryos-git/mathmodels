@@ -13,14 +13,34 @@ export function cylinderRepeats(c) {
   return [nx,ny];
 }
 
+// Sketch repeats (the default) sweep the frame along the repeated sketch on
+// the server. `tiling` is its layout from /api/regions: the repeat period,
+// the flat bounds that cover the shell exactly once, and the repeats it was
+// swept for. The frame arrives as one column holding every row; copies meet
+// exactly, so the turn has no seam overlap. Without `tiling` (first sweep
+// then repeat) finished copies overlap 0.05 mm at their tips.
+
+// The flat artwork around and up for these repeats, and the overlap within it.
+function flatSpan(bounds, repeatX, repeatY, tiling) {
+  if(tiling) {
+    const [px,py]=tiling.period;
+    // The frame's overhang beyond the sketch, above and below, counts once.
+    const overhang=(tiling.bounds[3]-tiling.bounds[1])-tiling.repeatY*py;
+    return {width:px*repeatX, height:py*repeatY+overhang, seamX:0, seamY:0};
+  }
+  const w=bounds[2]-bounds[0], h=bounds[3]-bounds[1];
+  return {width:w*repeatX, height:h*repeatY,
+    seamX:repeatX*CYLINDER_SEAM_OVERLAP, seamY:(repeatY-1)*CYLINDER_SEAM_OVERLAP};
+}
+
 // Minimize squared relative errors in diameter and container height. One
 // scale applies to both drawing axes; relief depth remains in millimetres.
-export function cylinderFit(bounds, c, repeatX, repeatY, mode='proportional') {
-  const w=bounds[2]-bounds[0], h=bounds[3]-bounds[1];
+export function cylinderFit(bounds, c, repeatX, repeatY, mode='proportional', tiling=null) {
   cylinderRepeats({repeatX,repeatY});
-  if (!(w>0&&h>0&&c.diameter>0&&c.height>0) || ![...bounds,c.diameter,c.height].every(Number.isFinite)) return null;
-  const extra=cylinderDimensions(c).height-c.height+(repeatY-1)*CYLINDER_SEAM_OVERLAP;
-  const a=w*repeatX/Math.PI, b=h*repeatY, seam=repeatX*CYLINDER_SEAM_OVERLAP/Math.PI;
+  const span=flatSpan(bounds,repeatX,repeatY,tiling);
+  if (!(span.width>0&&span.height>0&&c.diameter>0&&c.height>0) || ![...bounds,c.diameter,c.height].every(Number.isFinite)) return null;
+  const extra=cylinderDimensions(c).height-c.height+span.seamY;
+  const a=span.width/Math.PI, b=span.height, seam=span.seamX/Math.PI;
   let scale=mode==='original'?1:
     (a*(c.diameter+seam)/c.diameter**2+b*(c.height+extra)/c.height**2)/(a*a/c.diameter**2+b*b/c.height**2);
   const minRadius=c.lid?2*c.thickness+c.clearance+(c.threaded?0.4*c.pitch:0):c.thickness;
@@ -39,11 +59,11 @@ export function cylinderFit(bounds, c, repeatX, repeatY, mode='proportional') {
     error:Math.hypot((diameter-c.diameter)/c.diameter,(height-c.height)/c.height)};
 }
 
-export function cylinderSuggestions(bounds, c, mode='proportional', limit=10) {
+export function cylinderSuggestions(bounds, c, mode='proportional', limit=10, tiling=null) {
   const fits=[];
   for(let nx=1;nx<=CYLINDER_MAX_REPEAT;nx++) for(let ny=1;ny<=CYLINDER_MAX_REPEAT;ny++) {
     if(nx*ny>CYLINDER_MAX_COPIES)continue;
-    const fit=cylinderFit(bounds,c,nx,ny,mode);
+    const fit=cylinderFit(bounds,c,nx,ny,mode,tiling);
     if(fit)fits.push(fit);
   }
   fits.sort((a,b)=>Math.abs(a.error-b.error)>1e-10?a.error-b.error:
@@ -87,9 +107,9 @@ export function cylinderSurfaceInset(z, c, part) {
   return Math.max(0,d.lidBottomChamfer-(z-shoulder),d.lidTopChamfer-(height-z));
 }
 
-export function cylinderPoint([x,y,z], bounds, c, part) {
+export function cylinderPoint([x,y,z], bounds, c, part, seam=CYLINDER_SEAM_OVERLAP) {
   const [x0,y0,x1,y1] = bounds;
-  const angle = ((x-x0)/(x1-x0)-.5)*(2*Math.PI+CYLINDER_SEAM_OVERLAP/(c.diameter/2))+Math.PI;
+  const angle = ((x-x0)/(x1-x0)-.5)*(2*Math.PI+seam/(c.diameter/2))+Math.PI;
   const height=(y-y0)/(y1-y0)*cylinderDimensions(c).height;
   const r = c.diameter/2-cylinderSurfaceInset(height,c,part??(height<cylinderDimensions(c).shoulder?'body':'lid'))-0.05+z;
   const cx=Math.cos(angle), cy=Math.sin(angle);
@@ -118,22 +138,44 @@ function bevelBands(poly, levels) {
   return bands;
 }
 
-export function wrapCylinderTriangles(positions, bounds, c) {
-  if (bounds.some(v=>!Number.isFinite(v)) || bounds[2]<=bounds[0] || bounds[3]<=bounds[1]) throw new Error('The drawing needs a positive width and height to wrap.');
+// The strip that wraps once, its seam overlap, and where each copy sits in it.
+// With `tiling` the frame column already holds every row: it only repeats around.
+function cylinderLayout(bounds, c, tiling) {
   const [nx,ny]=cylinderRepeats(c);
+  const grid=(stepX,stepY,rows)=>Array.from({length:nx*rows},(_,i)=>[Math.floor(i/rows)*stepX,(i%rows)*stepY]);
+  if(tiling) {
+    if(tiling.repeatX!==nx||tiling.repeatY!==ny)throw new Error('The frame was swept for other repeats. Generate the model again.');
+    const [px,py]=tiling.period;
+    return {bounds:tiling.bounds, seam:0, copies:grid(px,py,ny), columns:grid(px,0,1)};
+  }
   const width=bounds[2]-bounds[0], tileHeight=bounds[3]-bounds[1];
   // Bond each repeat with a 0.05 mm overlap. Merely touching tips become
   // non-manifold STL edges, just as they do at the full-turn seam.
   const sx=(Math.PI*c.diameter+nx*CYLINDER_SEAM_OVERLAP)/(width*nx);
   const sy=(cylinderDimensions(c).height+(ny-1)*CYLINDER_SEAM_OVERLAP)/(tileHeight*ny);
   const stepX=width-CYLINDER_SEAM_OVERLAP/sx, stepY=tileHeight-CYLINDER_SEAM_OVERLAP/sy;
-  bounds=[bounds[0],bounds[1],bounds[0]+width+(nx-1)*stepX,bounds[1]+tileHeight+(ny-1)*stepY];
+  const copies=grid(stepX,stepY,ny);
+  return {bounds:[bounds[0],bounds[1],bounds[0]+width+(nx-1)*stepX,bounds[1]+tileHeight+(ny-1)*stepY],
+    seam:CYLINDER_SEAM_OVERLAP, copies, columns:copies};
+}
+
+// `frame`: these triangles are the swept frame, which `tiling` already repeats up.
+export function wrapCylinderTriangles(positions, bounds, c, {tiling=null, frame=false}={}) {
+  if (bounds.some(v=>!Number.isFinite(v)) || bounds[2]<=bounds[0] || bounds[3]<=bounds[1]) throw new Error('The drawing needs a positive width and height to wrap.');
+  const layout=cylinderLayout(bounds,c,tiling);
+  bounds=layout.bounds;
+  const turn=bounds[2]-bounds[0];
   const result={ body:[], lid:[] };
   const { shoulder, height }=cylinderDimensions(c);
   const dx=(bounds[2]-bounds[0])/CYLINDER_SEGMENTS;
-  for(let ix=0;ix<nx;ix++) for(let iy=0;iy<ny;iy++) for(let i=0;i<positions.length;i+=9) {
-    const triangle=[0,3,6].map(k=>[positions[i+k]+ix*stepX,positions[i+k+1]+iy*stepY,positions[i+k+2]]);
-    for(const part of c.lid?['body','lid']:['body']) {
+  for(const [ox,oy] of frame?layout.columns:layout.copies) for(let i=0;i<positions.length;i+=9) {
+    const placed=[0,3,6].map(k=>[positions[i+k]+ox,positions[i+k+1]+oy,positions[i+k+2]]);
+    // With sketch repeats, whatever reaches past either end continues on the other.
+    const shifts=[0];
+    if(tiling&&Math.min(...placed.map(p=>p[0]))<bounds[0])shifts.push(turn);
+    if(tiling&&Math.max(...placed.map(p=>p[0]))>bounds[2])shifts.push(-turn);
+    for(const shift of shifts) for(const part of c.lid?['body','lid']:['body']) {
+      const triangle=shift?placed.map(([x,y,z])=>[x+shift,y,z]):placed;
       let poly=triangle;
       if(c.lid) {
         const cut=bounds[1]+(shoulder+(part==='lid'?1:-1)*c.seamGap/2)/height*(bounds[3]-bounds[1]);
@@ -147,7 +189,7 @@ export function wrapCylinderTriangles(positions, bounds, c) {
         if(strip.length<3)continue;
         const levels=cylinderBevels(c,part).map(z=>bounds[1]+z/height*(bounds[3]-bounds[1]));
         for(const band of bevelBands(strip,levels)) {
-          const points=band.map(p=>cylinderPoint(p,bounds,c,part));
+          const points=band.map(p=>cylinderPoint(p,bounds,c,part,layout.seam));
           for(let k=1;k<points.length-1;k++)result[part].push(...points[0],...points[k],...points[k+1]);
         }
       }
