@@ -331,6 +331,10 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
 function handleRegions(req: Request, placement = false): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
+    // Very coarse sagitta for the preview — fast, not print-quality.
+    // The export uses the user's actual setting (argparse takes the last value).
+    const userSagitta = Number(form.get("sagitta") ?? 0.02);
+    const previewSagitta = String(Math.max(userSagitta, 0.5));
     return Response.json(await runScript([
       paths[0],
       placement ? "--addition-preview" : "--regions",
@@ -344,6 +348,7 @@ function handleRegions(req: Request, placement = false): Promise<Response> {
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await layerSpecs(form, dir, paths),
+      "--sagitta", previewSagitta,   // override for preview speed
     ]));
   });
 }

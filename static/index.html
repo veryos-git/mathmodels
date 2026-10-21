@@ -877,7 +877,7 @@
   </div>
   <div id="domeEndsSection" hidden>
     <strong>Open path endings</strong>
-    <p class="muted">Click an endpoint marker in the 3D view to toggle a dome cap. <span id="domeEndCount"></span></p>
+    <p class="muted">Click an endpoint marker in the view to toggle. Hit Generate 3D to apply. <span id="domeEndCount"></span></p>
     <button id="domeClearAll" class="ghost" hidden>Clear all dome endings</button>
   </div>
   <details id="gothicOptions">
@@ -2368,15 +2368,23 @@ function domeEndsUI() {
 }
 
 function setDomeEndpoints(eps) {
+  const prev = domeEndpoints;
+  const prevSel = domeEndSelected;
   domeEndpoints = eps ?? [];
+  // Re-map previously selected indices onto the new endpoint list by position.
   domeEndSelected = new Set();
+  for (const i of prevSel) {
+    if (i >= prev.length) continue;
+    const [px, py] = prev[i];
+    const j = domeEndpoints.findIndex(([x, y]) => Math.abs(x - px) < 0.1 && Math.abs(y - py) < 0.1);
+    if (j >= 0) domeEndSelected.add(j);
+  }
   domeEndsUI();
 }
 
 $('domeClearAll').onclick = () => {
   domeEndSelected.clear();
   domeEndsUI();
-  if (!$('go').disabled) refit('Dome endings cleared — your painting is kept');
 };
 
 /** Toggle dome selection when the user clicks an endpoint marker. */
@@ -2392,7 +2400,6 @@ function tryToggleDomeEnd(event) {
   if (domeEndSelected.has(idx)) domeEndSelected.delete(idx);
   else domeEndSelected.add(idx);
   domeEndsUI();
-  if (!$('go').disabled) refit('Dome ending updated — your painting is kept');
   return true;
 }
 
