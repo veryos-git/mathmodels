@@ -9,7 +9,8 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from ring import _tile_solid, export_ring, load_ring_info, mesh_of
+from ring import (_tile_solid, export_ring, export_ring_sizes, load_ring_info,
+                  mesh_of)
 
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = str(ROOT / "reverse_engeneering/ring/default_profile.dxf")
@@ -76,6 +77,64 @@ class RingTests(unittest.TestCase):
         for h in hists[1:]:
             # Each copy holds a comparable share of the relief tips.
             self.assertGreater(h.sum(), 0.6 * base)
+
+    def test_every_size_is_a_closed_ring_at_its_exact_inner_diameter(self):
+        """One sweep, many sizes: each file is a watertight ring whose hole is
+        the requested inner diameter (anchored to the profile's inner edge, not
+        its centre) and whose name carries the size."""
+        import manifold3d as mf
+        W, H, nx = 20.0, self.info["ring_height"], 3
+        column = mesh_of(mf.Manifold.cube((W, H, 2.0)))
+        buckets = [("relief", column, 1)]
+        tiling = {"period": [W, H], "bounds": [0.0, 0.0, nx * W, H],
+                  "repeatX": nx, "repeatY": 1}
+        sizes = [{"label": "5", "diameter": 15.6},
+                 {"label": "7", "diameter": 17.3},
+                 {"label": "13.5", "diameter": 22.6}]
+        with tempfile.TemporaryDirectory() as d:
+            res = export_ring_sizes(d, buckets, {**self.cfg, "repeatX": nx}, 0.3,
+                                    sizes, tiling=tiling)
+            self.assertEqual(res["sizes"], 3)
+            for entry, want in zip(res["files"], sizes):
+                self.assertIn(want["label"], entry["file"])
+                m = trimesh.load(os.path.join(d, entry["file"]))
+                self.assertTrue(m.is_watertight)
+                r = np.linalg.norm(m.vertices[:, :2], axis=1)
+                self.assertAlmostEqual(float(r.min() * 2), want["diameter"], places=1)
+
+    def test_one_unbuildable_size_is_skipped_not_fatal(self):
+        """A diameter whose boolean will not close is retried with a bonded seam
+        and, if it still fails, skipped — the other sizes still download."""
+        from unittest import mock
+        import manifold3d as mf
+        import ring
+        W, H, nx = 20.0, self.info["ring_height"], 3
+        column = mesh_of(mf.Manifold.cube((W, H, 2.0)))
+        buckets = [("relief", column, 1)]
+        tiling = {"period": [W, H], "bounds": [0.0, 0.0, nx * W, H],
+                  "repeatX": nx, "repeatY": 1}
+        sizes = [{"label": "5", "diameter": 15.6},
+                 {"label": "7", "diameter": 17.3},
+                 {"label": "10", "diameter": 19.8}]
+        # Call order: size 5 closes (call 1); size 7 fails both seam tries
+        # (calls 2, 3); size 10 closes (call 4).
+        real, counter = ring.printable_mesh, {"i": 0}
+
+        def flaky(solid):
+            counter["i"] += 1
+            if counter["i"] in (2, 3):
+                raise ValueError("forced boolean failure")
+            return real(solid)
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(ring, "printable_mesh", flaky):
+            res = export_ring_sizes(d, buckets, {**self.cfg, "repeatX": nx}, 0.3,
+                                    sizes, tiling=tiling)
+            self.assertEqual(res["sizes"], 2)
+            self.assertEqual(res["skipped"], ["7"])
+            self.assertEqual({f["ringSize"] for f in res["files"]}, {"5", "10"})
+            self.assertEqual(sorted(os.listdir(d)),
+                             ["ring-size-10-19.8mm.stl", "ring-size-5-15.6mm.stl"])
 
     def test_sweep_then_repeat_stays_a_side_by_side_copy(self):
         """Without `tiling` the finished relief is copied in place; the helper

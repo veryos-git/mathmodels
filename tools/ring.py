@@ -215,6 +215,57 @@ def _tile_solid(solid, bounds, repeatX):
 # ---------------------------------------------------------------------------
 # Export
 
+def _bucket_sources(buckets):
+    """Decompose each colour bucket's swept relief into closed solids once.
+
+    The sweep is the same for every ring size, so this is done up front and
+    reused while each size is wrapped onto its own shell.
+    """
+    return [(label, manifold(mesh).decompose())
+            for label, mesh, _ in buckets if len(mesh.faces)]
+
+
+def _tile_bounds(buckets):
+    flat = [mesh for _, mesh, _ in buckets if len(mesh.faces)]
+    if not flat:
+        raise ValueError("Generate a non-empty relief before wrapping it")
+    lo = np.min([m.bounds[0] for m in flat], axis=0)
+    hi = np.max([m.bounds[1] for m in flat], axis=0)
+    return [lo[0], lo[1], hi[0], hi[1]]
+
+
+def _wrap_sources(sources, ring_info, tile_bounds, repeatX, tiling, seam=None):
+    """Bend every colour bucket onto one ring surface; returns (label, solid).
+
+    `seam` overrides the turn overlap. Sketch repeats join their columns flat
+    (seam 0) by default; passing a small overlap bonds the back seam instead,
+    the fallback for a diameter where the exact join trips the boolean.
+    """
+    if tiling is not None:
+        bounds = tiling["bounds"]
+        nx, step = tiling["repeatX"], tiling["period"][0]
+        # Split mid-column, away from the planes where columns meet.
+        middle = bounds[0] + (nx // 2 + 0.5) * step
+        turn_seam = 0.0 if seam is None else seam
+
+        def wrap_one(solid):
+            strip = union([solid.translate((ix * step, 0, 0)) for ix in range(nx)])
+            return union([wrap_solid(piece, ring_info, bounds, middle=middle, seam=turn_seam)
+                          for piece in fold_strip(strip, bounds[0], bounds[2])])
+    else:
+        turn_seam = SEAM_OVERLAP if seam is None else seam
+
+        def wrap_one(solid):
+            tiled, total_bounds = _tile_solid(solid, tile_bounds, repeatX)
+            return wrap_solid(tiled, ring_info, total_bounds, seam=turn_seam)
+
+    art = []
+    for label, solids in sources:
+        wrapped = [w for w in (wrap_one(s) for s in solids) if not w.is_empty()]
+        art.append((label, union(wrapped) if wrapped else mf.Manifold()))
+    return art
+
+
 def export_ring(output, buckets, ring_settings, sagitta, split=False, tiling=None):
     """Wrap the colour buckets onto the ring shell and write the STL file(s).
 
@@ -228,50 +279,15 @@ def export_ring(output, buckets, ring_settings, sagitta, split=False, tiling=Non
     """
     import os
 
-    flat = [mesh for _, mesh, _ in buckets if len(mesh.faces)]
-    if not flat:
-        raise ValueError("Generate a non-empty relief before wrapping it")
-
     repeatX = int(ring_settings.get("repeatX", 1))
     if not (1 <= repeatX <= 12):
         raise ValueError("Use 1–12 artwork repeats around the ring")
 
     ring_info = load_ring_info(ring_settings, sagitta)
     shell = build_ring_shell(ring_info)
-
-    # Shared flat bounds for all components (one artwork tile width).
-    lo = np.min([m.bounds[0] for m in flat], axis=0)
-    hi = np.max([m.bounds[1] for m in flat], axis=0)
-    tile_bounds = [lo[0], lo[1], hi[0], hi[1]]
-
-    if tiling is not None:
-        bounds = tiling["bounds"]
-        nx, step = tiling["repeatX"], tiling["period"][0]
-        # Split mid-column, away from the planes where columns meet.
-        middle = bounds[0] + (nx // 2 + 0.5) * step
-
-        def wrap_one(solid):
-            strip = union([solid.translate((ix * step, 0, 0)) for ix in range(nx)])
-            return union([wrap_solid(piece, ring_info, bounds, middle=middle, seam=0.0)
-                          for piece in fold_strip(strip, bounds[0], bounds[2])])
-    else:
-        def wrap_one(solid):
-            tiled, total_bounds = _tile_solid(solid, tile_bounds, repeatX)
-            return wrap_solid(tiled, ring_info, total_bounds)
-
-    sources = [
-        (label, manifold(mesh).decompose())
-        for label, mesh, _ in buckets
-        if len(mesh.faces)
-    ]
-    art = []
-    for label, solids in sources:
-        wrapped = []
-        for s in solids:
-            w = wrap_one(s)
-            if not w.is_empty():
-                wrapped.append(w)
-        art.append((label, union(wrapped) if wrapped else mf.Manifold()))
+    tile_bounds = _tile_bounds(buckets)
+    sources = _bucket_sources(buckets)
+    art = _wrap_sources(sources, ring_info, tile_bounds, repeatX, tiling)
 
     if split:
         os.makedirs(output, exist_ok=True)
@@ -317,6 +333,80 @@ def export_ring(output, buckets, ring_settings, sagitta, split=False, tiling=Non
         "size": np.round(mesh.extents, 3).tolist(),
         "ring": True,
     }
+
+
+def export_ring_sizes(output_dir, buckets, ring_settings, sagitta, sizes, tiling=None):
+    """Write one combined, printable ring STL per standard size.
+
+    `sizes` is a list of {"label": str, "diameter": mm}, the standard inner
+    diameter of each ring size. The profile is swept once (the buckets); each
+    size then revolves a shell whose inner surface sits at diameter / 2 and
+    wraps the shared relief onto it, so the whole run costs one sweep plus one
+    wrap per size. The artwork always spans one full turn, so a larger ring
+    carries the same pattern, only scaled around its circumference.
+
+    `offset` is measured to the profile's inner edge, so the revolve offset is
+    shifted by where that edge sits in the loaded profile (load_profile centres
+    the section on x=0), keeping each ring's hole exactly its nominal diameter.
+    """
+    import os
+    from dxf2stl import load_profile
+
+    repeatX = int(ring_settings.get("repeatX", 1))
+    if not (1 <= repeatX <= 12):
+        raise ValueError("Use 1–12 artwork repeats around the ring")
+    if not sizes:
+        raise ValueError("No ring sizes were requested")
+
+    os.makedirs(output_dir, exist_ok=True)
+    tile_bounds = _tile_bounds(buckets)
+    sources = _bucket_sources(buckets)
+    # The shell's inner surface is at offset + (profile's min x); anchor it so
+    # the finished hole equals the requested inner diameter.
+    inner_edge = load_profile(ring_settings["profilePath"], sagitta).bounds[0]
+
+    def build(diameter, seam):
+        ring_info = load_ring_info(
+            {**ring_settings, "offset": diameter / 2.0 - inner_edge}, sagitta)
+        shell = build_ring_shell(ring_info)
+        art = _wrap_sources(sources, ring_info, tile_bounds, repeatX, tiling, seam=seam)
+        solid = union([shell] + [s for _, s in art if not s.is_empty()])
+        return printable_mesh(solid)  # raises if it is not a closed solid
+
+    # A clean column join is tried first; a tiny bonded seam is the fallback for
+    # the odd diameter where the exact back-seam coincidence trips the boolean.
+    # A size that still will not close is skipped so the rest still download.
+    seams = [None, SEAM_OVERLAP] if tiling is not None else [None]
+    written, skipped = [], []
+    for size in sizes:
+        diameter = float(size["diameter"])
+        label = str(size["label"])
+        mesh = None
+        for seam in seams:
+            try:
+                mesh = build(diameter, seam)
+                break
+            except (ValueError, RuntimeError):
+                mesh = None
+        if mesh is None:
+            skipped.append(label)
+            continue
+        name = f"ring-size-{label}-{diameter:g}mm.stl"
+        mesh.export(os.path.join(output_dir, name))
+        written.append({
+            "file": name,
+            "ringSize": label,
+            "diameter": diameter,
+            "triangles": int(len(mesh.faces)),
+            "size": np.round(mesh.extents, 3).tolist(),
+        })
+    if not written:
+        raise ValueError("No ring size could be built from this relief; "
+                         "check the profile and sketch, or try a lower repeat count")
+    result = {"files": written, "ring": True, "sizes": len(written)}
+    if skipped:
+        result["skipped"] = skipped
+    return result
 
 
 if __name__ == "__main__":

@@ -452,11 +452,30 @@ async function takeCylinder(form: FormData, dir: string, profilePath: string | n
 
 const DEFAULT_RING_PROFILE = "reverse_engeneering/ring/default_profile.dxf";
 
-/** Produce --ring flags when the form includes ring mode. */
+// Standard US ring sizes with their inner diameter in mm (ISO 8653, monotonic).
+// A set of these is swept once and a printable ring is produced for each — a
+// size for everybody.
+const RING_SIZES: { label: string; diameter: number }[] = [
+  { label: "3", diameter: 14.0 }, { label: "3.5", diameter: 14.4 },
+  { label: "4", diameter: 14.8 }, { label: "4.5", diameter: 15.2 },
+  { label: "5", diameter: 15.6 }, { label: "5.5", diameter: 16.1 },
+  { label: "6", diameter: 16.5 }, { label: "6.5", diameter: 16.9 },
+  { label: "7", diameter: 17.3 }, { label: "7.5", diameter: 17.7 },
+  { label: "8", diameter: 18.1 }, { label: "8.5", diameter: 18.5 },
+  { label: "9", diameter: 18.9 }, { label: "9.5", diameter: 19.4 },
+  { label: "10", diameter: 19.8 }, { label: "10.5", diameter: 20.2 },
+  { label: "11", diameter: 20.6 }, { label: "11.5", diameter: 21.0 },
+  { label: "12", diameter: 21.4 }, { label: "12.5", diameter: 21.8 },
+  { label: "13", diameter: 22.2 }, { label: "13.5", diameter: 22.6 },
+];
+
+/** Produce --ring flags when the form includes ring mode. With `allSizes` the
+ * config carries the full size table, so export writes one STL per size. */
 async function ringFlags(
   form: FormData,
   dir: string,
   ringProfilePath: string | null,
+  allSizes = false,
 ): Promise<string[]> {
   if (!form.has("ring")) return [];
   if (form.has("cylinder")) throw new HttpError(400, "Ring and cylinder modes cannot be combined");
@@ -475,7 +494,8 @@ async function ringFlags(
   }
   const sweepThenRepeat = form.get("ringSweepThenRepeat") === "1";
   const config = `${dir}/ring.json`;
-  await Deno.writeTextFile(config, JSON.stringify({ profilePath, offset, repeatX, sweepThenRepeat }));
+  await Deno.writeTextFile(config, JSON.stringify(
+    { profilePath, offset, repeatX, sweepThenRepeat, ...(allSizes ? { sizes: RING_SIZES } : {}) }));
   return ["--ring", config];
 }
 
@@ -619,6 +639,43 @@ function handleExport(req: Request): Promise<Response> {
       ...await layerSpecs(form, dir, paths),
       ...await takeCylinder(form, dir, profilePath),
       ...await ringFlags(form, dir, ringProfilePath),
+    ]);
+
+    const listed = (stats.files ?? []) as Array<Record<string, unknown>>;
+    const files = await Promise.all(listed.map(async (entry) => ({
+      ...entry,
+      stl: (await Deno.readFile(`${output}/${entry.file}`)).toBase64(),
+    })));
+    return Response.json({ ...stats, files });
+  });
+}
+
+/**
+ * POST /api/ring-sizes — one combined, printable ring STL per standard size.
+ * The relief is swept once and wrapped onto a shell for every inner diameter,
+ * so one click yields a ring that fits everybody.
+ */
+function handleRingSizes(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath, ringProfilePath } = await takeUpload(req, dir);
+    if (!form.has("ring")) throw new HttpError(400, "Ring mode is required to export ring sizes");
+    const output = `${dir}/rings`;
+    const stats = await runScript([
+      paths[0],
+      output,
+      ...shapeFlags(form, boundaryPath),
+      ...await additionFlags(form, dir),
+      ...(profilePath ? ["--profile", profilePath] : []),
+      ...(grooveProfilePath ? ["--groove-profile", grooveProfilePath] : []),
+      ...(cuspPath ? ["--cusps", cuspPath] : []),
+      ...(cuspProfilePath ? ["--cusp-profile", cuspProfilePath] : []),
+      ...await mapFlag(form, "heights", "--heights", dir),
+      ...await mapFlag(form, "stacks", "--stacks", dir),
+      ...await mapFlag(form, "wallStack", "--wall-stack", dir),
+      ...await mapFlag(form, "holes", "--holes", dir),
+      ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
+      ...await layerSpecs(form, dir, paths),
+      ...await ringFlags(form, dir, ringProfilePath, true),
     ]);
 
     const listed = (stats.files ?? []) as Array<Record<string, unknown>>;
@@ -1409,6 +1466,7 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/convert" && req.method === "POST") return await handleConvert(req);
     if (url.pathname === "/api/slice" && req.method === "POST") return await handleConvert(req, true);
     if (url.pathname === "/api/export" && req.method === "POST") return await handleExport(req);
+    if (url.pathname === "/api/ring-sizes" && req.method === "POST") return await handleRingSizes(req);
     if (url.pathname === "/api/export3mf" && req.method === "POST") {
       return await handleExport3mf(req);
     }

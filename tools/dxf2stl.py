@@ -2771,14 +2771,20 @@ def main():
         return
 
     if args.ring:
-        from ring import ring_extrude, export_ring
+        from ring import ring_extrude, export_ring, export_ring_sizes
         if args.slice_height is not None or args.variations or args.slicer_options or (args.output and args.output.lower().endswith(".3mf")):
             raise ConvertError("Ring mode exports STL; switch to flat mode for SVG slices or 3MF variations")
         try:
             ring_settings = ring if ring is not None else json.load(open(args.ring))
             buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=ring_extrude)
-            result = export_ring(args.output, buckets, ring_settings, args.sagitta,
-                                 split=bool(args.split or args.groups), tiling=tiling)
+            # A list of sizes sweeps the relief once, then revolves and wraps a
+            # separate printable ring for each inner diameter.
+            if ring_settings.get("sizes"):
+                result = export_ring_sizes(args.output, buckets, ring_settings,
+                                           args.sagitta, ring_settings["sizes"], tiling=tiling)
+            else:
+                result = export_ring(args.output, buckets, ring_settings, args.sagitta,
+                                     split=bool(args.split or args.groups), tiling=tiling)
         except (OSError, ValueError) as error:
             raise ConvertError(str(error)) from error
         json.dump({**layers[0]["summary"], **result, "walls": n_walls,

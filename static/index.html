@@ -830,7 +830,7 @@
       <p id="ringSummary" class="muted" aria-live="polite">Generate 3D to calculate ring dimensions.</p>
       <div id="ringSuggestions" role="group" aria-label="Suggested ring repeat counts"></div>
       <label class="check" title="Copy the finished relief instead: each copy keeps its own outer walls and grooves, side by side with its neighbours'"><input id="ringSweepThenRepeat" type="checkbox"> First sweep then repeat</label>
-      <p class="muted">Suggestions are ranked by how closely the artwork's proportions match the ring surface. Generate 3D first to see them. The artwork repeats around the ring (circumference direction only). The sketch repeats before the profile is swept, so neighbouring copies share the paths at its ends: one continuous wall, with its groove running through. <b>First sweep then repeat</b> places finished copies side by side instead. Each copy shares its painting. Relief depths stay in mm.</p>
+      <p class="muted">Suggestions are ranked by how closely the artwork's proportions match the ring surface. Generate 3D first to see them. The artwork repeats around the ring (circumference direction only). The sketch repeats before the profile is swept, so neighbouring copies share the paths at its ends: one continuous wall, with its groove running through. <b>First sweep then repeat</b> places finished copies side by side instead. Each copy shares its painting. Relief depths stay in mm. The offset above sets the preview size; <b>Download</b> generates a separate, correctly-sized ring for every standard US size (3–13.5).</p>
     </div>
     <div class="row">
       <div><label for="wallWidth">wall width (mm)</label>
@@ -1717,6 +1717,8 @@ function ringRepeatX(info = ringContext?.info) {
 function ringUI() {
   const enabled = ringEnabled();
   $('ringOptions').hidden = !enabled;
+  // Downloading a ring produces one STL per standard size, not a single file.
+  $('download').textContent = enabled ? 'Download every ring size' : 'Download STL';
   $('ringProfileClear').hidden = !ringProfilePicked;
   $('ringProfileName').textContent = ringProfilePicked ? ringProfilePicked.name : 'default ring profile';
   $('ringProfilePreview').source = filePreview(ringProfilePicked);
@@ -6398,9 +6400,37 @@ async function exportSliceEntries(entries) {
     + (saved > 1 ? '\nYour browser may ask to allow multiple downloads.' : ''));
 }
 
+// A ring prints at a size for everybody: one Download sweeps the relief once
+// and wraps a separate, correctly-sized ring for every standard US size.
+async function downloadRingSizes() {
+  const button = $('download');
+  setStatus('sweeping the relief and sizing every ring — this can take a minute…');
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/ring-sizes', { method: 'POST', body: buildForm() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error([err.error ?? res.statusText, err.log].filter(Boolean).join('\n'));
+    }
+    const data = await res.json();
+    const name = baseName();
+    for (const f of data.files) saveBlob(fromBase64(f.stl), 'application/sla', `${name}-${f.file}`);
+    const lo = data.files[0]?.diameter, hi = data.files.at(-1)?.diameter;
+    const skipped = data.skipped ?? [];
+    setStatus(`saved ${data.files.length} ring sizes (inner Ø ${lo}–${hi} mm)`
+      + (skipped.length ? `\n${skipped.length} size(s) could not be built and were skipped: ${skipped.join(', ')}` : '')
+      + (data.files.length > 1 ? '\nyour browser may ask to allow multiple downloads' : ''));
+    stats.textContent = `${data.files.length} ring sizes saved`
+      + (skipped.length ? ` · ${skipped.length} skipped` : '') + ` · inner Ø ${lo}–${hi} mm`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 $('download').onclick = async () => {
   if (!baseModel()) return;
   try {
+    if (ringEnabled()) { await downloadRingSizes(); return; }
     const { buf, info } = await requestBuild('/api/convert', buildForm(), $('download'));
     saveBlob(buf, 'application/sla', baseName() + '.stl');
     setStatus('saved');
