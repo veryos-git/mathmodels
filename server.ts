@@ -3,6 +3,7 @@ import { importProjectResources } from "./storage/import_projects.ts";
 import { ResourceStore, atomicWrite } from "./storage/resources.ts";
 import { PYTHON } from "./tools/python.ts";
 import { cylinderFlags, cylinderMeshes, cylinderSettings, readThreadedDefaults } from "./tools/cylinder.ts";
+import { lighterMeshes, lighterSettings } from "./tools/lighter.ts";
 import { findOpenScad } from "./tools/openscad.ts";
 /// Deno web server: upload a DXF or SVG, get back a relief STL.
 /// The heavy lifting is done by tools/dxf2stl.py (ezdxf + svgelements +
@@ -383,6 +384,27 @@ function handleRingShell(req: Request): Promise<Response> {
   });
 }
 
+/** POST /api/lighter — render the BIC J26 case shell and return its STL plus
+ * the elliptical-body geometry the preview wraps the relief onto. */
+function handleLighterShell(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    let settings;
+    try { settings = lighterSettings(await req.json()); }
+    catch (error) { throw new HttpError(422, error instanceof Error ? error.message : String(error)); }
+    try {
+      const meshes = await lighterMeshes(settings, dir);
+      const shellPath = `${dir}/lighter_shell.stl`;
+      await Deno.writeFile(shellPath, meshes.body);
+      const config = `${dir}/lighter_config.json`;
+      await Deno.writeTextFile(config, JSON.stringify(settings));
+      const info = await runScript([config], "tools/lighter.py");
+      return Response.json({ settings, shell: meshes.body.toBase64(), info });
+    } catch (error) {
+      throw new HttpError(422, error instanceof Error ? error.message : String(error));
+    }
+  });
+}
+
 /** Shells are cached separately from the artwork, which stays editable locally. */
 function handleCylinder(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
@@ -433,6 +455,16 @@ function sketchRepeatFlags(form: FormData): string[] {
     const repeatX = Math.trunc(Number(form.get("ringRepeatX") ?? 1));
     if (Number.isFinite(repeatX) && repeatX > 1 && repeatX <= 12) {
       return ["--sketch-repeat", String(repeatX), "1"];
+    }
+  }
+  if (form.has("lighter")) {
+    try {
+      const c = lighterSettings(JSON.parse(String(form.get("lighter"))));
+      if (!c.sweepThenRepeat && c.repeatX > 1) {
+        return ["--sketch-repeat", String(c.repeatX), "1"];
+      }
+    } catch (error) {
+      throw new HttpError(422, error instanceof Error ? error.message : String(error));
     }
   }
   return [];
@@ -499,6 +531,29 @@ async function ringFlags(
   return ["--ring", config];
 }
 
+/** Produce --lighter flags when the form includes lighter mode: render the
+ * BIC J26 shell from bicj26.scad and write the settings the wrap reads. */
+async function lighterFlags(form: FormData, dir: string): Promise<string[]> {
+  const raw = form.get("lighter");
+  if (raw === null) return [];
+  if (form.has("cylinder") || form.has("ring")) {
+    throw new HttpError(400, "Lighter mode cannot be combined with cylinder or ring mode");
+  }
+  let settings;
+  try { settings = lighterSettings(JSON.parse(String(raw))); }
+  catch (error) { throw new HttpError(422, error instanceof Error ? error.message : String(error)); }
+  try {
+    const meshes = await lighterMeshes(settings, dir);
+    const bodyPath = `${dir}/lighter_shell.stl`;
+    await Deno.writeFile(bodyPath, meshes.body);
+    const config = `${dir}/lighter.json`;
+    await Deno.writeTextFile(config, JSON.stringify({ ...settings, bodyPath }));
+    return ["--lighter", config];
+  } catch (error) {
+    throw new HttpError(422, error instanceof Error ? error.message : String(error));
+  }
+}
+
 /**
  * Write a per-region JSON map from the form into the scratch dir, and return
  * the flag pair the converter needs for it.
@@ -563,7 +618,7 @@ async function layerSpecs(
 function handleConvert(req: Request, slice = false): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, file, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath, ringProfilePath } = await takeUpload(req, dir);
-    if (slice && (form.has("cylinder") || form.has("ring"))) throw new HttpError(400, "Slice SVG export is available in flat mode. Use STL for a cylinder or ring.");
+    if (slice && (form.has("cylinder") || form.has("ring") || form.has("lighter"))) throw new HttpError(400, "Slice SVG export is available in flat mode. Use STL for a cylinder, ring or lighter.");
     const height = form.get("sliceHeight");
     if (slice && (typeof height !== "string" || height.trim() === "" ||
       !Number.isFinite(Number(height)) || Number(height) < 0)) {
@@ -589,6 +644,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
       ...(slice ? ["--slice-height", String(height)] : []),
       ...await takeCylinder(form, dir, profilePath),
       ...await ringFlags(form, dir, ringProfilePath),
+      ...await lighterFlags(form, dir),
     ];
 
     const stats = await runScript(args);
@@ -639,6 +695,7 @@ function handleExport(req: Request): Promise<Response> {
       ...await layerSpecs(form, dir, paths),
       ...await takeCylinder(form, dir, profilePath),
       ...await ringFlags(form, dir, ringProfilePath),
+      ...await lighterFlags(form, dir),
     ]);
 
     const listed = (stats.files ?? []) as Array<Record<string, unknown>>;
@@ -1362,7 +1419,7 @@ async function deleteLibrary(name: string): Promise<Response> {
 function handleExport3mf(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths, profilePath, grooveProfilePath, boundaryPath, cuspPath, cuspProfilePath } = await takeUpload(req, dir);
-    if (form.has("cylinder") || form.has("ring")) throw new HttpError(400, "Colour-variation 3MF export is available in flat mode. Use cylinder or ring STL exports.");
+    if (form.has("cylinder") || form.has("ring") || form.has("lighter")) throw new HttpError(400, "Colour-variation 3MF export is available in flat mode. Use cylinder, ring or lighter STL exports.");
     const output = `${dir}/variations`;
     // Legacy callers may specify one pattern; the dialog sends slicerOptions.
     const patterns = form.get("patterns");
@@ -1463,6 +1520,7 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/cylinder" && req.method === "POST") return await handleCylinder(req);
     if (url.pathname === "/api/cylinder/lid-art" && req.method === "POST") return await handleLidArt(req);
     if (url.pathname === "/api/ring" && req.method === "POST") return await handleRingShell(req);
+    if (url.pathname === "/api/lighter" && req.method === "POST") return await handleLighterShell(req);
     if (url.pathname === "/api/convert" && req.method === "POST") return await handleConvert(req);
     if (url.pathname === "/api/slice" && req.method === "POST") return await handleConvert(req, true);
     if (url.pathname === "/api/export" && req.method === "POST") return await handleExport(req);

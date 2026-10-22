@@ -788,7 +788,7 @@
   <fieldset id="sizeBox">
     <legend>size &amp; walls</legend>
     <label for="surfaceMode">model surface</label>
-    <select id="surfaceMode"><option value="flat">Flat relief</option><option value="cylinder">Cylinder shell</option><option value="ring">Ring (revolved profile)</option></select>
+    <select id="surfaceMode"><option value="flat">Flat relief</option><option value="cylinder">Cylinder shell</option><option value="ring">Ring (revolved profile)</option><option value="lighter">Lighter case (BIC J26)</option></select>
     <div id="cylinderOptions" hidden>
       <div class="row"><label>Desired diameter (mm)<input id="cylinderDiameter" type="number" value="60" min="10" max="500" step="1"></label><label>Desired container height (mm)<input id="cylinderHeight" type="number" value="60" min="5" max="500" step="1"></label></div>
       <label for="cylinderSizing">Artwork sizing</label>
@@ -831,6 +831,21 @@
       <div id="ringSuggestions" role="group" aria-label="Suggested ring repeat counts"></div>
       <label class="check" title="Copy the finished relief instead: each copy keeps its own outer walls and grooves, side by side with its neighbours'"><input id="ringSweepThenRepeat" type="checkbox"> First sweep then repeat</label>
       <p class="muted">Suggestions are ranked by how closely the artwork's proportions match the ring surface. Generate 3D first to see them. The artwork repeats around the ring (circumference direction only). The sketch repeats before the profile is swept, so neighbouring copies share the paths at its ends: one continuous wall, with its groove running through. <b>First sweep then repeat</b> places finished copies side by side instead. Each copy shares its painting. Relief depths stay in mm. The offset above sets the preview size; <b>Download</b> generates a separate, correctly-sized ring for every standard US size (3–13.5).</p>
+    </div>
+    <div id="lighterOptions" hidden>
+      <div class="row"><label title="Shell wall thickness of the lighter case">Wall thickness (mm)<input id="lighterWall" type="number" value="1.0" min="0.4" max="20" step="0.1"></label><label title="Overall height of the lighter case">Case height (mm)<input id="lighterHeight" type="number" value="70.9" min="10" max="200" step="0.5"></label></div>
+      <label>Pattern start</label>
+      <div id="lighterStartButtons" role="group" aria-label="Pattern start vertex" class="seed-row">
+        <button type="button" class="ghost" data-vertex="3" title="Top narrow edge (+b)">V3 ▲ top</button>
+        <button type="button" class="ghost" data-vertex="1" title="Right wide face (+a)">V1 ▶ right</button>
+        <button type="button" class="ghost" data-vertex="4" title="Bottom narrow edge (−b)">V4 ▼ bottom</button>
+        <button type="button" class="ghost" data-vertex="2" title="Left wide face (−a)">V2 ◀ left</button>
+      </div>
+      <label title="Rotate the seam further around the perimeter; 90° steps exactly one vertex to the next">Start offset (°)<input id="lighterStartOffset" type="number" value="0" step="5" min="-360" max="360"></label>
+      <p id="lighterSummary" class="muted" aria-live="polite">Generate 3D to calculate lighter dimensions.</p>
+      <div id="lighterSuggestions" role="group" aria-label="Suggested lighter repeat counts"></div>
+      <label class="check" title="Copy the finished relief instead: each copy keeps its own outer walls and grooves, side by side with its neighbours'"><input id="lighterSweepThenRepeat" type="checkbox"> First sweep then repeat</label>
+      <p class="muted">A BIC Maxi (J26) lighter drops into the fixed elliptical cavity (25 × 14.5 mm plus fit). The artwork wraps once around the case's elliptical body, between the top and bottom chamfers, and can repeat around it. Suggestions are ranked by how closely the artwork's proportions match that surface. The sketch repeats before the profile is swept, so neighbouring copies share the paths at their ends. <b>First sweep then repeat</b> places finished copies side by side instead. Relief depths stay in mm.</p>
     </div>
     <div class="row">
       <div><label for="wallWidth">wall width (mm)</label>
@@ -1187,6 +1202,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { cylinderDimensions, cylinderFit, cylinderSuggestions, wrapCylinderTriangles } from './cylinder.js';
 import { wrapRingTriangles, ringFit, ringSuggestions, RING_MAX_REPEAT } from './ring.js';
+import { wrapLighterTriangles, lighterFit, lighterSuggestions, lighterStart, LIGHTER_MAX_REPEAT } from './lighter.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1639,7 +1655,8 @@ function cylinderUI() {
   for(const key of ['bottom','lidTop','neck','pitch','clearance'])cylinderControl(key).closest('label').hidden=screw;
   $('cylinderThreadDefaults').hidden=!screw;
   if(screw)$('cylinderThreadDefaults').textContent=`Lid ${c.threadedDesign.lidHeight} mm high · neck ${c.neck.toFixed(2)} mm · thread pitch ${c.pitch} mm. Thread fit and chamfers use the container design defaults. Bottom and lid top match the shell thickness.`;
-  const wrapped = enabled || (typeof ringEnabled === 'function' && ringEnabled());
+  const wrapped = enabled || (typeof ringEnabled === 'function' && ringEnabled())
+    || (typeof lighterEnabled === 'function' && lighterEnabled());
   for (const id of ['exportBambu','export3mf']) $(id).hidden = wrapped || !baseModel();
   $('flatExportNote').hidden = $('flatSlices').hidden = wrapped;
   $('cylinderExportNote').hidden = !wrapped;
@@ -1776,6 +1793,167 @@ $('ringSweepThenRepeat').onchange = () => {
   if (ringEnabled() && !$('go').disabled)
     refit(ringSweepThenRepeat() ? 'Finished copies placed side by side' : 'Sketch repeated around the ring');
 };
+
+/* --------------------------------------------------- lighter mode */
+const lighterEnabled = () => $('surfaceMode').value === 'lighter';
+const lighterSweepThenRepeat = () => $('lighterSweepThenRepeat').checked;
+let lighterRepeatChoice = null;   // chosen repeatX or null (auto-pick best)
+let lighterFlatBounds = null;     // flat artwork bounds set after Generate 3D
+let lighterTiling = null;         // sketch repeats: the server's swept-column layout
+let lighterRetiling = false;      // guards the one reconciling rebuild (see generate)
+let lighterContext = null;        // { tileBounds, info, tiling, repeatX } when active
+let lighterShellObj = null;       // THREE.Group holding the lighter shell mesh
+let lighterStartVertex = 1;       // which ellipse vertex the pattern seam sits on
+
+function readLighterSettings() {
+  return {
+    wall: Number($('lighterWall').value),
+    height: Number($('lighterHeight').value),
+    repeatX: lighterRepeatX(),
+    sweepThenRepeat: lighterSweepThenRepeat(),
+    startVertex: lighterStartVertex,
+    startOffset: Number($('lighterStartOffset').value) || 0,
+  };
+}
+
+function updateLighterStartButtons() {
+  for (const b of $('lighterStartButtons').querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.vertex) === lighterStartVertex));
+  }
+}
+for (const b of document.querySelectorAll('#lighterStartButtons button')) {
+  b.onclick = () => {
+    lighterStartVertex = Number(b.dataset.vertex);
+    updateLighterStartButtons();
+    if (!$('go').disabled) refit('Pattern start moved');
+  };
+}
+$('lighterStartOffset').oninput = () => {
+  if (lighterEnabled() && !$('go').disabled) refit('Pattern start offset updated');
+};
+
+function lighterRepeatX(info = lighterContext?.info) {
+  if (lighterRepeatChoice) return lighterRepeatChoice;
+  if (!info || !lighterFlatBounds) return 1;
+  const fits = lighterSuggestions(lighterFlatBounds, info);
+  return fits[0]?.repeatX ?? 1;
+}
+
+function updateLighterFits() {
+  const list = $('lighterSuggestions'), summary = $('lighterSummary');
+  list.replaceChildren();
+  const info = lighterContext?.info;
+  if (!info) { summary.textContent = 'Generate 3D to calculate lighter dimensions.'; return; }
+  const base = `Body ${(info.a*2).toFixed(2)} × ${(info.b*2).toFixed(2)} mm · perimeter ${info.perimeter.toFixed(2)} mm · height ${info.body_height.toFixed(2)} mm`;
+  if (!lighterFlatBounds) { summary.textContent = base; return; }
+  const fits = lighterSuggestions(lighterFlatBounds, info);
+  const chosen = lighterRepeatChoice ? lighterFit(lighterFlatBounds, info, lighterRepeatChoice) : null;
+  const active = chosen ?? fits[0] ?? null;
+  if (!active) { summary.textContent = base; return; }
+  summary.textContent = `${base} · ${active.repeatX}× around · ${(active.scale*100).toFixed(1)}% scale`;
+  for (const [i, fit] of fits.entries()) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'ghost';
+    button.setAttribute('aria-pressed', String(fit.repeatX === active.repeatX));
+    button.textContent = `${i === 0 ? 'Best fit · ' : ''}${fit.repeatX}× around`;
+    const detail = document.createElement('small');
+    detail.textContent = `${(fit.scale*100).toFixed(1)}% scale · ${fit.widthOnLighter.toFixed(2)} mm per copy · error ${(fit.error*100).toFixed(1)}%`;
+    button.append(detail);
+    button.onclick = () => {
+      lighterRepeatChoice = fit.repeatX; updateLighterFits();
+      if (!$('go').disabled) refit('Lighter repeat updated — your painting is kept');
+    };
+    list.append(button);
+  }
+}
+
+function lighterUI() {
+  $('lighterOptions').hidden = !lighterEnabled();
+  updateLighterStartButtons();
+  updateLighterFits();
+  // Export notes shared with cylinder are managed by cylinderUI().
+  cylinderUI();
+}
+
+function restoreLighter(saved) {
+  lighterRepeatChoice = saved?.repeatX ?? null;
+  lighterFlatBounds = null;
+  lighterTiling = null;
+  lighterStartVertex = saved?.startVertex ?? 1;
+  $('lighterStartOffset').value = saved?.startOffset ?? 0;
+  $('lighterSweepThenRepeat').checked = saved?.sweepThenRepeat ?? false;
+  if (saved) {
+    $('lighterWall').value = saved.wall ?? 1.0;
+    $('lighterHeight').value = saved.height ?? 70.9;
+    $('surfaceMode').value = 'lighter';
+  }
+  lighterUI();
+}
+
+$('lighterWall').oninput = $('lighterHeight').oninput = () => {
+  if (lighterEnabled() && !$('go').disabled) refit('Lighter size updated');
+};
+$('lighterSweepThenRepeat').onchange = () => {
+  if (lighterEnabled() && !$('go').disabled)
+    refit(lighterSweepThenRepeat() ? 'Finished copies placed side by side' : 'Sketch repeated around the lighter');
+};
+
+function clearLighterPreview() {
+  lighterContext = null;
+  if (lighterShellObj) {
+    lighterShellObj.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    group.remove(lighterShellObj); lighterShellObj = null;
+  }
+}
+function wrapLighterPreviewMesh(mesh, layer) {
+  if (!lighterContext || mesh.userData.cylinderWrapped) return;
+  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const attribute = source.getAttribute('position');
+  if (!attribute?.count) { if (source !== mesh.geometry) source.dispose(); return; }
+  const n = attribute.count;
+  const positions = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    positions[3*i]   = attribute.getX(i);
+    positions[3*i+1] = attribute.getY(i);
+    positions[3*i+2] = attribute.getZ(i) * mesh.scale.z + mesh.position.z + layer.zBase;
+  }
+  if (source !== mesh.geometry) source.dispose();
+  const wrapped = wrapLighterTriangles(positions, lighterContext.tileBounds, lighterContext.info,
+    { tiling: lighterContext.tiling, repeatX: lighterContext.repeatX });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(wrapped, 3));
+  geometry.computeVertexNormals();
+  mesh.geometry = geometry; mesh.scale.z = 1; mesh.position.z = 0;
+  mesh.userData.cylinderWrapped = true;
+}
+function buildLighterPreview(shellB64, info) {
+  const box = new THREE.Box3().setFromObject(group);
+  const tileBounds = [box.min.x, box.min.y, box.max.x, box.max.y];
+  lighterFlatBounds = tileBounds;
+  // Place the seam from the live start controls, so the preview matches the
+  // export even before the next shell fetch returns an updated info.start.
+  info = { ...info, start: lighterStart(readLighterSettings()) };
+  const sweepThenRepeat = lighterSweepThenRepeat();
+  const tiling = sweepThenRepeat ? null : lighterTiling;
+  const repeatX = sweepThenRepeat ? lighterRepeatX(info) : (tiling?.repeatX ?? 1);
+  lighterContext = { tileBounds, info, tiling, repeatX };
+  for (const layer of layers) {
+    layer.group.position.z = 0;
+    for (const mesh of [...layer.wallMeshes, ...layer.regionMeshes.flat()]) {
+      wrapLighterPreviewMesh(mesh, layer);
+    }
+    if (layer.holeMarkers) layer.holeMarkers.visible = false;
+  }
+  lighterShellObj = new THREE.Group();
+  const geometry = new STLLoader().parse(fromBase64(shellB64).buffer);
+  const shellMesh = new THREE.Mesh(geometry,
+    new THREE.MeshStandardMaterial({ color: 0x687582, roughness: 0.8, wireframe }));
+  shellMesh.userData.cylinderShell = true;
+  lighterShellObj.add(shellMesh);
+  group.add(lighterShellObj);
+  lighterUI();
+  frameModel();
+}
+
 function clearCylinderPreview() {
   cylinderContext = null;
   lidArtInfo=null;
@@ -1991,6 +2169,7 @@ function disposeLayer(l) {
 function disposeModels() {
   clearCylinderPreview();
   clearRingPreview();
+  clearLighterPreview();
   clearDomeMarkers();
   for (const l of layers) disposeLayer(l);
   slicePreview.syncModel();
@@ -2009,10 +2188,13 @@ function dropLayer(li) {
 function resetLayers() {
   clearCylinderPreview();
   clearRingPreview();
+  clearLighterPreview();
   cylinderFlatBounds=null;
   cylinderTiling=null;
   ringTiling=null;
   ringFlatBounds=null;
+  lighterTiling=null;
+  lighterFlatBounds=null;
   cylinderAppliedFit=null;
   updateCylinderFits();
   while (layers.length) dropLayer(0);
@@ -2612,7 +2794,7 @@ function drawFaceCard(sel, event) {
 }
 
 function updateReadout() {
-  if (!cylinderEnabled() && !ringEnabled()) slicePreview.syncModel();
+  if (!cylinderEnabled() && !ringEnabled() && !lighterEnabled()) slicePreview.syncModel();
   if (!baseModel()) return;
   const totals = layers.flatMap((l) => l.stacks.map(totalHeight));
   // A drawing can hold no closed faces at all, and so nothing to measure.
@@ -5067,7 +5249,7 @@ function shapeForm({ placement = false } = {}) {
   } else if ($('additionEnabled').checked) {
     if (!additionOutlinePicked) throw new Error('Choose a closed shelf outline in Additions.');
     if (!profilePicked) throw new Error('Choose a main sweep profile in Inputs before adding a shelf.');
-    if (cylinderEnabled() || ringEnabled()) throw new Error('Perpendicular additions require a flat model surface.');
+    if (cylinderEnabled() || ringEnabled() || lighterEnabled()) throw new Error('Perpendicular additions require a flat model surface.');
     for (const id of Object.keys(ADDITION_DEFAULTS)) {
       if (!$(id).checkValidity() || !Number.isFinite(Number($(id).value))) {
         throw new Error(`Check the shelf setting: ${$(id).labels?.[0]?.textContent ?? id}`);
@@ -5091,6 +5273,7 @@ function shapeForm({ placement = false } = {}) {
     if (ringSweepThenRepeat()) form.append('ringSweepThenRepeat', '1');
     if (ringProfilePicked) form.append('ringProfile', ringProfilePicked);
   }
+  if (lighterEnabled()) form.append('lighter', JSON.stringify(readLighterSettings()));
   // The drawings go in stacking order, base first; everything else about the
   // shape is shared, so it is sent once.
   for (const l of layers) form.append('file', l.file);
@@ -5203,8 +5386,9 @@ async function generate(keep = null, { lenient = false, resweep = false } = {}) 
     const box=new THREE.Box3().setFromObject(group);
     cylinderFlatBounds=[box.min.x,box.min.y,box.max.x,box.max.y];
     cylinderTiling=data.cylinderRepeat??null;
-    // The ring reuses the same sketch-repeat layout (circumference only).
+    // The ring and lighter reuse the same sketch-repeat layout (around only).
     ringTiling=data.cylinderRepeat??null;
+    lighterTiling=data.cylinderRepeat??null;
     updateCylinderFits();
     if (cylinderEnabled()) {
       if(!cylinderAppliedFit)throw new Error($('cylinderFitSummary').textContent);
@@ -5256,8 +5440,26 @@ async function generate(keep = null, { lenient = false, resweep = false } = {}) 
         finally { ringRetiling = false; }
       }
     }
+    if (lighterEnabled()) {
+      setStatus('building lighter shell…');
+      const lighterRes = await fetch('/api/lighter', { method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(readLighterSettings()) });
+      const lighterData = await lighterRes.json();
+      if (!lighterRes.ok) throw new Error(lighterData.error ?? lighterRes.statusText);
+      buildLighterPreview(lighterData.shell, lighterData.info);
+      // Like the ring: the sketch-repeat frame was swept before the artwork
+      // bounds were known. If the fit now wants a different count, rebuild once.
+      if (!lighterSweepThenRepeat() && !lighterRetiling && lighterRepeatX() > 1
+          && lighterRepeatX() !== (lighterTiling?.repeatX ?? 1)) {
+        lighterRetiling = true;
+        try { return await generate(keepStacks(), { lenient: true }); }
+        finally { lighterRetiling = false; }
+      }
+    }
     cylinderUI();
     ringUI();
+    lighterUI();
     buildPalette(lo, hi);
     select(null);
     modelThumb = captureModelThumbnail();   // the 3D object just generated
@@ -5348,8 +5550,9 @@ for (const control of [$('surfaceMode'), $('cylinderSizing'), ...Object.keys(cyl
     updateCylinderFits();
     cylinderUI();
     ringUI();
+    lighterUI();
     // Existing planes describe the flat model and cannot follow a wrap.
-    if (cylinderEnabled() || ringEnabled()) slicePreview.clear();
+    if (cylinderEnabled() || ringEnabled() || lighterEnabled()) slicePreview.clear();
     if(!$('go').disabled)refit('Surface updated — your painting is kept');
   });
 }
@@ -5556,6 +5759,7 @@ async function buildProject() {
     profileScaleLocks: profileScales.snapshotLocks(),
     cylinder: cylinderEnabled() ? {...readCylinderSettings(),fit:{diameter:Number($('cylinderDiameter').value),height:Number($('cylinderHeight').value),mode:$('cylinderSizing').value}} : null,
     ring: ringEnabled() ? {offset:Number($('ringOffset').value),repeatX:ringRepeatX(),sweepThenRepeat:ringSweepThenRepeat(),profile:ringProfilePicked?{name:ringProfilePicked.name,data:await fileBase64(ringProfilePicked),resource:ringProfilePicked.resource??null}:null} : null,
+    lighter: lighterEnabled() ? {wall:Number($('lighterWall').value),height:Number($('lighterHeight').value),repeatX:lighterRepeatX(),sweepThenRepeat:lighterSweepThenRepeat(),startVertex:lighterStartVertex,startOffset:Number($('lighterStartOffset').value)||0} : null,
     lidSketch: lidSketchPicked ? {name:lidSketchPicked.name,data:await fileBase64(lidSketchPicked),resource:lidSketchPicked.resource??null} : null,
     layers: selectedLayers(),
     palette: [...HUES],
@@ -5685,6 +5889,7 @@ async function applyProject(project) {
   setWorkflow(project.workflow ?? 'glass', false);
   restoreCylinder(project.cylinder);
   if (!project.cylinder) restoreRing(project.ring);
+  if (!project.cylinder && !project.ring) restoreLighter(project.lighter);
   filamentManager?.restore(project.filaments);
   shaderInspector.restore(project.shaderPreview);
   const embeddedFile = (value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
@@ -5771,7 +5976,7 @@ async function applyProject(project) {
   // false: keep the scale the project was saved with, whatever the y size box
   // happens to say — reopening work must not resize it.
   await pickFile(Object.assign(new File([bytes], project.drawing.name || 'drawing.dxf'), { resource: project.drawing.resource ?? null }), false);
-  slicePreview.restore((cylinderEnabled() || ringEnabled()) ? [] : project.slices);
+  slicePreview.restore((cylinderEnabled() || ringEnabled() || lighterEnabled()) ? [] : project.slices);
   if (profilePicked) profilePicked.resource = project.profile?.resource ?? null;
   if (boundaryPicked) boundaryPicked.resource = project.boundary?.resource ?? null;
   await restoreTrace(project);
@@ -7422,7 +7627,7 @@ function shelfPlacementState() {
   };
   const message = !picked ? 'Choose a main-frame drawing in Inputs.'
     : !profilePicked ? 'Choose a main sweep profile in Inputs.'
-    : cylinderEnabled() ? 'Shelf placement requires a flat model surface.' : '';
+    : (cylinderEnabled() || ringEnabled() || lighterEnabled()) ? 'Shelf placement requires a flat model surface.' : '';
   return { values, enabled:$('additionEnabled').checked, message,
     form:message ? null : shapeForm({placement:true}) };
 }
@@ -7549,6 +7754,7 @@ async function newWorkflow(mode) {
   restoreAdditions();
   restoreCylinder(null);
   restoreRing(null);
+  restoreLighter(null);
   resetLayers();picked=null;clearTrace();
   cuspPicked=cuspProfilePicked=null;
   clearTimeout(profileScaleTimer);profileScales.restore();

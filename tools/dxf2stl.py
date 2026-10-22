@@ -2318,6 +2318,9 @@ def main():
                     help="Cylinder settings and OpenSCAD shell paths as JSON")
     ap.add_argument("--ring", default=None, metavar="FILE",
                     help="Ring settings JSON: profilePath and offset (mm) for a revolved profile")
+    ap.add_argument("--lighter", default=None, metavar="FILE",
+                    help="Lighter settings JSON: bodyPath (OpenSCAD shell) plus the case "
+                         "dimensions for the BIC J26 elliptical body")
     ap.add_argument("--sketch-repeat", type=int, nargs=2, default=None, metavar=("X", "Y"),
                     help="sweep the frame along X × Y copies of the sketch, for a cylinder "
                          "(--cylinder settings imply this unless sweepThenRepeat is set)")
@@ -2469,15 +2472,15 @@ def main():
     if args.lid_sketch and (not args.cylinder or not args.profile):
         raise ConvertError("A lid-top sketch requires cylinder settings and a sweep profile")
 
-    if args.cylinder and args.ring:
-        raise ConvertError("Cylinder and ring modes cannot be combined")
+    if sum(bool(m) for m in (args.cylinder, args.ring, args.lighter)) > 1:
+        raise ConvertError("Cylinder, ring and lighter modes cannot be combined")
 
 
-    if (args.cylinder or args.sketch_repeat or args.ring) and (args.addition_outline or args.addition_preview):
+    if (args.cylinder or args.sketch_repeat or args.ring or args.lighter) and (args.addition_outline or args.addition_preview):
         raise ConvertError("Perpendicular additions require a flat model surface")
-    # By default a cylinder (and a ring) repeats the sketch before sweeping it;
-    # the older "first sweep then repeat" copies the finished relief instead.
-    cylinder, ring, sketch_repeat = None, None, None
+    # By default a cylinder (and a ring or lighter) repeats the sketch before
+    # sweeping it; "first sweep then repeat" copies the finished relief instead.
+    cylinder, ring, lighter, sketch_repeat = None, None, None, None
     try:
         if args.cylinder:
             with open(args.cylinder) as fp:
@@ -2493,6 +2496,13 @@ def main():
             if not ring.get("sweepThenRepeat") and int(ring.get("repeatX", 1)) > 1:
                 from cylinder import repeat_counts
                 sketch_repeat = repeat_counts({"repeatX": int(ring["repeatX"]), "repeatY": 1})
+        elif args.lighter:
+            with open(args.lighter) as fp:
+                lighter = json.load(fp)
+            # Same rule as the ring: one copy wraps alone, repeats sweep again.
+            if not lighter.get("sweepThenRepeat") and int(lighter.get("repeatX", 1)) > 1:
+                from cylinder import repeat_counts
+                sketch_repeat = repeat_counts({"repeatX": int(lighter["repeatX"]), "repeatY": 1})
         elif args.sketch_repeat:
             from cylinder import repeat_counts
             sketch_repeat = repeat_counts(dict(zip(("repeatX", "repeatY"), args.sketch_repeat)))
@@ -2785,6 +2795,21 @@ def main():
             else:
                 result = export_ring(args.output, buckets, ring_settings, args.sagitta,
                                      split=bool(args.split or args.groups), tiling=tiling)
+        except (OSError, ValueError) as error:
+            raise ConvertError(str(error)) from error
+        json.dump({**layers[0]["summary"], **result, "walls": n_walls,
+                   "regions": n_regions, "holes": n_holes}, sys.stdout)
+        return
+
+    if args.lighter:
+        from lighter import ellipse_extrude, export_lighter
+        if args.slice_height is not None or args.variations or args.slicer_options or (args.output and args.output.lower().endswith(".3mf")):
+            raise ConvertError("Lighter mode exports STL; switch to flat mode for SVG slices or 3MF variations")
+        try:
+            lighter_settings = lighter if lighter is not None else json.load(open(args.lighter))
+            buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=ellipse_extrude)
+            result = export_lighter(args.output, buckets, lighter_settings,
+                                    split=bool(args.split or args.groups), tiling=tiling)
         except (OSError, ValueError) as error:
             raise ConvertError(str(error)) from error
         json.dump({**layers[0]["summary"], **result, "walls": n_walls,

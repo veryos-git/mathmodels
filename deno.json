@@ -30,6 +30,7 @@
         "setup"
       ]
     },
-    "test:cylinder": "deno run --allow-read tools/test_cylinder.mjs"
+    "test:cylinder": "deno run --allow-read tools/test_cylinder.mjs",
+    "test:lighter": "deno run --allow-read --allow-run=.venv/bin/python tools/test_lighter.mjs"
   }
 }
