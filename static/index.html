@@ -829,7 +829,8 @@
       <asset-preview id="ringProfilePreview" hidden></asset-preview>
       <p id="ringSummary" class="muted" aria-live="polite">Generate 3D to calculate ring dimensions.</p>
       <div id="ringSuggestions" role="group" aria-label="Suggested ring repeat counts"></div>
-      <p class="muted">Suggestions are ranked by how closely the artwork's proportions match the ring surface. Generate 3D first to see them. The artwork repeats around the ring (circumference direction only). Relief depths stay in mm.</p>
+      <label class="check" title="Copy the finished relief instead: each copy keeps its own outer walls and grooves, side by side with its neighbours'"><input id="ringSweepThenRepeat" type="checkbox"> First sweep then repeat</label>
+      <p class="muted">Suggestions are ranked by how closely the artwork's proportions match the ring surface. Generate 3D first to see them. The artwork repeats around the ring (circumference direction only). The sketch repeats before the profile is swept, so neighbouring copies share the paths at its ends: one continuous wall, with its groove running through. <b>First sweep then repeat</b> places finished copies side by side instead. Each copy shares its painting. Relief depths stay in mm.</p>
     </div>
     <div class="row">
       <div><label for="wallWidth">wall width (mm)</label>
@@ -1669,10 +1670,15 @@ $('lidSketchClear').onclick=()=>applyLidSketchFile(null).catch(error=>setStatus(
 
 /* --------------------------------------------------- ring mode */
 const ringEnabled = () => $('surfaceMode').value === 'ring';
+// First sweep then repeat copies the finished relief; the default sketch
+// repeat joins the paths before the sweep, like the cylinder.
+const ringSweepThenRepeat = () => $('ringSweepThenRepeat').checked;
 let ringProfilePicked = null;  // null = use default
 let ringProfileRevision = 0;
 let ringRepeatChoice = null;   // chosen [repeatX] or null (auto-pick best)
 let ringFlatBounds = null;     // flat artwork bounds set after Generate 3D
+let ringTiling = null;         // sketch repeats: the server's swept-column layout
+let ringRetiling = false;      // guards the one reconciling rebuild (see generate)
 
 function updateRingFits() {
   const list = $('ringSuggestions'), summary = $('ringSummary');
@@ -1701,10 +1707,9 @@ function updateRingFits() {
   }
 }
 
-function ringRepeatX() {
-  const info = ringContext?.info;
-  if (!info || !ringFlatBounds) return 1;
+function ringRepeatX(info = ringContext?.info) {
   if (ringRepeatChoice) return ringRepeatChoice;
+  if (!info || !ringFlatBounds) return 1;
   const fits = ringSuggestions(ringFlatBounds, info);
   return fits[0]?.repeatX ?? 1;
 }
@@ -1748,6 +1753,8 @@ function restoreRing(saved) {
   ringProfilePicked = null; ringProfileRevision++;
   ringRepeatChoice = saved?.repeatX ?? null;
   ringFlatBounds = null;
+  ringTiling = null;
+  $('ringSweepThenRepeat').checked = saved?.sweepThenRepeat ?? false;
   if (saved) {
     $('ringOffset').value = saved.offset ?? 9;
     $('surfaceMode').value = 'ring';
@@ -1762,6 +1769,11 @@ function restoreRing(saved) {
 }
 
 $('ringOffset').oninput = () => { if (ringEnabled() && !$('go').disabled) refit('Ring offset updated'); };
+$('ringSweepThenRepeat').onchange = () => {
+  // The two modes sweep differently on the server, so rebuild the frame.
+  if (ringEnabled() && !$('go').disabled)
+    refit(ringSweepThenRepeat() ? 'Finished copies placed side by side' : 'Sketch repeated around the ring');
+};
 function clearCylinderPreview() {
   cylinderContext = null;
   lidArtInfo=null;
@@ -1770,7 +1782,7 @@ function clearCylinderPreview() {
     group.remove(cylinderShell); cylinderShell = null;
   }
 }
-let ringContext = null;   // { bounds, info } — set when ring preview is active
+let ringContext = null;   // { tileBounds, info, tiling, repeatX } when active
 let ringShellObj = null;  // THREE.Group holding the ring shell mesh
 function clearRingPreview() {
   ringContext = null;
@@ -1779,26 +1791,22 @@ function clearRingPreview() {
     group.remove(ringShellObj); ringShellObj = null;
   }
 }
-function wrapRingPreviewMesh(mesh, layer, repeatX, tileBounds, totalBounds) {
+function wrapRingPreviewMesh(mesh, layer) {
   if (!ringContext || mesh.userData.cylinderWrapped) return;
   const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
   const attribute = source.getAttribute('position');
   if (!attribute?.count) { if (source !== mesh.geometry) source.dispose(); return; }
   const n = attribute.count;
-  const w = tileBounds[2] - tileBounds[0];
-  // Build tiled positions: one copy per repeat, offset in X.
-  const tiled = new Float64Array(n * repeatX * 3);
-  for (let rep = 0; rep < repeatX; rep++) {
-    const ox = rep * w;
-    for (let i = 0; i < n; i++) {
-      const base = (rep * n + i) * 3;
-      tiled[base]   = attribute.getX(i) + ox;
-      tiled[base+1] = attribute.getY(i);
-      tiled[base+2] = attribute.getZ(i) * mesh.scale.z + mesh.position.z + layer.zBase;
-    }
+  // One copy of the artwork; wrapRingTriangles lays out the copies itself.
+  const positions = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    positions[3*i]   = attribute.getX(i);
+    positions[3*i+1] = attribute.getY(i);
+    positions[3*i+2] = attribute.getZ(i) * mesh.scale.z + mesh.position.z + layer.zBase;
   }
   if (source !== mesh.geometry) source.dispose();
-  const wrapped = wrapRingTriangles(tiled, totalBounds, ringContext.info);
+  const wrapped = wrapRingTriangles(positions, ringContext.tileBounds, ringContext.info,
+    { tiling: ringContext.tiling, repeatX: ringContext.repeatX });
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(wrapped, 3));
   geometry.computeVertexNormals();
@@ -1809,16 +1817,17 @@ function buildRingPreview(shellB64, ringInfo) {
   const box = new THREE.Box3().setFromObject(group);
   const tileBounds = [box.min.x, box.min.y, box.max.x, box.max.y];
   ringFlatBounds = tileBounds;
-  // Apply the current repeat count to compute total wrapping bounds.
-  const N = ringRepeatX();
-  const w = tileBounds[2] - tileBounds[0];
-  const totalBounds = [tileBounds[0], tileBounds[1], tileBounds[0] + N * w, tileBounds[3]];
-  ringContext = { bounds: totalBounds, tileBounds, info: ringInfo };
+  // Sketch repeats wrap the server's swept column (ringTiling); otherwise copy
+  // the finished relief. Pass the fresh ring info: ringContext is still null
+  // here (just cleared by disposeModels), so the auto-pick fit needs it.
+  const sweepThenRepeat = ringSweepThenRepeat();
+  const tiling = sweepThenRepeat ? null : ringTiling;
+  const repeatX = sweepThenRepeat ? ringRepeatX(ringInfo) : (tiling?.repeatX ?? 1);
+  ringContext = { tileBounds, info: ringInfo, tiling, repeatX };
   for (const layer of layers) {
     layer.group.position.z = 0;
-    // Tile each mesh N times in X before wrapping for the preview.
     for (const mesh of [...layer.wallMeshes, ...layer.regionMeshes.flat()]) {
-      wrapRingPreviewMesh(mesh, layer, N, tileBounds, totalBounds);
+      wrapRingPreviewMesh(mesh, layer);
     }
     if (layer.holeMarkers) layer.holeMarkers.visible = false;
   }
@@ -2000,6 +2009,8 @@ function resetLayers() {
   clearRingPreview();
   cylinderFlatBounds=null;
   cylinderTiling=null;
+  ringTiling=null;
+  ringFlatBounds=null;
   cylinderAppliedFit=null;
   updateCylinderFits();
   while (layers.length) dropLayer(0);
@@ -5075,6 +5086,7 @@ function shapeForm({ placement = false } = {}) {
     form.append('ring', '1');
     form.append('ringOffset', $('ringOffset').value);
     form.append('ringRepeatX', String(ringRepeatX()));
+    if (ringSweepThenRepeat()) form.append('ringSweepThenRepeat', '1');
     if (ringProfilePicked) form.append('ringProfile', ringProfilePicked);
   }
   // The drawings go in stacking order, base first; everything else about the
@@ -5189,6 +5201,8 @@ async function generate(keep = null, { lenient = false, resweep = false } = {}) 
     const box=new THREE.Box3().setFromObject(group);
     cylinderFlatBounds=[box.min.x,box.min.y,box.max.x,box.max.y];
     cylinderTiling=data.cylinderRepeat??null;
+    // The ring reuses the same sketch-repeat layout (circumference only).
+    ringTiling=data.cylinderRepeat??null;
     updateCylinderFits();
     if (cylinderEnabled()) {
       if(!cylinderAppliedFit)throw new Error($('cylinderFitSummary').textContent);
@@ -5230,6 +5244,15 @@ async function generate(keep = null, { lenient = false, resweep = false } = {}) 
       const ringData = await ringRes.json();
       if (!ringRes.ok) throw new Error(ringData.error ?? ringRes.statusText);
       buildRingPreview(ringData.shell, ringData.info);
+      // The sketch-repeat frame was swept for the repeat we sent before the
+      // artwork bounds were known. If the fit now wants a different count,
+      // rebuild once so the preview matches what export will produce.
+      if (!ringSweepThenRepeat() && !ringRetiling && ringRepeatX() > 1
+          && ringRepeatX() !== (ringTiling?.repeatX ?? 1)) {
+        ringRetiling = true;
+        try { return await generate(keepStacks(), { lenient: true }); }
+        finally { ringRetiling = false; }
+      }
     }
     cylinderUI();
     ringUI();
@@ -5530,7 +5553,7 @@ async function buildProject() {
     ),
     profileScaleLocks: profileScales.snapshotLocks(),
     cylinder: cylinderEnabled() ? {...readCylinderSettings(),fit:{diameter:Number($('cylinderDiameter').value),height:Number($('cylinderHeight').value),mode:$('cylinderSizing').value}} : null,
-    ring: ringEnabled() ? {offset:Number($('ringOffset').value),repeatX:ringRepeatX(),profile:ringProfilePicked?{name:ringProfilePicked.name,data:await fileBase64(ringProfilePicked),resource:ringProfilePicked.resource??null}:null} : null,
+    ring: ringEnabled() ? {offset:Number($('ringOffset').value),repeatX:ringRepeatX(),sweepThenRepeat:ringSweepThenRepeat(),profile:ringProfilePicked?{name:ringProfilePicked.name,data:await fileBase64(ringProfilePicked),resource:ringProfilePicked.resource??null}:null} : null,
     lidSketch: lidSketchPicked ? {name:lidSketchPicked.name,data:await fileBase64(lidSketchPicked),resource:lidSketchPicked.resource??null} : null,
     layers: selectedLayers(),
     palette: [...HUES],

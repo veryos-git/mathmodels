@@ -417,15 +417,25 @@ function handleLidArt(req: Request): Promise<Response> {
   });
 }
 
-/** A cylinder sweeps its frame along the repeated sketch unless told otherwise. */
+/** A cylinder or ring sweeps its frame along the repeated sketch unless told
+ * otherwise. The ring repeats around only (Y is fixed by its profile), and a
+ * single copy wraps cleanly without re-sweeping. */
 function sketchRepeatFlags(form: FormData): string[] {
-  if (!form.has("cylinder")) return [];
-  try {
-    const c = cylinderSettings(JSON.parse(String(form.get("cylinder"))));
-    return c.sweepThenRepeat ? [] : ["--sketch-repeat", String(c.repeatX), String(c.repeatY)];
-  } catch (error) {
-    throw new HttpError(422, error instanceof Error ? error.message : String(error));
+  if (form.has("cylinder")) {
+    try {
+      const c = cylinderSettings(JSON.parse(String(form.get("cylinder"))));
+      return c.sweepThenRepeat ? [] : ["--sketch-repeat", String(c.repeatX), String(c.repeatY)];
+    } catch (error) {
+      throw new HttpError(422, error instanceof Error ? error.message : String(error));
+    }
   }
+  if (form.has("ring") && form.get("ringSweepThenRepeat") !== "1") {
+    const repeatX = Math.trunc(Number(form.get("ringRepeatX") ?? 1));
+    if (Number.isFinite(repeatX) && repeatX > 1 && repeatX <= 12) {
+      return ["--sketch-repeat", String(repeatX), "1"];
+    }
+  }
+  return [];
 }
 
 async function takeCylinder(form: FormData, dir: string, profilePath: string | null) {
@@ -463,8 +473,9 @@ async function ringFlags(
   if (!Number.isFinite(repeatX) || repeatX < 1 || repeatX > 12) {
     throw new HttpError(400, "Ring repeat count must be 1–12");
   }
+  const sweepThenRepeat = form.get("ringSweepThenRepeat") === "1";
   const config = `${dir}/ring.json`;
-  await Deno.writeTextFile(config, JSON.stringify({ profilePath, offset, repeatX }));
+  await Deno.writeTextFile(config, JSON.stringify({ profilePath, offset, repeatX, sweepThenRepeat }));
   return ["--ring", config];
 }
 

@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 import manifold3d as mf
 
-from cylinder import clip_x, cylinder_extrude, manifold, mesh_of, printable_mesh, union
+from cylinder import clip_x, cylinder_extrude, fold_strip, manifold, mesh_of, printable_mesh, union
 
 RING_SEGMENTS = 128
 EMBED = 0.05
@@ -108,13 +108,16 @@ def ring_shell_info(ring_settings, sagitta):
 # ---------------------------------------------------------------------------
 # Artwork wrapping
 
-def _wrap_half(half_solid, ring_info, x0, x1, y0_art, y1_art):
+def _wrap_half(half_solid, ring_info, x0, x1, y0_art, y1_art, seam=SEAM_OVERLAP):
     """Bend one half-turn of the flat relief onto the ring surface.
 
     The full artwork (x0..x1) maps to slightly more than one full revolution
     (2π + seam/r_outer), centred at angle=π (front of ring) so the seam sits
     at angle=0 (back).  Each vertex radius follows the ring's actual outer
     surface r(z) rather than a flat cylinder, ensuring contact everywhere.
+
+    `seam` is 0 for sketch repeats, where the periodic columns already meet in
+    one plane after exactly one turn and no extra overlap is wanted.
     """
     width = x1 - x0
     height_art = y1_art - y0_art
@@ -124,7 +127,7 @@ def _wrap_half(half_solid, ring_info, x0, x1, y0_art, y1_art):
     z_profile = np.array(ring_info["z_profile"])
     r_profile = np.array(ring_info["r_profile"])
 
-    full_angle = 2 * math.pi + SEAM_OVERLAP / r_outer
+    full_angle = 2 * math.pi + seam / r_outer
 
     data = half_solid.to_mesh64()
     triangles = data.vert_properties[:, :3][data.tri_verts]
@@ -170,11 +173,14 @@ def _wrap_half(half_solid, ring_info, x0, x1, y0_art, y1_art):
     return manifold(mesh)
 
 
-def wrap_solid(solid, ring_info, bounds):
+def wrap_solid(solid, ring_info, bounds, middle=None, seam=SEAM_OVERLAP):
     """Map one flat relief solid onto the outer surface of the ring.
 
     `bounds` is [x0, y0, x1, y1] — the TOTAL flat bounds covering all artwork
     repeats, so repeated tiles map to equal angular slices of the ring.
+
+    `middle` is where the solid is split into two half-turns (default halfway).
+    Sketch repeats split mid-column, away from the planes where columns meet.
     """
     x0, y0, x1, y1 = bounds
 
@@ -182,10 +188,10 @@ def wrap_solid(solid, ring_info, bounds):
         raise ValueError("The relief must have positive width and height")
 
     halves = []
-    for half in solid.split_by_plane((1, 0, 0), (x0 + x1) / 2):
+    for half in solid.split_by_plane((1, 0, 0), (x0 + x1) / 2 if middle is None else middle):
         if half.is_empty():
             continue
-        m = _wrap_half(half, ring_info, x0, x1, y0, y1)
+        m = _wrap_half(half, ring_info, x0, x1, y0, y1, seam)
         if m is not None:
             halves.append(m)
 
@@ -209,8 +215,14 @@ def _tile_solid(solid, bounds, repeatX):
 # ---------------------------------------------------------------------------
 # Export
 
-def export_ring(output, buckets, ring_settings, sagitta, split=False):
+def export_ring(output, buckets, ring_settings, sagitta, split=False, tiling=None):
     """Wrap the colour buckets onto the ring shell and write the STL file(s).
+
+    With sketch repeats (`tiling`, from dxf2stl.repeat_sketch) the buckets hold
+    one periodic column. Its copies around the ring meet at exactly coincident
+    faces, so the strip is joined flat and wraps exactly once, its ends meeting
+    in one plane — one continuous wall with its groove running through. Without
+    `tiling` the finished relief is simply copied side by side.
 
     Returns a stats dict (files list only populated when split=True).
     """
@@ -232,6 +244,21 @@ def export_ring(output, buckets, ring_settings, sagitta, split=False):
     hi = np.max([m.bounds[1] for m in flat], axis=0)
     tile_bounds = [lo[0], lo[1], hi[0], hi[1]]
 
+    if tiling is not None:
+        bounds = tiling["bounds"]
+        nx, step = tiling["repeatX"], tiling["period"][0]
+        # Split mid-column, away from the planes where columns meet.
+        middle = bounds[0] + (nx // 2 + 0.5) * step
+
+        def wrap_one(solid):
+            strip = union([solid.translate((ix * step, 0, 0)) for ix in range(nx)])
+            return union([wrap_solid(piece, ring_info, bounds, middle=middle, seam=0.0)
+                          for piece in fold_strip(strip, bounds[0], bounds[2])])
+    else:
+        def wrap_one(solid):
+            tiled, total_bounds = _tile_solid(solid, tile_bounds, repeatX)
+            return wrap_solid(tiled, ring_info, total_bounds)
+
     sources = [
         (label, manifold(mesh).decompose())
         for label, mesh, _ in buckets
@@ -241,8 +268,7 @@ def export_ring(output, buckets, ring_settings, sagitta, split=False):
     for label, solids in sources:
         wrapped = []
         for s in solids:
-            tiled, total_bounds = _tile_solid(s, tile_bounds, repeatX)
-            w = wrap_solid(tiled, ring_info, total_bounds)
+            w = wrap_one(s)
             if not w.is_empty():
                 wrapped.append(w)
         art.append((label, union(wrapped) if wrapped else mf.Manifold()))

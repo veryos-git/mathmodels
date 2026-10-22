@@ -2475,9 +2475,9 @@ def main():
 
     if (args.cylinder or args.sketch_repeat or args.ring) and (args.addition_outline or args.addition_preview):
         raise ConvertError("Perpendicular additions require a flat model surface")
-    # By default a cylinder repeats the sketch before sweeping it; the older
-    # "first sweep then repeat" copies the finished relief instead.
-    cylinder, sketch_repeat = None, None
+    # By default a cylinder (and a ring) repeats the sketch before sweeping it;
+    # the older "first sweep then repeat" copies the finished relief instead.
+    cylinder, ring, sketch_repeat = None, None, None
     try:
         if args.cylinder:
             with open(args.cylinder) as fp:
@@ -2485,6 +2485,14 @@ def main():
             if not cylinder.get("sweepThenRepeat"):
                 from cylinder import repeat_counts
                 sketch_repeat = repeat_counts(cylinder)
+        elif args.ring:
+            with open(args.ring) as fp:
+                ring = json.load(fp)
+            # A single copy wraps cleanly on its own; repeats join by sweeping
+            # the sketch once more, exactly as the cylinder does.
+            if not ring.get("sweepThenRepeat") and int(ring.get("repeatX", 1)) > 1:
+                from cylinder import repeat_counts
+                sketch_repeat = repeat_counts({"repeatX": int(ring["repeatX"]), "repeatY": 1})
         elif args.sketch_repeat:
             from cylinder import repeat_counts
             sketch_repeat = repeat_counts(dict(zip(("repeatX", "repeatY"), args.sketch_repeat)))
@@ -2767,11 +2775,10 @@ def main():
         if args.slice_height is not None or args.variations or args.slicer_options or (args.output and args.output.lower().endswith(".3mf")):
             raise ConvertError("Ring mode exports STL; switch to flat mode for SVG slices or 3MF variations")
         try:
-            with open(args.ring) as fp:
-                ring_settings = json.load(fp)
+            ring_settings = ring if ring is not None else json.load(open(args.ring))
             buckets, n_walls, n_regions = colour_buckets(layers, wall_stack, extrude=ring_extrude)
             result = export_ring(args.output, buckets, ring_settings, args.sagitta,
-                                 split=bool(args.split or args.groups))
+                                 split=bool(args.split or args.groups), tiling=tiling)
         except (OSError, ValueError) as error:
             raise ConvertError(str(error)) from error
         json.dump({**layers[0]["summary"], **result, "walls": n_walls,
