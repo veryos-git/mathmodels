@@ -45,6 +45,8 @@ class HookSections(unittest.TestCase):
         bottom, post, bar = (np.asarray(c) for c in chains)
         self.assertTrue(np.allclose(bottom[:, 1], 0))           # along the ground
         self.assertTrue(np.allclose(post[:, 0], 0))             # upright at the endpoint
+        # The post ends where the bar's centre line crosses it.
+        self.assertAlmostEqual(post[-1][1], 33 * np.tan(np.radians(26)))
         # The bar rises back over the frame (negative along) past the post.
         self.assertLess(tip[0], 0)
         self.assertAlmostEqual(np.degrees(np.arctan2(direction[1], -direction[0])), 26)
@@ -65,48 +67,79 @@ class HookSections(unittest.TestCase):
 class HookSolid(unittest.TestCase):
     """Each hook is one printable body standing on the base plane."""
 
-    def test_each_hook_type_matches_the_reference_size(self):
-        # Overall heights: the round hook's big circle tops out at 28 mm (the
-        # reference STEP reaches 32.2 only through its 180° tip revolve); the
-        # straight bracket is about 27 mm with the quarter-turn tip.
-        for spec, height in (({"type": "round"}, 28.0), ({"type": "straight"}, 27.1)):
-            with self.subTest(spec["type"]):
-                mesh = hook_solid(PROFILE, (0, 0), (1, 0), spec)
-                loaded = trimesh.load(io.BytesIO(mesh.export(file_type="stl")), file_type="stl")
-                self.assertTrue(loaded.is_volume)
-                self.assertEqual(len(loaded.split()), 1)
-                self.assertAlmostEqual(loaded.bounds[0, 2], 0, places=4)   # nothing below
-                self.assertAlmostEqual(loaded.bounds[1, 2], height, delta=0.3)
-                # It stands in the vertical plane through the travel direction:
-                # across the path it is exactly the profile's width.
-                self.assertAlmostEqual(loaded.extents[1], 10, places=3)
+    def test_round_hook_matches_the_reference_size(self):
+        # The big circle tops out at 28 mm (the reference STEP reaches 32.2
+        # only through its 180° tip revolve).
+        mesh = hook_solid(PROFILE, (0, 0), (1, 0), {"type": "round"})
+        loaded = trimesh.load(io.BytesIO(mesh.export(file_type="stl")), file_type="stl")
+        self.assertTrue(loaded.is_volume)
+        self.assertEqual(len(loaded.split()), 1)
+        self.assertAlmostEqual(loaded.bounds[0, 2], 0, places=4)   # nothing below
+        self.assertAlmostEqual(loaded.bounds[1, 2], 28.0, delta=0.3)
+        # It stands in the vertical plane through the travel direction:
+        # across the path it is exactly the profile's width.
+        self.assertAlmostEqual(loaded.extents[1], 10, places=3)
 
-    def test_tip_is_rounded_over_by_a_quarter_turn(self):
-        # A 90° roll ends with the section lying along the bar, so the nose
-        # reaches no further than one profile height past the tip.
-        chains, (tip, direction, _), _ = hook_sections({"type": "straight"}, 5.34)
-        mesh = hook_solid(PROFILE, (0, 0), (1, 0), {"type": "straight"})
-        bare = hook_solid(PROFILE, (0, 0), (1, 0), {"type": "straight", "cap": False})
-        self.assertLess(mesh.bounds[0, 0], bare.bounds[0, 0])
-        reach = (tip - 0.05 * direction)[0] + 5.34 * direction[0]
-        self.assertGreaterEqual(mesh.bounds[0, 0], reach - 1e-3)
+    def test_straight_hook_is_built_like_the_reference(self):
+        # hook/24-10-2026: the sketch's three lines and the STEP's bodies.
+        # Bottom bar 33.23 long, post 16.32 high, the bar's line ends at
+        # (11.09, 21.77) past the post; reference profile 5.34 high.
+        length, post, tip = 33.2279, 16.3222, np.array([11.0908, 21.7701])
+        spec = {"type": "straight", "length": length,
+                "angle": np.degrees(np.arctan2(post, length)),
+                "overhang": float(np.hypot(tip[0], tip[1] - post))}
+        h, a = 5.338, np.arctan2(post, length)
+        mesh = hook_solid(PROFILE, (0, 0), (1, 0), spec, inset=0)
+        loaded = trimesh.load(io.BytesIO(mesh.export(file_type="stl")), file_type="stl")
+        self.assertTrue(loaded.is_volume)
+        self.assertEqual(len(loaded.split()), 1)
+        # Along the path (our +x is the reference's -Y): the 180° knob reaches
+        # one profile height past the bar's end, forward and up; the bar's top
+        # face meets the ground 45.33 out (the STEP's cut face).
+        self.assertAlmostEqual(mesh.bounds[0, 0], -(tip[0] + h), delta=0.1)
+        self.assertAlmostEqual(mesh.bounds[1, 0], 45.334, delta=0.01)
+        self.assertAlmostEqual(mesh.bounds[0, 2], 0, places=4)
+        self.assertAlmostEqual(mesh.bounds[1, 2], tip[1] + h, delta=0.1)
+        self.assertAlmostEqual(mesh.extents[1], 10, places=3)
 
-    def test_half_tip_mirrors_the_moulding_under_the_overhang(self):
+        def heights(s):
+            return mesh.section(plane_origin=(s, 0, 0), plane_normal=(1, 0, 0)).vertices[:, 2]
+        # Over the overhang the bar has the profile on both faces of its line.
+        line = post + 6 * np.tan(a)
+        cut = heights(-6)
+        self.assertAlmostEqual(cut.min(), line - h / np.cos(a), delta=0.01)
+        self.assertAlmostEqual(cut.max(), line + h / np.cos(a), delta=0.01)
+        # So does the post (Parts 3 and 4), centred on the vertex (cut between
+        # the bottom bar's top and the bar's underside)...
+        level = mesh.section(plane_origin=(0, 0, 6), plane_normal=(0, 0, 1)).vertices[:, 0]
+        level = level[level < 8]
+        self.assertAlmostEqual(level.min(), -h, delta=0.01)
+        self.assertAlmostEqual(level.max(), h, delta=0.01)
+        # ...while the bottom bar (Part 2) carries it on top only.
+        low = heights(8)
+        low = low[low < 6]
+        self.assertAlmostEqual(low.min(), 0, places=4)
+        self.assertAlmostEqual(low.max(), h, delta=0.01)
+
+    def test_straight_tip_is_a_half_round_unless_square(self):
+        # The bar has the profile on both faces, so a rounded tip rolls the
+        # end section 180° from one face to the other: quarter and half agree.
         spec = {"type": "straight", "length": 33, "angle": 26, "overhang": 13}
         half = hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "half"})
         quarter = hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "quarter"})
-        loaded = trimesh.load(io.BytesIO(half.export(file_type="stl")), file_type="stl")
-        self.assertTrue(loaded.is_volume)
-        self.assertEqual(len(loaded.split()), 1)
-        # Over the overhang (behind the post, s < 0) the bar is now a full
-        # profile height thicker underneath: its lowest point there drops.
-        def underside(mesh):
-            cut = mesh.section(plane_origin=(-8, 0, 0), plane_normal=(1, 0, 0))
-            return cut.vertices[:, 2].min()
-        thick = 5.34 / np.cos(np.radians(26))
-        self.assertAlmostEqual(underside(quarter) - underside(half), thick, delta=0.5)
+        square = hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "square"})
+        self.assertAlmostEqual(half.volume, quarter.volume, places=6)
+        self.assertLess(square.volume, half.volume)
+        _, (tip, direction, _), _ = hook_sections(spec, 5.34)
+        self.assertAlmostEqual(half.bounds[0, 0], (tip - 0.05 * direction)[0] - 5.34, delta=0.05)
         with self.assertRaises(ValueError):
             hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "pointy"})
+
+    def test_round_tip_rolls_a_quarter_or_a_half_turn(self):
+        quarter, half, square = (hook_solid(PROFILE, (0, 0), (1, 0), {"type": "round", "tip": t})
+                                 for t in ("quarter", "half", "square"))
+        self.assertLess(square.volume, quarter.volume)
+        self.assertLess(quarter.volume, half.volume)
 
     def test_hook_follows_the_given_direction(self):
         mesh = hook_solid(PROFILE, (5, 5), (0, -1), {"type": "round"})
@@ -217,6 +250,88 @@ class HookCli(unittest.TestCase):
             high = turned.vertices[turned.vertices[:, 2] > 5]
             self.assertAlmostEqual(float(np.ptp(high[:, 1])), 4, delta=0.01)
             self.assertGreater(turned.bounds[1, 0], 70 - 1)   # +X after 90° CCW from -Y
+
+    def test_hooks_are_added_after_the_groove_unless_it_is_cut_last(self):
+        # The hook at the (10, 70) corner runs its bottom bar down the grooved
+        # vertical path: by default the hook stays whole over it and the
+        # groove stops there; --groove-last cuts the groove through the hook.
+        import manifold3d as mf
+
+        def solid_at(mesh, point):
+            body = mf.Manifold(mf.Mesh(vert_properties=np.asarray(mesh.vertices, np.float32),
+                                       tri_verts=np.asarray(mesh.faces, np.uint32)))
+            return (body ^ mf.Manifold.cube((0.1, 0.1, 0.1), True).translate(point)).volume() > 9e-4
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            frame, profile, groove, hooks = (tmp / n for n in ("frame.svg", "p.svg", "g.svg", "h.json"))
+            frame.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
+                             'height="80mm" viewBox="0 0 80 80">'
+                             '<path d="M10 70 V10 H70" fill="none" stroke="black"/></svg>')
+            profile.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
+                               'height="3mm" viewBox="0 0 4 3"><path d="M0 0H4V3H0Z"/></svg>')
+            # A 1 mm wide slot, 1 mm deep from the top of the 3 mm profile.
+            groove.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
+                              'height="3mm" viewBox="0 0 4 3"><path d="M1.5 -1H2.5V1H1.5Z"/></svg>')
+            hooks.write_text(json.dumps([{"x": 10, "y": 70, "type": "straight", "length": 20,
+                                          "angle": 30, "overhang": 5}]))
+
+            def build(*flags):
+                out = tmp / "hooked.stl"
+                result = subprocess.run([
+                    sys.executable, "tools/dxf2stl.py", str(frame), str(out),
+                    "--profile", str(profile), "--groove-profile", str(groove),
+                    "--frame-only", "--hooks", str(hooks), *flags,
+                ], cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                mesh = trimesh.load(out)
+                self.assertTrue(mesh.is_volume)
+                self.assertEqual(len(mesh.split()), 1)
+                return mesh
+
+            under_hook, bare_frame = (10, 60, 2.5), (10, 30, 2.5)   # inside the slot
+            default, last = build(), build("--groove-last")
+            self.assertTrue(solid_at(default, under_hook))
+            self.assertFalse(solid_at(default, bare_frame))
+            self.assertFalse(solid_at(last, under_hook))
+            self.assertFalse(solid_at(last, bare_frame))
+            self.assertGreater(default.volume, last.volume)
+
+    def test_offset_slides_a_hook_up_the_drawing(self):
+        # The hook at (40, 40) moves 7 mm up the drawing's vertical axis; its
+        # bottom bar still crosses the horizontal path, so it stays fused.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            frame = tmp / "frame.svg"
+            profile = tmp / "profile.svg"
+            hooks = tmp / "hooks.json"
+            frame.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
+                             'height="80mm" viewBox="0 0 80 80">'
+                             '<path d="M10 40 H70 M40 40 L60 10" fill="none" '
+                             'stroke="black"/></svg>')
+            profile.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
+                               'height="3mm" viewBox="0 0 4 3"><path d="M0 0H4V3H0Z"/></svg>')
+
+            def build(offset):
+                hooks.write_text(json.dumps([{"x": 40, "y": 40, "type": "straight", "length": 20,
+                                              "angle": 30, "overhang": 5, "offset": offset}]))
+                out = tmp / "hooked.stl"
+                result = subprocess.run([
+                    sys.executable, "tools/dxf2stl.py", str(frame), str(out),
+                    "--profile", str(profile), "--frame-only", "--hooks", str(hooks),
+                ], cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return trimesh.load(out)
+
+            still, moved = build(0), build(7)
+            self.assertTrue(moved.is_volume)
+            self.assertEqual(len(moved.split()), 1)
+            # Above the 3 mm frame there is only hook: all of it shifted +Y.
+            high, shifted = (m.vertices[m.vertices[:, 2] > 5] for m in (still, moved))
+            self.assertAlmostEqual(shifted[:, 1].min() - high[:, 1].min(), 7, delta=0.01)
+            self.assertAlmostEqual(shifted[:, 1].max() - high[:, 1].max(), 7, delta=0.01)
+            self.assertAlmostEqual(float(np.ptp(shifted[:, 0])), 4, delta=0.01)
+            self.assertAlmostEqual(moved.bounds[0, 1], 20 - 3 / 0.5 + 7, delta=0.05)
 
     def test_hook_without_profile_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

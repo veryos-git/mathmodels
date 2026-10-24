@@ -715,6 +715,7 @@
   </div>
   <input type="file" id="file" accept=".dxf,.svg,.v2sproj,application/dxf,image/svg+xml,image/png,image/jpeg,image/gif,image/webp">
   <asset-preview id="subjectPreview" hidden></asset-preview>
+  <button class="ghost" id="editTips" hidden title="Drag where two arcs meet to reshape the subject's pointy tips; every arc keeps touching the lines it touches">Edit pointy tips…</button>
   <button class="ghost" id="example">Use the example subject</button>
 
   <div class="seed-row" style="margin-top:8px"
@@ -906,19 +907,21 @@
       <label>Curl angle (deg)<input id="hookCurl" type="number" min="100" max="350" step="5" value="200"></label>
     </div>
     <div id="hookStraightParams" class="row" hidden>
-      <label>Length (mm)<input id="hookLength" type="number" min="1" step="1" value="33"></label>
-      <label>Angle (deg)<input id="hookAngle" type="number" min="5" max="80" step="1" value="26"></label>
-      <label>Overhang (mm)<input id="hookOverhang" type="number" min="0" step="1" value="13"></label>
+      <label>Length (mm)<input id="hookLength" type="number" min="1" step="0.1" value="33.2"></label>
+      <label>Angle (deg)<input id="hookAngle" type="number" min="5" max="80" step="0.1" value="26.2"></label>
+      <label>Overhang (mm)<input id="hookOverhang" type="number" min="0" step="0.1" value="12.4"></label>
     </div>
     <div id="hookCapRow" class="row" hidden>
       <label>Rotation (deg)<input id="hookRotation" type="number" min="-180" max="180" step="15" value="0"></label>
       <label>Tip<select id="hookTip">
         <option value="quarter">Quarter round (90° roll)</option>
-        <option value="half">Half round + underside sweep (180°)</option>
+        <option value="half">Half round (180° roll)</option>
         <option value="square">Square cut</option>
       </select></label>
     </div>
-    <p class="muted">Hooks are swept from the main profile and stand up out of the frame. All hooks face the same way: down the drawing's vertical axis, or turned counter-clockwise by the rotation. Round: a small arc rises into a big arc that curls over; the curl angle is measured round the big circle from the ground. Straight: a bottom bar of the given length continues the path, a post stands at the endpoint, and a bar rising at the angle rests on the post and overhangs it back over the frame. A quarter-round tip can leave the profile's edges sharp; the half-round tip turns the end 180° and sweeps it back under the overhang for a smooth end.</p>
+    <label class="check" id="grooveLastRow" hidden title="By default hooks are added after the groove is cut, so the groove stops where a hook stands. Tick this to cut the groove at the very end, through the hooks too"><input id="grooveLast" type="checkbox"> Cut the groove last, through the hooks too</label>
+    <div id="hookOffsetList" hidden></div>
+    <p class="muted">Hooks are swept from the main profile and stand up out of the frame. All hooks face the same way: down the drawing's vertical axis, or turned counter-clockwise by the rotation. Each applied hook can slide up (positive) or down (negative) the drawing's vertical axis from its marker by its own vertical offset. Round: a small arc rises into a big arc that curls over; the curl angle is measured round the big circle from the ground. Straight: a bottom bar of the given length runs from the marker, a post stands there, and a bar rising at the angle crosses the post's top and overhangs it back over the frame; the post and the rising bar carry the profile on both faces. A quarter-round tip can leave the profile's edges sharp; the half-round tip turns the end 180°. A straight hook's rounded tip is always the 180° half-round. With a groove profile, hooks are added after the groove is cut, so the groove stops where a hook stands; tick “Cut the groove last” to cut it through the hooks too.</p>
     <button id="domeClearAll" class="ghost" hidden>Clear all endings</button>
   </div>
   <details id="gothicOptions">
@@ -1216,6 +1219,7 @@ import { filePreview } from './file-preview.js';
 import { bindProfileScales, PROFILE_SCALE_GROUPS, PROFILE_POSITION_FIELDS, PROFILE_TRANSFORM_FIELDS } from './profile-scales.js';
 import { ProfileEditor } from './profile-editor.js';
 import { ShelfEditor } from './shelf-editor.js';
+import { TipEditor } from './tip-editor.js';
 import { ShaderInspector } from './shader-inspector.js';
 import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
@@ -2228,6 +2232,7 @@ function resetLayers() {
   layers.push(newLayer());
   picked = null;
   $('subjectPreview').source = null;
+  $('editTips').hidden = true;
   drawing = null;
   modelThumb = null;         // a new drawing has no generated model yet
   setHoleMode(false);
@@ -2546,7 +2551,9 @@ let domeEndpoints = [];      // [[x, y], ...] from the regions response
 // index -> 'dome' | 'round' | 'straight'. Dome caps the endpoint; the hook
 // kinds continue the main profile along a hook path from it.
 let endpointMode = new Map();
-let pendingEndpointModes = null;  // [{x, y, mode}] restored from a project
+// index -> mm a hook slides up the drawing's vertical axis from its vertex.
+let hookOffset = new Map();
+let pendingEndpointModes = null;  // [{x, y, mode, offset}] restored from a project
 let domeEndMarkers = null;   // THREE.Group of marker meshes
 
 const ENDPOINT_COLORS = { dome: 0x60a5fa, round: 0x34d399, straight: 0xf59e0b };
@@ -2577,6 +2584,18 @@ function drawDomeMarkers() {
     mesh.renderOrder = 2;
     mesh.userData.domeEndIndex = i;
     domeEndMarkers.add(mesh);
+    // A shifted hook: a smaller dot where it stands, tied to its vertex.
+    const shift = mode && mode !== 'dome' ? hookOffset.get(i) ?? 0 : 0;
+    if (shift) {
+      const color = ENDPOINT_COLORS[mode];
+      const at = new THREE.Mesh(new THREE.SphereGeometry(r * 0.6, 12, 6),
+        new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      at.position.copy(mesh.position).setY(mesh.position.y + shift);
+      const tie = new THREE.Line(new THREE.BufferGeometry().setFromPoints([mesh.position, at.position]),
+        new THREE.LineBasicMaterial({ color, depthTest: false }));
+      at.renderOrder = tie.renderOrder = 2;
+      domeEndMarkers.add(at, tie);
+    }
   });
   scene.add(domeEndMarkers);
 }
@@ -2598,30 +2617,65 @@ function domeEndsUI() {
     ? `${n} of ${domeEndpoints.length} applied.`
     : domeEndpoints.length ? `${domeEndpoints.length} endpoints — click to apply.` : '';
   $('domeClearAll').hidden = n === 0;
+  hookOffsetsUI();
+  grooveLastUI();
   drawDomeMarkers();
+}
+
+/** The groove-order choice only matters with a groove profile and a hook. */
+function grooveLastUI() {
+  $('grooveLastRow').hidden = !grooveProfilePicked || ![...endpointMode.values()].some((mode) => mode !== 'dome');
+}
+
+/** One vertical-offset field per applied hook, in marker order. */
+function hookOffsetsUI() {
+  const list = $('hookOffsetList');
+  list.replaceChildren();
+  for (const [i, mode] of [...endpointMode].sort(([a], [b]) => a - b)) {
+    if (mode === 'dome') continue;
+    const [x, y] = domeEndpoints[i];
+    const label = document.createElement('label');
+    label.textContent = `${mode === 'round' ? 'Round' : 'Straight'} hook at (${x.toFixed(1)}, ${y.toFixed(1)}) · vertical offset (mm)`;
+    const input = document.createElement('input');
+    Object.assign(input, { type: 'number', step: '0.5', value: hookOffset.get(i) ?? 0 });
+    input.oninput = () => {
+      const shift = Number(input.value);
+      if (Number.isFinite(shift) && shift) hookOffset.set(i, shift);
+      else hookOffset.delete(i);
+      drawDomeMarkers();
+    };
+    label.append(input);
+    list.append(label);
+  }
+  list.hidden = !list.childElementCount;
 }
 
 function setDomeEndpoints(eps) {
   const prev = domeEndpoints;
   const prevModes = endpointMode;
+  const prevOffsets = hookOffset;
   domeEndpoints = eps ?? [];
   endpointMode = new Map();
+  hookOffset = new Map();
   // A project restore supplies modes by position before the endpoints exist.
   const byPosition = pendingEndpointModes
-    ? pendingEndpointModes.map(m => [[m.x, m.y], m.mode])
-    : [...prevModes].map(([i, mode]) => [prev[i], mode]);
+    ? pendingEndpointModes.map(m => [[m.x, m.y], m.mode, Number(m.offset) || 0])
+    : [...prevModes].map(([i, mode]) => [prev[i], mode, prevOffsets.get(i) ?? 0]);
   pendingEndpointModes = null;
-  for (const [pos, mode] of byPosition) {
+  for (const [pos, mode, shift] of byPosition) {
     if (!pos) continue;
     const [px, py] = pos;
     const j = domeEndpoints.findIndex(([x, y]) => Math.abs(x - px) < 0.1 && Math.abs(y - py) < 0.1);
-    if (j >= 0) endpointMode.set(j, mode);
+    if (j < 0) continue;
+    endpointMode.set(j, mode);
+    if (shift && mode !== 'dome') hookOffset.set(j, shift);
   }
   domeEndsUI();
 }
 
 $('domeClearAll').onclick = () => {
   endpointMode.clear();
+  hookOffset.clear();
   domeEndsUI();
 };
 
@@ -2634,28 +2688,31 @@ function tryToggleDomeEnd(event) {
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects(domeEndMarkers.children, false);
+  const markers = domeEndMarkers.children.filter((o) => o.userData.domeEndIndex !== undefined);
+  const hits = raycaster.intersectObjects(markers, false);
   if (!hits.length) return false;
   const idx = hits[0].object.userData.domeEndIndex;
   const mode = $('endpointMode').value;
   // Clicking the same mode again clears it; a different mode replaces it.
+  // A hook keeps its offset when it changes kind, a dome cap has none.
   if (endpointMode.get(idx) === mode) endpointMode.delete(idx);
   else endpointMode.set(idx, mode);
+  if (!endpointMode.has(idx) || mode === 'dome') hookOffset.delete(idx);
   domeEndsUI();
   return true;
 }
 
 /** Build the hook spec a round/straight endpoint sends to the converter. */
-function hookSpec(x, y, mode) {
+function hookSpec(x, y, mode, offset = 0) {
   const tip = $('hookTip').value;
   const rotation = Number($('hookRotation').value) || 0;
   if (mode === 'round') {
-    return { x, y, type: 'round', tip, rotation,
+    return { x, y, offset, type: 'round', tip, rotation,
       small_radius: Number($('hookSmallRadius').value),
       big_radius: Number($('hookBigRadius').value),
       angle: Number($('hookCurl').value) };
   }
-  return { x, y, type: 'straight', tip, rotation,
+  return { x, y, offset, type: 'straight', tip, rotation,
     length: Number($('hookLength').value),
     angle: Number($('hookAngle').value),
     overhang: Number($('hookOverhang').value) };
@@ -3213,6 +3270,7 @@ async function pickFile(file, fit = true) {
   invalidatePreview();
   picked = file;
   $('subjectPreview').source = filePreview(file);
+  $('editTips').hidden = !/\.dxf$/i.test(file.name);
   layers[0].file = file;
   $('dropName').textContent = file.name;
   $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — click to change`;
@@ -3228,6 +3286,40 @@ async function pickFile(file, fit = true) {
   setStatus('reading layers…');
   await loadLayers(file, fit);
   renderDrawings();
+}
+
+/* ------------------------------------------------------- pointy tips */
+
+let tipEditor = null;
+$('editTips').onclick = () => {
+  if (!picked) return;
+  tipEditor ??= new TipEditor({ apply: applyTipEdits });
+  tipEditor.open(picked, $('sagitta').value);
+};
+
+/**
+ * Write the tip editor's arcs into the subject and rebuild. Unlike a new
+ * subject this keeps sublayers, holes, paint and scale: only the arcs moved.
+ */
+async function applyTipEdits(edits) {
+  const form = new FormData();
+  form.append('file', picked);
+  form.append('edits', JSON.stringify(edits));
+  const response = await fetch('/api/sketch/apply', { method: 'POST', body: form });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? response.statusText);
+  // Same name, no library link: the subject is now this edited copy.
+  const file = new File([await response.blob()], picked.name, { type: 'application/dxf' });
+  picked = layers[0].file = file;
+  $('subjectPreview').source = filePreview(file);
+  $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — tips edited · click to change`;
+  invalidatePreview();
+  const info = await inspect(file);
+  drawing = layers[0].drawing = { x: info.size[0], y: info.size[1] };
+  showYSize();
+  if (!baseModel()) setStatus(`${count(edits.length, 'arc')} reshaped — Generate 3D to build the model`);
+  else if (await generate(keepStacks(), { lenient: true }) === 'restored') {
+    setStatus([`${count(edits.length, 'arc')} reshaped, model rebuilt`, paintLossNote].filter(Boolean).join(' — '));
+  }
 }
 
 /** What the server makes of a drawing: its size, sublayers and curve count. */
@@ -3318,6 +3410,7 @@ function profileUI() {
   $('profileClear').hidden = !on;
   $('grooveProfileName').textContent = grooveProfilePicked?.name ?? 'No groove profile';
   $('grooveProfileClear').hidden = !grooveProfilePicked;
+  grooveLastUI();
   $('grooveProfilePick').disabled = $('grooveProfileLibrary').disabled = !on;
   $('grooveProfileNote').textContent = on
     ? 'Sweeps along the same paths and subtracts from the frame. Draw both profiles in the same coordinates; adjust their alignment in the shared preview. Each section has independent size and vertical offset.'
@@ -5354,6 +5447,7 @@ function shapeForm({ placement = false } = {}) {
   if (cuspProfilePicked) form.append('cuspProfile', cuspProfilePicked);
   if ($('roundEnds').checked) form.append('roundEnds','1');
   if ($('frameOnly').checked) form.append('frameOnly','1');
+  if ($('grooveLast').checked) form.append('grooveLast','1');
   if (profilePicked) {
     form.append('profile', profilePicked);
     if (grooveProfilePicked) form.append('grooveProfile', grooveProfilePicked);
@@ -5374,7 +5468,7 @@ function shapeForm({ placement = false } = {}) {
   for (const [i, mode] of endpointMode) {
     const [x, y] = domeEndpoints[i];
     if (mode === 'dome') domeEnds.push([x, y]);
-    else hooks.push(hookSpec(x, y, mode));
+    else hooks.push(hookSpec(x, y, mode, hookOffset.get(i) ?? 0));
   }
   if (domeEnds.length) form.append('domeEnds', JSON.stringify(domeEnds));
   if (hooks.length) form.append('hooks', JSON.stringify(hooks));
@@ -5795,10 +5889,11 @@ async function buildProject() {
       profile: cuspProfilePicked ? {name:cuspProfilePicked.name,data:await fileBase64(cuspProfilePicked),resource:cuspProfilePicked.resource??null} : null,
       roundEnds: $('roundEnds').checked, frameOnly: $('frameOnly').checked,
       hookTip: $('hookTip').value,
+      grooveLast: $('grooveLast').checked,
       // Endpoint endings and hooks, keyed by position so they survive a
       // regeneration that renumbers the detected endpoints.
       endpoints: [...endpointMode].map(([i, mode]) => ({
-        x: domeEndpoints[i]?.[0], y: domeEndpoints[i]?.[1], mode,
+        x: domeEndpoints[i]?.[0], y: domeEndpoints[i]?.[1], mode, offset: hookOffset.get(i) ?? 0,
       })).filter((e) => Number.isFinite(e.x) && Number.isFinite(e.y)),
     },
     drawing: { name: picked.name, data: await fileBase64(picked), resource: picked.resource ?? null },
@@ -5976,6 +6071,8 @@ async function applyProject(project) {
   for (const [id,value] of Object.entries({cuspWidth:.55,cuspHeight:.55,cuspZ:0,endAngle:90,endSide:1})) $(id).value=value;
   $('roundEnds').checked = !!project.tracery?.roundEnds;
   $('frameOnly').checked = !!project.tracery?.frameOnly;
+  // Older projects cut the groove last; they now get hooks after the groove.
+  $('grooveLast').checked = !!project.tracery?.grooveLast;
   // Older projects stored a "Rounded tip" checkbox instead of the tip style.
   $('hookTip').value = project.tracery?.hookTip
     ?? (project.tracery?.hookCap === false ? 'square' : 'quarter');
@@ -7892,7 +7989,7 @@ $('cuspProfileClear').onclick=()=>setCuspFile('cuspProfile',null);
 $('cuspLibrary').onclick=()=>openPicker('cusps');
 $('cuspProfileLibrary').onclick=()=>openPicker('cuspProfile');
 $('workflowMode').onchange=()=>{setWorkflow($('workflowMode').value);refit('Workflow updated.');};
-for (const id of ['roundEnds','endAngle','endSide','frameOnly']) $(id).onchange=()=>{updateWorkflowProgress();refit('Tracery shape updated.');};
+for (const id of ['roundEnds','endAngle','endSide','frameOnly','grooveLast']) $(id).onchange=()=>{updateWorkflowProgress();refit('Tracery shape updated.');};
 $('startGothic').onclick=async()=>{await newWorkflow('gothic');showScreen('model');showModelStep('inputs');};
 $('gothicExample').onclick=async()=>{
   try{

@@ -19,6 +19,7 @@ The pipeline in one line:
 | **profile** | A closed cross-section swept along the subject's lines to form the frame. |
 | **groove profile** | A second closed cross-section swept along the main frame's paths and subtracted from it; its coordinates set the groove position and depth relative to the main profile. |
 | **tracery** | The network of ornament lines of a gothic subject. |
+| **pointy tip** | Where two arcs of a subject meet at an angle — in CAD, two overlapping circles. Reshaped in the tip editor. Not to be confused with **cusp paths**, the finer tracery swept with their own profile. |
 
 ## 3D result
 

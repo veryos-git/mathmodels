@@ -1319,6 +1319,8 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
             if not (isinstance(_spec, dict) and all(math.isfinite(float(_spec.get(k, float("nan"))))
                                                     for k in ("x", "y"))):
                 raise ConvertError("Each hook needs finite x and y endpoint coordinates")
+            if not math.isfinite(float(_spec.get("offset", 0.0))):
+                raise ConvertError("A hook's vertical offset must be a finite number")
 
     def build_frame(offsets=None, trim=None):
         """The swept frame and its connection ribs; None for flat walls.
@@ -1332,6 +1334,10 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
             return None, None
         paths = repeat_paths(swept, offsets)
         frame_mesh = sweep_profile(profile, chain_curves(paths))
+        # Hooks stand on the paths the groove is swept along, so a groove cut
+        # after them would slice through every hook. They join the frame
+        # after the groove unless --groove-last asks for the old order.
+        late = []
 
         if args.cusps or args.round_ends or dome_ends_coords or hook_specs:
             solids = [frame_mesh]
@@ -1375,8 +1381,10 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                 overlap = max(args.sagitta * 2, 0.05)
                 # Hooks stand up out of the drawing plane. They all face the
                 # same way, along the drawing's -Y by default, whatever the
-                # path does at their vertex; `rotation` turns one about Z.
-                # One hook per vertex, even where several paths meet there.
+                # path does at their vertex; `rotation` turns one about Z, and
+                # `offset` slides it up the drawing's vertical axis (+Y) from
+                # the vertex. One hook per vertex, even where several paths
+                # meet there.
                 placed = set()
                 for chain in chain_curves(paths, min_dot=-0.5):
                     for point in path_frames(chain)[0]:
@@ -1389,12 +1397,16 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                         placed.add(key)
                         turn = math.radians(float(spec.get("rotation", 0.0)))
                         forward = np.array([math.sin(turn), -math.cos(turn)])
+                        anchor = point + (0.0, float(spec.get("offset", 0.0)))
                         try:
                             # The profile is centred on both the path and the
-                            # hook, so the hook's root always overlaps the frame.
-                            solids.append(hook_solid(profile, point, forward, spec, overlap))
+                            # hook, so an unshifted hook's root always overlaps
+                            # the frame.
+                            hook = hook_solid(profile, anchor, forward, spec, overlap)
                         except ValueError as error:
                             raise ConvertError(str(error)) from error
+                        (late if groove_profile is not None and not args.groove_last
+                         else solids).append(hook)
             try:
                 frame_mesh = solid_union(solids)
             except (ValueError, RuntimeError) as error:
@@ -1422,6 +1434,19 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                                             .trim_by_plane((-1, 0, 0), -trim[1]))
             except ValueError as error:
                 raise ConvertError(f"Could not cut the repeated frame: {error}") from error
+        if late:
+            # The grooved frame can hold parts that only touch at an edge, so
+            # fuse with the same manifold tools the groove cut used.
+            from cylinder import manifold, printable_mesh
+            try:
+                solid = manifold(frame_mesh)
+                for hook in late:
+                    solid = solid + manifold(hook)
+                if trim is not None:
+                    solid = solid.trim_by_plane((1, 0, 0), trim[0]).trim_by_plane((-1, 0, 0), -trim[1])
+                frame_mesh = printable_mesh(solid.simplify(.0001))
+            except (ValueError, RuntimeError) as error:
+                raise ConvertError(f"Could not fuse the hooks onto the grooved frame: {error}") from error
         return frame_mesh, connection_mesh
 
     # Sketch repeats sweep the frame later, once every drawing is placed.
@@ -2538,6 +2563,12 @@ def main():
                          "the 2D window-position preview, then exit")
     ap.add_argument("--profile-sections", action="store_true",
                     help="report normalized main, groove and cusp sections for the shared profile editor")
+    ap.add_argument("--sketch", action="store_true",
+                    help="report a DXF subject's exact lines, circles and arcs as JSON for "
+                         "the tip editor, then exit")
+    ap.add_argument("--sketch-edit", default=None, metavar="FILE",
+                    help="JSON file: [{handle, center, radius, start, end}] counter-clockwise "
+                         "arcs to write into the DXF subject, saved to the output path")
     ap.add_argument("--heights", default=None, metavar="FILE",
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
     ap.add_argument("--cylinder", default=None, metavar="FILE",
@@ -2651,11 +2682,16 @@ def main():
                     help="JSON file: list of {x,y,type,...} hooks swept from the main "
                          "profile, standing up out of the drawing plane at path "
                          "vertices, facing the drawing's -Y unless rotation (degrees, "
-                         "counter-clockwise) turns them. type is 'round' (small_radius, "
-                         "big_radius, angle) or 'straight' (length, angle, overhang); "
-                         "tip is 'quarter' (default), 'half' (180° roll plus an underside "
-                         "sweep) or 'square'")
+                         "counter-clockwise) turns them; offset (mm) slides one up the "
+                         "drawing's Y axis from its vertex. type is 'round' (small_radius, "
+                         "big_radius, angle) or 'straight' (length, angle, overhang; post "
+                         "and bar carry the profile on both faces); tip is 'quarter' "
+                         "(default), 'half' (180° roll) or 'square' — a straight hook's "
+                         "rounded tip is always the 180° half-round")
     ap.add_argument("--frame-only", action="store_true", help="Generate tracery without glass faces")
+    ap.add_argument("--groove-last", action="store_true",
+                    help="cut the groove profile after the hooks are fused on, so it runs "
+                         "through them too (by default hooks are added after the groove)")
     ap.add_argument("--boundary", default=None, metavar="FILE",
                     help="DXF/SVG holding a closed polygon that bounds the "
                          "drawing: everything outside it is cut away. It is "
@@ -2749,6 +2785,24 @@ def main():
 
     if args.preview:
         json.dump(preview(args), sys.stdout)
+        return
+
+    if args.sketch or args.sketch_edit:
+        import sketch_arcs
+        try:
+            if args.sketch:
+                json.dump(sketch_arcs.read_sketch(args.input, args.sagitta), sys.stdout)
+                return
+            if not args.output:
+                raise ConvertError("an output path is required for --sketch-edit")
+            with open(args.sketch_edit) as fp:
+                edits = json.load(fp)
+            if not isinstance(edits, list):
+                raise ConvertError("--sketch-edit expects a JSON list of arcs")
+            sketch_arcs.write_arcs(args.input, edits, args.output)
+        except (OSError, ValueError) as error:
+            raise ConvertError(str(error)) from error
+        json.dump({"arcs": len(edits)}, sys.stdout)
         return
 
     if args.profile_sections:

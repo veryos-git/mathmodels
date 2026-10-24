@@ -129,25 +129,62 @@ cap** rounds a free endpoint over. Hooks are swept from the same main profile
 and stand up out of the drawing plane. All hooks face the same way, down the
 drawing's vertical axis (−Y), whatever the path does at their vertex; the
 **Rotation** turns them counter-clockwise from there. A vertex shared by several
-paths still gets a single hook. A **round hook** is a reverse curve: a *small radius* arc
+paths still gets a single hook. Each applied hook gets its own **vertical
+offset** field: it slides that hook up (positive) or down (negative) the
+drawing's vertical axis from the clicked marker, which then shows a smaller dot
+where the hook stands. A **round hook** is a reverse curve: a *small radius* arc
 rises from the endpoint into a *big radius* arc that curls over, ending at the
 *curl angle* measured round the big circle from the ground; the profile sits on
 the concave side of each arc, as in the reference model. A **straight hook** is
-a bracket: a bottom bar of the given *length* continues the path, a post stands
-at the endpoint, and a bar rising at *angle* from the bottom bar's far end rests
-on the post and *overhangs* it back over the frame; anything below the base
-plane is cut off. The **Tip** sets how the free end finishes: *quarter round* rolls the end
-section 90° forward (its profile edges can stay sharp); *half round + underside
-sweep* rolls it 180° so it hangs under the bar and, on a straight hook, sweeps
-that flipped section back to the post, giving a smooth half-round end with the
-moulding on both faces of the overhang (the post then stops at that underside);
-*square* leaves the cut. The endings and hooks are fused into the frame with
+built like the reference (`object_additions/hook/24-10-2026`): a bottom bar of
+the given *length* runs from the marker with the profile on top, a post stands
+at the marker, and a bar rising at *angle* from the bottom bar's far end crosses
+the post's top and *overhangs* it back over the frame. The post and the rising
+bar carry the profile on both faces (the section and its mirror image), the post
+ending square at the bar's centre line; anything below the base plane is cut off.
+The **Tip** sets how the free end finishes: *quarter round* rolls the end
+section 90° forward (its profile edges can stay sharp); *half round* rolls it
+180° into a half-disc knob; *square* leaves the cut. A straight hook's bar has
+the profile on both faces, so its rounded tip is always the 180° half-round.
+With a **groove profile**, hooks are fused on after the groove is cut, so the
+groove stops where a hook stands instead of slicing through it. Tick **Cut the
+groove last, through the hooks too** (shown once a groove and a hook are both
+set; CLI `--groove-last`) for the old order.
+The endings and hooks are fused into the frame with
 Manifold, so they export as one printable body, and travel inside project files.
 
 Choose **Frame only** for an ornamental tracery object without faces.
 Keep it off for a swept frame with paintable infill. The input files, settings,
 workflow selection and material calibrations all travel inside project files.
 Imported project resources include cusp paths and cusp profiles.
+
+### Editing pointy tips
+
+A DXF subject's **pointy tips** — where two arcs (in CAD, two overlapping
+circles) meet at an angle — can be reshaped without going back to CAD. Choose
+**Edit pointy tips…** under the subject preview. The editor shows the subject's
+exact lines and arcs. Each tip is an orange dot, and each tangency the subject
+already has (an arc touching a line, a circle or another arc) is a green
+diamond:
+
+- **Drag a tip**, or type its **Tip X / Tip Y**. Its two arcs change radius and
+  centre so that each still touches the same lines and circles; the arcs stay
+  joined at every tip. A drag that would break a tangency, or slide an arc off
+  the end of its line, stops at the last shape that still works.
+- **Circle overlap** — with a tip selected, how far its two circles overlap
+  along the line between their centres (r₁ + r₂ − distance). The selected tip's
+  full circles are drawn dashed.
+- **Arc radius** — click an arc to select it and type its radius.
+- **Keep symmetry** — on when the subject is symmetric (mirrored left/right,
+  up/down, or rotated). Every symmetric copy follows the edit, so all tips of a
+  quatrefoil move together. Off, only the selected tip's two arcs change; the
+  neighbouring tips slide along arcs that stay put.
+
+**Apply to subject** writes the new arcs into the DXF itself (same entity
+handles, layers and everything else untouched) and rebuilds the model, keeping
+holes, paint and scale. Lines, circles, polylines and arcs inside blocks stay
+fixed; only model-space arcs are editable. SVG subjects cannot be edited this
+way yet. Sizes are the DXF's own units, before the model's scale.
 
 ### Additions: perpendicular shelves
 
@@ -305,12 +342,25 @@ The same options travel through the existing build/export HTTP routes as
 `roundEnds`, `endAngle`, `endSide`, `frameOnly` fields. New dependencies are
 installed by the existing `deno task setup` / start workflow.
 
+The tip editor reads and writes DXF arcs through the converter too:
+
+```bash
+# Exact lines, circles and arcs (model-space arcs carry their handle)
+.venv/bin/python tools/dxf2stl.py subject.dxf --sketch
+# Write [{handle, center, radius, start, end}] counter-clockwise arcs back
+.venv/bin/python tools/dxf2stl.py subject.dxf edited.dxf --sketch-edit arcs.json
+```
+
+Over HTTP these are `POST /api/sketch` (`file`) and `POST /api/sketch/apply`
+(`file` plus an `edits` JSON field), which answers with the edited DXF.
+
 ## Checks
 
 ```bash
 deno task check
 deno task test
 deno task test:geometry
+deno task test:tip-editor
 ```
 
 Storage tests cover resource revisions, thumbnails, imports and filament CRUD.

@@ -1,0 +1,1 @@
+the generated hook is not like the expected . example files are in this current folder

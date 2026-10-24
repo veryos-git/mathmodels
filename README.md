@@ -13,6 +13,9 @@ of a hand-drawn sketch** — traced to an SVG right in the page first.
 
 Use the **Inputs → Shape → Paint → Export** panels for stained glass, or start
 **Gothic tracery** for separate frame/cusp profiles and revolved endings.
+**Edit pointy tips…** under a DXF subject's preview reshapes the tips where two
+arcs meet: drag a tip or type its position, circle overlap or arc radius, and
+every arc keeps touching the lines it touched (symmetric copies follow).
 **Additions**, between Shape and Export (or Paint), adds a perpendicular shelf
 from a closed SVG/DXF outline, with adjustable thickness, placement and a rotated
 decorative edge profile. The supplied gothic bat shelf outline is available

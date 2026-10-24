@@ -4,6 +4,7 @@ import numpy as np
 import trimesh
 import manifold3d
 from shapely import make_valid, set_precision
+from shapely.affinity import scale
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
@@ -299,8 +300,10 @@ def hook_sections(spec, profile_height, segments=24):
       measured from its ground point, so 180° is straight over the top.
     * ``"straight"`` — a triangular bracket: a bottom bar continues the path
       by ``length``, a post stands up at the endpoint, and a bar rising at
-      ``angle`` from the bottom bar's far end rests on the post and overhangs
-      it back over the frame by ``overhang`` (measured along the bar).
+      ``angle`` from the bottom bar's far end crosses the post's top and
+      overhangs it back over the frame by ``overhang`` (measured along the
+      bar). ``chains[1:]`` (post, bar) carry the moulding on both faces, see
+      `hook_solid`.
     """
     kind = spec.get("type", "round")
     if kind == "round":
@@ -334,9 +337,9 @@ def hook_sections(spec, profile_height, segments=24):
         up = -np.array([math.cos(stop), math.sin(stop)])          # towards the centre
         return [rise, curl[::-1]], (np.array(curl[-1]), direction, up), [joint]
     if kind == "straight":
-        length = float(spec.get("length", 33.0))
-        angle = float(spec.get("angle", 26.0))
-        overhang = float(spec.get("overhang", 13.0))
+        length = float(spec.get("length", 33.2))
+        angle = float(spec.get("angle", 26.2))
+        overhang = float(spec.get("overhang", 12.4))
         if not math.isfinite(length) or length <= 0:
             raise ValueError("Hook length must be a positive number")
         if not math.isfinite(angle) or not 5 <= angle <= 80:
@@ -352,9 +355,9 @@ def hook_sections(spec, profile_height, segments=24):
         sink = profile_height / math.tan(a) + 1
         top = foot + (length / math.cos(a) + overhang) * along
         bar = [tuple(top), tuple(foot - sink * along)]  # downhill: profile sits on top
-        # The post ends just inside the bar's underside (trimmed exactly there
-        # by `hook_solid`); its profile leans back towards the frame.
-        post = [(0, -1), (0, height + profile_height / math.cos(a) + profile_height * math.tan(a))]
+        # The post ends square where the bar's centre line crosses it, as in
+        # the reference; the two-sided bar buries that end on both faces.
+        post = [(0, -1), (0, height)]
         bottom = [(0, 0), (length + 0.05, 0)]
         return [bottom, post, bar], (top, along, np.array([math.sin(a), math.cos(a)])), []
     raise ValueError(f"Unknown hook type {kind!r}; use 'round' or 'straight'")
@@ -382,6 +385,16 @@ def _plane_sweep(profile, chain, place):
         verts.extend(place(p[0] + h * n[0], p[1] + h * n[1], x) for x, h in cap_v)
         faces.extend((cap_f + offset).tolist())
     return _closed(verts, faces)
+
+
+def _two_sided(profile):
+    """The section and its mirror image across the path, as sections to sweep.
+
+    One section where they share the base line (the usual case), so the two
+    faces are a single sweep with no internal face for the union to resolve.
+    """
+    both = unary_union([profile, scale(profile, 1, -1, origin=(0, 0))]).simplify(0)
+    return list(getattr(both, "geoms", [both]))
 
 
 def _plane_knob(profile, point, direction, up, place, angle=90, segments=24):
@@ -425,10 +438,12 @@ def hook_tip(spec):
 
     * ``"quarter"`` (default) — the end section rolls 90° forward over its
       base line: a quarter-round nose, whose profile edges can stay sharp.
-    * ``"half"`` — it rolls 180° to hang under the bar, and on a straight
-      hook that flipped section is swept back to the post, so the tip is a
-      smooth half-round with the moulding on both faces of the overhang.
+    * ``"half"`` — it rolls 180° to hang under the bar, as a half-disc knob.
     * ``"square"`` — left as cut (also ``cap: false``).
+
+    A straight hook's bar carries the moulding on both faces, so both its
+    rounded tips are the reference's 180° half-round, where the two faces'
+    quarter rolls meet.
     """
     style = spec.get("tip", "quarter" if spec.get("cap", True) else "square")
     if style not in ("quarter", "half", "square"):
@@ -447,6 +462,12 @@ def hook_solid(profile, point, forward, spec, inset=0.05, across=None, segments=
     profile-x direction there (default: left of `forward`), so asymmetric
     profiles are not mirrored. Nothing goes below the frame's
     base plane (z = 0). The free tip follows `hook_tip`.
+
+    A straight hook is built like the reference (``object_additions/hook/
+    24-10-2026``): the bottom bar carries the profile on top only; the post
+    and the rising bar carry it on both faces (the section plus its mirror
+    image across the path, as the reference's 180° revolve leaves it), the
+    post ending square at the bar's centre line.
     """
     point = np.asarray(point, dtype=float)
     forward = np.asarray(forward, dtype=float)
@@ -463,28 +484,17 @@ def hook_solid(profile, point, forward, spec, inset=0.05, across=None, segments=
         return (xy[0], xy[1], v)
 
     style = hook_tip(spec)
-    meshes = [_plane_sweep(profile, chain, place) for chain in chains]
     if spec.get("type") == "straight":
-        a = math.radians(float(spec.get("angle", 26.0)))
-        drop = 0.0
-        if style == "half":
-            # The end section turned 180° hangs upside down under the bar;
-            # sweep it back to where the bar crosses the post, so the
-            # overhang carries the moulding on both faces. Listed uphill, the
-            # chain's left normal points below the bar.
-            cross = (0.0, float(spec.get("length", 33.0)) * math.tan(a))
-            meshes.append(_plane_sweep(profile, [cross, tuple(tip[0])], place))
-            drop = height
-        # The post stops at the underside of whatever the bar carries (plus
-        # a sliver for the union), so thin profile edges are not pierced.
-        normal = np.array([*(math.sin(a) * forward), math.cos(a)])   # off the bar's underside
-        level = (float(normal[:2] @ point) + float(spec.get("length", 33.0)) * math.sin(a)
-                 - drop + 0.1)
-        meshes[1] = _manifold_mesh(_to_manifold(meshes[1]).trim_by_plane(-normal, -level))
+        two_sided = _two_sided(profile)
+        meshes = [_plane_sweep(profile, chains[0], place)] + [
+            _plane_sweep(part, chain, place) for chain in chains[1:] for part in two_sided]
+    else:
+        meshes = [_plane_sweep(profile, chain, place) for chain in chains]
     # Each knob is recessed a sliver so it fuses with the sweep it ends.
     knobs = [(joint, 180) for joint in joints]
     if style != "square":
-        knobs.append((tip, 180 if style == "half" else 90))
+        half = style == "half" or spec.get("type") == "straight"
+        knobs.append((tip, 180 if half else 90))
     for (point2, direction, up), angle in knobs:
         meshes.append(_plane_knob(profile, point2 - direction * 0.05, direction, up,
                                   place, angle, segments))

@@ -117,3 +117,60 @@ The tip is now a choice (spec key `tip`, UI "Tip"): `quarter` (90° roll, the
 default), `half` (180° roll + underside sweep), `square`. The older `cap: false`
 still means square. On a round hook, `half` gives the 180° knob without an
 underside sweep.
+
+## 2026-10-24 — straight hook exactly as the reference; per-hook offset (`24-10-2026/`)
+
+> i am not satisified with the straight hook addition. please make sure the hook
+> that can be added is generated exactly like the examples in the folder. after
+> this also add a parameter to be able to move / offset a certain hook
+> vertically from the actual clicked vertex
+
+The new reference (`hooround Copy 1 - lines.dxf`, `hooround Copy 1.step`) is
+three sketch lines — bottom bar 33.23, post 16.32, a bar from the foot through
+the post's top to (11.09, 21.77), so 26.16° with a 12.36 overhang along the bar
+— and five bodies:
+
+- **Part 2**, bottom bar: the profile on top only, square ends, vertex to foot.
+- **Parts 3 + 4**, post: the profile on **both** faces (section and mirror
+  image), from the ground to the bar's centre line, square ends.
+- **Part 5**, a wedge filling the post's overhang side up to the bar's centre
+  plane; it lies wholly inside the two-sided bar, so it adds nothing.
+- **Part 1**, rising bar: the profile on **both** faces along its whole length,
+  the end section revolved **180°** about the across axis at the tip (a
+  half-disc knob), everything below the ground cut off.
+
+Decisions:
+
+- The straight hook is now built exactly that way. The old construction (bar
+  with the profile on top only, post trimmed to the bar's underside, underside
+  sweep only back to the post for `tip: half`) is gone.
+- On a straight hook any rounded tip is the 180° half-round (the two faces'
+  quarter rolls meet); `square` still leaves the cut. The round hook keeps
+  quarter/half/square.
+- Defaults follow the reference: length 33.2, angle 26.2°, overhang 12.4 (0.1
+  steps in the UI).
+- **Vertical offset** (spec key `offset`, mm, per hook): slides that hook along
+  the drawing's vertical axis (+Y up) from the clicked vertex. Each applied hook
+  gets its own field in the Additions panel; the marker shows a smaller dot
+  where the shifted hook stands. Saved with the hook in the project's
+  `tracery.endpoints`.
+
+## 2026-10-24 — hooks after the groove
+
+> cutting a groove and the straight hook addition is not a good combination.
+> the hooks are cut throught. please add the hooks after cutting the groove by
+> default cutting the groove at the very end should be an optional checkbox
+
+The groove cutter is swept along every main path and was subtracted after
+everything had been fused, hooks included. A hook standing on a path, such as
+a straight hook's bottom bar and post, was slotted wherever it crossed the path.
+
+Decisions:
+
+- **Default:** frame, cusps and endings are fused, the groove is cut, and only
+  then are the hooks fused on. The groove stops where a hook stands.
+- **Option:** "Cut the groove last, through the hooks too" (project key
+  `tracery.grooveLast`, form field `grooveLast`, CLI `--groove-last`) restores
+  the old order. The checkbox sits in the hooks panel and shows only when a
+  groove profile and at least one hook are set. Projects saved before this
+  change open with it unticked, so they get the new default.

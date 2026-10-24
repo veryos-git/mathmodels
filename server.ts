@@ -233,6 +233,27 @@ function handlePreview(req: Request): Promise<Response> {
   });
 }
 
+/** POST /api/sketch — a DXF subject's exact lines and arcs, for the tip editor. */
+function handleSketch(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    const { form, paths } = await takeUpload(req, dir);
+    return Response.json(await runScript([paths[0], "--sketch", ...numericFlags(form, { sagitta: "--sagitta" })]));
+  });
+}
+
+/** POST /api/sketch/apply — the DXF subject with the tip editor's arcs written in. */
+function handleSketchApply(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    const { form, paths } = await takeUpload(req, dir);
+    const edits = form.get("edits");
+    if (typeof edits !== "string") throw new HttpError(400, "expected the edited arcs as JSON");
+    await Deno.writeTextFile(`${dir}/edits.json`, edits);
+    const output = `${dir}/edited.dxf`;
+    await runScript([paths[0], output, "--sketch-edit", `${dir}/edits.json`]);
+    return new Response(await Deno.readFile(output), { headers: { "content-type": "application/dxf" } });
+  });
+}
+
 /** Shelf inputs use the same validated uploads for preview and every export. */
 async function additionFlags(form: FormData, dir: string): Promise<string[]> {
   const outline = await takeExtra(form, "additionOutline", "shelf outline", dir);
@@ -320,6 +341,7 @@ function shapeFlags(form: FormData, boundaryPath: string | null = null): string[
 
   if (form.get("roundEnds") === "1") args.push("--round-ends");
   if (form.get("frameOnly") === "1") args.push("--frame-only");
+  if (form.get("grooveLast") === "1") args.push("--groove-last");
   const layers = form.get("layers");
   if (typeof layers === "string" && layers !== "") args.push("--layers", layers);
   return args;
@@ -1514,6 +1536,8 @@ Deno.serve({ port: PORT }, async (req) => {
 
     if (url.pathname === "/api/inspect" && req.method === "POST") return await handleInspect(req);
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
+    if (url.pathname === "/api/sketch" && req.method === "POST") return await handleSketch(req);
+    if (url.pathname === "/api/sketch/apply" && req.method === "POST") return await handleSketchApply(req);
     if (url.pathname === "/api/profiles/preview" && req.method === "POST") return await handleProfileSections(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);
     if (url.pathname === "/api/additions/preview" && req.method === "POST") return await handleRegions(req, true);
