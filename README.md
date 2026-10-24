@@ -644,14 +644,23 @@ While a profile is set:
   converter does not have, and placing one is refused
 
 Corners are mitred — a pointed arch comes to a real point — up to a limit of
-twice the offset; sharper cusps are bevelled rather than spiking. Curves that
+four times the offset; sharper cusps are clipped rather than spiking. Curves that
 meet end-to-end are chained into continuous paths first (the straightest
-continuation wins at a junction), and duplicate strokes are swept once.
+continuation wins at a junction), and duplicate strokes are swept once. Each
+junction pairs the strokes meeting there by itself, straightest pair first, so
+the result does not depend on the order the drawing lists them: bars that end in
+the corners of a frame leave the frame one closed, mitred loop.
 
 If a sweep fails on tight bends or overlapping paths, the converter retries
 with closed, mitred sections joined by a 0.001 mm overlap. This applies to main
 profiles, cusps and groove cutters, preserving the profile's width and height.
-The result is checked at STL precision before preview or export.
+Whether the first attempt fails is a matter of chance coincidences — where
+separate sweeps meet exactly, STL rounding can weld them into invalid edges —
+so changing the width only moves the problem. The retry therefore sweeps each
+redrawn stretch of a stroke once, drops jogs under 1 µm, makes strokes that
+nearly meet (within 1 µm, as CAD rounding leaves them) meet exactly, and splits
+paths at corners past the mitre limit, building their clipped mitres separately,
+so it works at any width. The result is checked at STL precision before preview or export.
 
 Projects carry all section scales and their proportion locks. Older projects
 retain their existing section dimensions when opened. Without a separate cusp

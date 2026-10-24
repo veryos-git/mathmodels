@@ -1,83 +1,238 @@
-"""Generated hook paths use the active frame profile and stay printable."""
+"""Hooks stand up out of the frame, swept from the main profile at path vertices."""
 import io
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
+import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from additions import attach_hook, hook_mesh
-from dxf2stl import ConvertError, read_curves
+from gothic import hook_sections, hook_solid
 
 ROOT = Path(__file__).resolve().parent.parent
+# The reference moulding: 10 mm wide, a 5.34 mm gable ridge.
+PROFILE = Polygon([(0, 0), (10, 0), (10, 1.13), (8.05, 3.08), (6.93, 3.08), (5, 5.34),
+                   (3.07, 3.08), (1.95, 3.08), (0, 1.13)])
 
 
-class Hooks(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.path = Path(self.tmp.name)
-        self.hook_path = self.path / "generated-hook.svg"
-        self.hook_path.write_text(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="24mm" height="36mm" '
-            'viewBox="0 0 24 36"><path d="M 0 0 V 36 H 24 M 0 0 L 24 36" '
-            'fill="none" stroke="black"/></svg>')
-        self.frame = trimesh.creation.box(extents=[80, 80, 3])
-        self.profile = Polygon([(-1, 0), (1, 0), (1, 3), (-1, 3)])
+class HookSections(unittest.TestCase):
+    """The (along, up) paths a hook sweeps, in the vertical plane at the endpoint."""
 
-    def args(self, **changes):
-        values = dict(cylinder=None, hook_path=str(self.hook_path), hook_x=0,
-                      hook_y=0, hook_z=0, hook_mirror=False, sagitta=.02)
-        return SimpleNamespace(**(values | changes))
+    def test_round_rises_tangent_then_curls_over_the_big_circle(self):
+        chains, (tip, direction, up), joints = hook_sections(
+            {"type": "round", "small_radius": 6, "big_radius": 14, "angle": 200}, 5.34)
+        rise, curl = (np.asarray(c) for c in chains)
+        # Leaves the endpoint along the ground, first bending upward.
+        np.testing.assert_allclose(rise[0], (0, 0), atol=1e-9)
+        self.assertAlmostEqual(rise[1][1] / rise[1][0], 0, delta=0.2)
+        self.assertGreater(rise[1][1], 0)
+        # Both circles rest on the ground and touch: 2*sqrt(6*14) apart.
+        gap = 2 * np.sqrt(84)
+        np.testing.assert_allclose(np.linalg.norm(curl - (gap, 14), axis=1), 14, atol=1e-9)
+        # The tip is 200° round the big circle from its ground point.
+        np.testing.assert_allclose(tip, (gap + 14 * np.sin(np.radians(20)),
+                                         14 + 14 * np.cos(np.radians(20))), atol=1e-9)
+        self.assertEqual(len(joints), 1)            # the reverse-curve joint
+        np.testing.assert_allclose(np.linalg.norm(up), 1, atol=1e-9)
 
-    def test_generated_svg_has_three_profile_swept_rails(self):
-        curves, _, _ = read_curves(str(self.hook_path), .02)
-        expected = [[(0, 36), (0, 0), (24, 0)], [(0, 36), (24, 0)]]
-        for actual, target in zip(curves, expected):
-            for point, wanted in zip(actual, target):
-                self.assertAlmostEqual(point[0], wanted[0], places=3)
-                self.assertAlmostEqual(point[1], wanted[1], places=3)
-        mesh = hook_mesh(self.hook_path, self.profile, .02)
-        self.assertTrue(mesh.is_volume)
-        self.assertGreater(mesh.extents[0], 23)
-        self.assertGreater(mesh.extents[1], 35)
+    def test_straight_is_a_bracket_with_a_post_at_the_endpoint(self):
+        chains, (tip, direction, _), _ = hook_sections(
+            {"type": "straight", "length": 33, "angle": 26, "overhang": 13}, 5.34)
+        bottom, post, bar = (np.asarray(c) for c in chains)
+        self.assertTrue(np.allclose(bottom[:, 1], 0))           # along the ground
+        self.assertTrue(np.allclose(post[:, 0], 0))             # upright at the endpoint
+        # The bar rises back over the frame (negative along) past the post.
+        self.assertLess(tip[0], 0)
+        self.assertAlmostEqual(np.degrees(np.arctan2(direction[1], -direction[0])), 26)
 
-    def test_hook_fuses_to_frame_and_mirror_adds_a_second_support(self):
-        single = attach_hook(self.frame, self.profile, self.args(hook_x=16))
-        paired = attach_hook(self.frame, self.profile, self.args(hook_x=16, hook_mirror=True))
-        self.assertTrue(single.is_volume)
-        self.assertTrue(paired.is_volume)
-        self.assertEqual(len(single.split()), 1)
-        self.assertEqual(len(paired.split()), 1)
-        self.assertGreater(single.bounds[1, 2], self.frame.bounds[1, 2] + 20)
-        self.assertGreater(paired.volume, single.volume + .1)
-        loaded = trimesh.load(io.BytesIO(paired.export(file_type="stl")), file_type="stl")
+    def test_bad_parameters_are_rejected(self):
+        for spec in ({"type": "straight", "length": 0},
+                     {"type": "straight", "angle": 90},
+                     {"type": "straight", "overhang": -1},
+                     {"type": "round", "big_radius": -1},
+                     {"type": "round", "angle": 400},
+                     {"type": "round", "angle": 30},
+                     {"type": "spiral"}):
+            with self.subTest(spec):
+                with self.assertRaises(ValueError):
+                    hook_sections(spec, 5.34)
+
+
+class HookSolid(unittest.TestCase):
+    """Each hook is one printable body standing on the base plane."""
+
+    def test_each_hook_type_matches_the_reference_size(self):
+        # Overall heights: the round hook's big circle tops out at 28 mm (the
+        # reference STEP reaches 32.2 only through its 180° tip revolve); the
+        # straight bracket is about 27 mm with the quarter-turn tip.
+        for spec, height in (({"type": "round"}, 28.0), ({"type": "straight"}, 27.1)):
+            with self.subTest(spec["type"]):
+                mesh = hook_solid(PROFILE, (0, 0), (1, 0), spec)
+                loaded = trimesh.load(io.BytesIO(mesh.export(file_type="stl")), file_type="stl")
+                self.assertTrue(loaded.is_volume)
+                self.assertEqual(len(loaded.split()), 1)
+                self.assertAlmostEqual(loaded.bounds[0, 2], 0, places=4)   # nothing below
+                self.assertAlmostEqual(loaded.bounds[1, 2], height, delta=0.3)
+                # It stands in the vertical plane through the travel direction:
+                # across the path it is exactly the profile's width.
+                self.assertAlmostEqual(loaded.extents[1], 10, places=3)
+
+    def test_tip_is_rounded_over_by_a_quarter_turn(self):
+        # A 90° roll ends with the section lying along the bar, so the nose
+        # reaches no further than one profile height past the tip.
+        chains, (tip, direction, _), _ = hook_sections({"type": "straight"}, 5.34)
+        mesh = hook_solid(PROFILE, (0, 0), (1, 0), {"type": "straight"})
+        bare = hook_solid(PROFILE, (0, 0), (1, 0), {"type": "straight", "cap": False})
+        self.assertLess(mesh.bounds[0, 0], bare.bounds[0, 0])
+        reach = (tip - 0.05 * direction)[0] + 5.34 * direction[0]
+        self.assertGreaterEqual(mesh.bounds[0, 0], reach - 1e-3)
+
+    def test_half_tip_mirrors_the_moulding_under_the_overhang(self):
+        spec = {"type": "straight", "length": 33, "angle": 26, "overhang": 13}
+        half = hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "half"})
+        quarter = hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "quarter"})
+        loaded = trimesh.load(io.BytesIO(half.export(file_type="stl")), file_type="stl")
         self.assertTrue(loaded.is_volume)
+        self.assertEqual(len(loaded.split()), 1)
+        # Over the overhang (behind the post, s < 0) the bar is now a full
+        # profile height thicker underneath: its lowest point there drops.
+        def underside(mesh):
+            cut = mesh.section(plane_origin=(-8, 0, 0), plane_normal=(1, 0, 0))
+            return cut.vertices[:, 2].min()
+        thick = 5.34 / np.cos(np.radians(26))
+        self.assertAlmostEqual(underside(quarter) - underside(half), thick, delta=0.5)
+        with self.assertRaises(ValueError):
+            hook_solid(PROFILE, (0, 0), (1, 0), {**spec, "tip": "pointy"})
 
-    def test_disconnected_hook_is_rejected(self):
-        with self.assertRaisesRegex(ConvertError, "does not touch"):
-            attach_hook(self.frame, self.profile, self.args(hook_z=100))
+    def test_hook_follows_the_given_direction(self):
+        mesh = hook_solid(PROFILE, (5, 5), (0, -1), {"type": "round"})
+        self.assertLess(mesh.bounds[0, 1], -15)    # runs out towards -Y
+        self.assertAlmostEqual(mesh.extents[0], 10, places=3)
 
-    def test_cli_sweeps_the_generated_path(self):
-        frame_path = self.path / "frame.svg"
-        profile_path = self.path / "profile.svg"
-        output = self.path / "hook.stl"
-        frame_path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
-                              'height="80mm" viewBox="0 0 80 80"><path d="M0 0H80V80H0Z"/></svg>')
-        profile_path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
-                                'height="3mm" viewBox="0 0 4 3"><path d="M0 0H4V3H0Z"/></svg>')
-        result = subprocess.run([
-            sys.executable, "tools/dxf2stl.py", str(frame_path), str(output), "--profile", str(profile_path),
-            "--frame-only", "--hook-path", str(self.hook_path), "--hook-x", "10", "--hook-mirror",
-        ], cwd=ROOT, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        mesh = trimesh.load(output)
-        self.assertTrue(mesh.is_volume)
-        self.assertEqual(len(mesh.split()), 1)
+
+class HookCli(unittest.TestCase):
+    """The converter fuses hooks onto the swept frame as a single body."""
+
+    def test_round_and_straight_hooks_fuse_onto_the_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            frame = tmp / "frame.svg"
+            profile = tmp / "profile.svg"
+            hooks = tmp / "hooks.json"
+            out = tmp / "hooked.stl"
+            # An open L-path; the converter flips SVG Y, so its ends are at
+            # (10, 10) and (70, 70) in model coordinates.
+            frame.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
+                             'height="80mm" viewBox="0 0 80 80">'
+                             '<path d="M10 70 V10 H70" fill="none" stroke="black"/></svg>')
+            profile.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
+                               'height="3mm" viewBox="0 0 4 3"><path d="M0 0H4V3H0Z"/></svg>')
+            hooks.write_text(json.dumps([
+                {"x": 10, "y": 10, "type": "round"},
+                {"x": 70, "y": 70, "type": "straight", "length": 25, "angle": 30,
+                 "overhang": 8, "cap": True},
+            ]))
+            result = subprocess.run([
+                sys.executable, "tools/dxf2stl.py", str(frame), str(out),
+                "--profile", str(profile), "--frame-only", "--hooks", str(hooks),
+            ], cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            mesh = trimesh.load(out)
+            self.assertTrue(mesh.is_volume)
+            self.assertEqual(len(mesh.split()), 1)
+            # The round hook runs on past the (10, 10) end towards -Y, and
+            # both hooks stand up well above the 3 mm frame.
+            self.assertLess(mesh.bounds[0, 1], -10)
+            self.assertGreater(mesh.bounds[1, 2], 25)
+
+    def test_hook_fuses_onto_a_closed_loop_corner(self):
+        # A closed frame has no free ends; every corner is still placeable and
+        # the hook leaves perpendicular, away from the loop.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            box = tmp / "box.svg"
+            profile = tmp / "profile.svg"
+            hooks = tmp / "hooks.json"
+            out = tmp / "hooked.stl"
+            box.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
+                           'height="80mm" viewBox="0 0 80 80">'
+                           '<path d="M10 10 H70 V70 H10 Z" fill="none" stroke="black"/></svg>')
+            profile.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
+                               'height="3mm" viewBox="0 0 4 3"><path d="M0 0H4V3H0Z"/></svg>')
+            hooks.write_text(json.dumps([
+                {"x": 10, "y": 10, "type": "round", "small_radius": 5,
+                 "big_radius": 12, "angle": 200},
+            ]))
+            result = subprocess.run([
+                sys.executable, "tools/dxf2stl.py", str(box), str(out),
+                "--profile", str(profile), "--frame-only", "--hooks", str(hooks),
+            ], cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            mesh = trimesh.load(out)
+            self.assertTrue(mesh.is_volume)
+            self.assertEqual(len(mesh.split()), 1)
+            # The corner hook leaves perpendicular, away from the loop centre,
+            # so it protrudes past the frame's lower-left corner (~8 mm).
+            self.assertLess(min(mesh.bounds[0, :2]), 0)
+            self.assertGreater(mesh.bounds[1, 2], 20)
+
+    def test_hooks_all_face_down_the_drawing_and_rotate(self):
+        # Three paths meet at (40, 40); a hook there and at a free end both
+        # face -Y regardless of the paths, and a shared vertex gets one hook.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            frame = tmp / "frame.svg"
+            profile = tmp / "profile.svg"
+            hooks = tmp / "hooks.json"
+            frame.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
+                             'height="80mm" viewBox="0 0 80 80">'
+                             '<path d="M10 40 H40 M40 40 H70 M40 40 L60 10" fill="none" '
+                             'stroke="black"/></svg>')
+            profile.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4mm" '
+                               'height="3mm" viewBox="0 0 4 3"><path d="M0 0H4V3H0Z"/></svg>')
+
+            def build(spec):
+                hooks.write_text(json.dumps([{"x": 40, "y": 40, "type": "straight", **spec}]))
+                out = tmp / "hooked.stl"
+                result = subprocess.run([
+                    sys.executable, "tools/dxf2stl.py", str(frame), str(out),
+                    "--profile", str(profile), "--frame-only", "--hooks", str(hooks),
+                ], cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return trimesh.load(out)
+
+            down = build({"length": 20, "angle": 30, "overhang": 5})
+            self.assertTrue(down.is_volume)
+            # Bottom bar runs 20 mm down from (40, 40) to y = 20; the bar's
+            # foot reaches 3 mm / sin 30° further before the ground cut. One
+            # hook, aligned with -Y, standing 4 mm wide across X.
+            self.assertAlmostEqual(down.bounds[0, 1], 20 - 3 / 0.5, delta=0.05)
+            high = down.vertices[down.vertices[:, 2] > 5]
+            self.assertAlmostEqual(float(np.ptp(high[:, 0])), 4, delta=0.01)
+            turned = build({"length": 20, "angle": 30, "overhang": 5, "rotation": 90})
+            high = turned.vertices[turned.vertices[:, 2] > 5]
+            self.assertAlmostEqual(float(np.ptp(high[:, 1])), 4, delta=0.01)
+            self.assertGreater(turned.bounds[1, 0], 70 - 1)   # +X after 90° CCW from -Y
+
+    def test_hook_without_profile_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            frame = tmp / "frame.svg"
+            hooks = tmp / "hooks.json"
+            frame.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="80mm" '
+                             'height="80mm" viewBox="0 0 80 80">'
+                             '<path d="M10 70 V10 H70" fill="none" stroke="black"/></svg>')
+            hooks.write_text(json.dumps([{"x": 10, "y": 10, "type": "round"}]))
+            result = subprocess.run([
+                sys.executable, "tools/dxf2stl.py", str(frame), str(tmp / "o.stl"),
+                "--frame-only", "--hooks", str(hooks),
+            ], cwd=ROOT, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("profile", result.stderr.lower())
 
 
 if __name__ == "__main__":

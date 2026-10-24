@@ -42,7 +42,7 @@ below; colour groups are shared, so split and 3MF exports merge the layers.
 """
 
 from gothic import (solid_union, revolved_ending, dome_ending, stepped_profile_sweep,
-                    segmented_profile_sweep, path_frames)
+                    segmented_profile_sweep, path_frames, hook_solid)
 import argparse
 import base64
 import itertools
@@ -61,7 +61,7 @@ import numpy as np
 import svgelements
 import trimesh
 from ezdxf.path import make_path
-from shapely import STRtree, union_all
+from shapely import STRtree, difference, set_precision, union, union_all
 from shapely.affinity import scale as aff_scale
 from shapely.affinity import translate
 from shapely.geometry import LineString, Point, Polygon, box
@@ -547,6 +547,11 @@ def chain_curves(curves, min_dot=-0.95):
     path — pairing them up arbitrarily turns the chain back on itself and
     the sweep folds into garbage there. Near-reversing tangents are separate
     capped sweeps, as at the bottom cusp of a pair of pointed arches.
+
+    Each junction pairs its ends on its own, straightest pair first. Growing
+    one chain at a time instead lets the first chain to arrive take a turn
+    meant for two other strokes: a bar ending at a frame's corner would
+    turn into one side of the frame and leave the frame open there.
     """
     segs = []
     seen = set()
@@ -568,50 +573,47 @@ def chain_curves(curves, min_dot=-0.95):
         n = math.hypot(*d)
         return (d[0] / n, d[1] / n) if n else (0.0, 0.0)
 
-    def straightest(anchor, outward):
-        """The unused segment at `anchor` most in line with `outward`."""
-        best = None
-        for j, other in enumerate(segs):
-            if used[j]:
-                continue
-            if other[0] == anchor:
-                cand, forward = unit(anchor, other[1]), True
-            elif other[-1] == anchor:
-                cand, forward = unit(anchor, other[-2]), False
-            else:
-                continue
-            score = outward[0] * cand[0] + outward[1] * cand[1]
+    # The ends at each junction, keyed (segment, at its last point), with
+    # the direction leading away from the junction into the segment.
+    ends = defaultdict(list)
+    for j, seg in enumerate(segs):
+        if seg[0] != seg[-1]:
+            ends[seg[0]].append(((j, False), unit(seg[0], seg[1])))
+            ends[seg[-1]].append(((j, True), unit(seg[-1], seg[-2])))
+    partner = {}
+    for meeting in ends.values():
+        # Running in along one end and out along the other: how straight.
+        pairs = [(-(a[0] * b[0] + a[1] * b[1]), x, y)
+                 for x, (_, a) in enumerate(meeting)
+                 for y, (_, b) in enumerate(meeting) if x < y]
+        for score, x, y in sorted(pairs, key=lambda p: (-p[0], p[1], p[2])):
             if score < min_dot:
-                continue
-            if best is None or score > best[0]:
-                best = (score, j, forward)
-        return best[1:] if best else None
+                break
+            a, b = meeting[x][0], meeting[y][0]
+            if a not in partner and b not in partner:
+                partner[a], partner[b] = b, a
+
+    used = [False] * len(segs)
+
+    def run(j, backwards):
+        """Points along segment j and on through paired junctions."""
+        points = []
+        while j is not None and not used[j]:
+            used[j] = True
+            seg = segs[j][::-1] if backwards else segs[j]
+            points += seg if not points else seg[1:]
+            j, backwards = partner.get((j, not backwards), (None, None))
+        return points
 
     chains = []
-    used = [False] * len(segs)
     for i, seg in enumerate(segs):
         if used[i]:
             continue
-        used[i] = True
-        chain = list(seg)
-        while chain[0] != chain[-1]:
-            grown = False
-            # tail, then head; each takes the straightest continuation on offer
-            nxt = straightest(chain[-1], unit(chain[-2], chain[-1]))
-            if nxt is not None:
-                j, forward = nxt
-                chain.extend(segs[j][1:] if forward else segs[j][-2::-1])
-                used[j] = True
-                grown = True
-            if chain[0] != chain[-1]:
-                nxt = straightest(chain[0], unit(chain[1], chain[0]))
-                if nxt is not None:
-                    j, forward = nxt
-                    chain = (segs[j][:-1] if not forward else segs[j][:0:-1]) + chain
-                    used[j] = True
-                    grown = True
-            if not grown:
-                break
+        # Keep the earliest segment's drawn direction; a loop closes itself.
+        chain = run(i, False)
+        before = partner.get((i, False))
+        if before is not None and not used[before[0]]:
+            chain = run(before[0], before[1])[::-1][:-1] + chain
         chains.append(chain)
     return chains
 
@@ -633,6 +635,177 @@ def repeat_paths(paths, offsets, merge=True):
             if line.geom_type == "LineString" and not line.is_empty]
 
 
+def merged_chains(chains, tolerance=1e-3):
+    """The chains with every stretch swept once and no sub-`tolerance` jogs.
+
+    Sketches often redraw part of a stroke inside another, a hair off the
+    original. Two sweeps along a shared stretch touch everywhere without
+    fusing. Each chain gives up only what an earlier one already covers,
+    on a grid that makes such near-copies coincide, and otherwise keeps
+    its own course and direction through junctions, so mitres and
+    asymmetric sections stay as drawn. Jogs left where strokes part are
+    segments whose directions are noise, so they are simplified away;
+    `tolerance` (in mm) is far below print resolution.
+    """
+    grid = tolerance / 10
+    covered, paths = None, []
+    for chain in chains:
+        if len(chain) < 2:
+            continue
+        line = set_precision(LineString(chain), grid)
+        nearby = prep(covered) if covered is not None else None
+        runs, run = [], []
+        # Walk the chain's own segments in order: overlay would rejoin a path
+        # that passes back through itself into a different course.
+        for a, b in zip(line.coords, line.coords[1:]):
+            segment = LineString([a, b])
+            rest = (segment if nearby is None or not nearby.intersects(segment)
+                    else difference(segment, covered, grid_size=grid))
+            parts = [p for p in getattr(rest, "geoms", [rest])
+                     if p.geom_type == "LineString" and not p.is_empty]
+            for part in sorted(parts, key=lambda p: segment.project(Point(p.coords[0]))):
+                coords = list(part.coords)
+                if run and run[-1] == coords[0]:
+                    run += coords[1:]
+                else:
+                    runs.append(run)
+                    run = coords
+        runs.append(run)
+        covered = line if covered is None else union(covered, line, grid_size=grid)
+        for run in runs:
+            if len(run) < 2:
+                continue
+            part = LineString(run).simplify(tolerance, preserve_topology=False)
+            if part.length > tolerance:
+                paths.append(list(part.coords))
+    # A chain cut short by a shared stretch resumes along the earlier stroke.
+    # Chain first: chaining rounds coordinates, which would undo exactness.
+    return exact_junctions(chain_curves(paths), tolerance)
+
+
+def exact_junctions(paths, tolerance, straight=math.radians(1)):
+    """The paths with every near-junction made exact.
+
+    A stroke that ends, or turns, a few nanometres beside another (CAD
+    rounding does this, as does the grid above) leaves its sweep a sub-STL
+    distance from the other's ridge, and float32 rounding folds the slivers
+    between them into open edges. Vertices closer than `tolerance` become
+    one, and a vertex within `tolerance` of another stroke moves onto it,
+    which is threaded through the vertex there. Strokes running straight
+    (within `straight`) through a vertex never bend there, as a hair's kink
+    would leave two nearly coplanar prism faces, slivers of their own: the
+    vertex only slides along such a stroke, and stays where two cross.
+    """
+    points = [tuple(p) for path in paths for p in path]
+    if not points:
+        return []
+    owner, index = zip(*[(n, i) for n, path in enumerate(paths) for i in range(len(path))])
+
+    def turn(k):
+        """How sharply the path turns at point k; None at a free end."""
+        path, i = paths[owner[k]], index[k]
+        closed = path[0] == path[-1] and len(path) > 2
+        if not closed and i in (0, len(path) - 1):
+            return None
+        before = path[i - 1] if i > 0 else path[-2]
+        after = path[i + 1] if i < len(path) - 1 else path[1]
+        a, b = np.subtract(path[i], before), np.subtract(after, path[i])
+        return abs(math.atan2(a[0] * b[1] - a[1] * b[0], a @ b))
+
+    bends = [turn(k) for k in range(len(points))]
+    # Weld clusters onto the member whose stroke runs straightest through it.
+    rank = [(math.inf if t is None else t, k) for k, t in enumerate(bends)]
+    parent = list(range(len(points)))
+
+    def root(k):
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    shapes = [Point(p) for p in points]
+    for i, j in zip(*STRtree(shapes).query(shapes, predicate="dwithin", distance=tolerance)):
+        a, b = root(int(i)), root(int(j))
+        if a != b:
+            keep, drop = sorted((a, b), key=lambda k: rank[k])
+            parent[drop] = keep
+    welded = [points[root(k)] for k in range(len(points))]
+    starts = np.cumsum([0] + [len(path) for path in paths])
+    guides = defaultdict(list)
+    for k, t in enumerate(bends):
+        if t is not None and t < straight:
+            n, i = owner[k], index[k]
+            before = k - 1 if i > 0 else starts[n] + len(paths[n]) - 2
+            guides[welded[k]].append(LineString([welded[before], welded[k]]))
+    # Each vertex near another stroke moves onto it: onto the nearest
+    # segment, or where two strokes cross beside it, onto their crossing.
+    segments = [(n, i, LineString([welded[k], welded[k + 1]]))
+                for k, (n, i) in enumerate(zip(owner, index))
+                if i < len(paths[n]) - 1]
+    tree = STRtree([s for _, _, s in segments])
+    moves = {}
+    for vertex in set(welded):
+        here = Point(vertex)
+        near = [segments[s] for s in tree.query(here, predicate="dwithin", distance=tolerance)]
+        near = sorted(((segment.distance(here), n, i, segment) for n, i, segment in near
+                       if min(here.distance(Point(c)) for c in segment.coords) >= tolerance),
+                      key=lambda m: m[0])
+        lines = guides[vertex]
+        if not near or any(_crossing(lines[0], line) is not None for line in lines[1:]):
+            continue
+        hits = near[:1]
+        if lines:
+            target = _crossing(lines[0], near[0][3])
+        else:
+            target = _foot(near[0][3], vertex)
+            for other in near[1:]:
+                crossing = _crossing(near[0][3], other[3])
+                if crossing is not None and here.distance(Point(crossing)) < tolerance:
+                    target, hits = crossing, [near[0], other]
+                    break
+        if target is not None and here.distance(Point(target)) < tolerance:
+            moves[vertex] = (target, [(n, i, segment) for _, n, i, segment in hits])
+    # A segment whose own end moves would no longer pass through its thread.
+    planned = set(moves)
+    threads = defaultdict(list)
+    for vertex, (target, hits) in list(moves.items()):
+        if any({welded[starts[n] + i], welded[starts[n] + i + 1]} & planned for n, i, _ in hits):
+            del moves[vertex]
+            continue
+        for n, i, segment in hits:
+            threads[n, i].append((segment.project(Point(target)), target))
+    result, k = [], 0
+    for n, path in enumerate(paths):
+        own = [moves[p][0] if p in moves else p for p in welded[k:k + len(path)]]
+        k += len(path)
+        out = own[:1]
+        for i, end in enumerate(own[1:]):
+            out += [p for _, p in sorted(threads[n, i])] + [end]
+        # Welding can fold two vertices of one path together.
+        out = out[:1] + [p for prev, p in zip(out, out[1:]) if p != prev]
+        if len(out) >= 2:
+            result.append(out)
+    return result
+
+
+def _foot(segment, point):
+    """The point on `segment` nearest `point`, computed along the segment."""
+    (ax, ay), (bx, by) = segment.coords
+    t = segment.project(Point(point), normalized=True)
+    return (ax + t * (bx - ax), ay + t * (by - ay))
+
+
+def _crossing(first, second):
+    """Where the lines through two segments cross, or None if parallel."""
+    (ax, ay), (bx, by) = first.coords
+    (cx, cy), (dx, dy) = second.coords
+    det = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx)
+    if abs(det) < 1e-12 * first.length * second.length:
+        return None
+    t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / det
+    return (ax + t * (bx - ax), ay + t * (by - ay))
+
+
 def sweep_profile(profile, chains):
     """The frame as one mesh: the profile swept along every path.
 
@@ -648,23 +821,29 @@ def sweep_profile(profile, chains):
     # and prevents these otherwise closed sweeps from being solid-unioned.
     profile = profile.simplify(0, preserve_topology=True)
     try:
-        stepped = stepped_profile_sweep(profile, chains, MITER_LIMIT)
-        if stepped is not None:
-            return stepped
-        return _ring_profile_sweep(profile, chains)
+        mesh = stepped_profile_sweep(profile, chains, MITER_LIMIT)
+        if mesh is None:
+            mesh = _ring_profile_sweep(profile, chains)
+        # solid_union checks its parts one at a time, but an STL reader
+        # welds parts that touch at an edge; the whole must stay closed.
+        welded = mesh.copy()
+        welded.merge_vertices()
+        if welded.is_volume:
+            return mesh
     except (ValueError, RuntimeError):
-        # Wide sections can fold through themselves on tight bends, or leave
-        # tangent slivers that collapse when STL rounds vertices to float32.
-        # Rebuild from closed prisms so the boolean resolves their overlaps.
-        # This recovery belongs to all sweeps, including tracery and cutters.
-        from cylinder import printable_mesh
-
+        pass
+    # Wide sections can fold through themselves on tight bends, or leave
+    # tangent slivers that collapse when STL rounds vertices to float32.
+    # Rebuild from closed prisms so the boolean resolves their overlaps.
+    # This recovery belongs to all sweeps, including tracery and cutters.
+    # Which sweeps fail is set by chance coincidences in the geometry,
+    # not by the width, so the prisms also get a cleaned path network.
+    from cylinder import printable_mesh
     try:
-        return printable_mesh(segmented_profile_sweep(profile, chains, MITER_LIMIT))
+        return printable_mesh(segmented_profile_sweep(profile, merged_chains(chains), MITER_LIMIT))
     except (ValueError, RuntimeError) as error:
-        raise ConvertError("Could not build the profile sweep: the profile could not form "
-                           "closed solids at STL precision; reduce the profile width "
-                           "or simplify tight sketch corners") from error
+        raise ConvertError("Could not build the profile sweep: the swept paths did not form "
+                           f"closed solids at STL precision ({error})") from error
 
 
 def _ring_profile_sweep(profile, chains):
@@ -1002,6 +1181,8 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         wall_height = max(wall_height, cusp_section.bounds[3])
     if args.round_ends and profile is None:
         raise ConvertError("Rounded endings require a sweep profile")
+    if args.hooks and profile is None:
+        raise ConvertError("Hooks are swept from the main profile; choose one first")
 
     # The boundary crops the subject. Walled — the default — the cut curves
     # plus the boundary's own rings are the drawing from here on, so the rim
@@ -1100,15 +1281,21 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
     if args.frame_only and connection_polys:
         wall_polys = wall_polys + connection_polys
 
-    # Open path endpoints (only meaningful when a sweep profile is loaded).
+    # Every path vertex is a candidate for an ending or a hook (only meaningful
+    # when a sweep profile is loaded). Both free ends and interior/closed-loop
+    # corners qualify; the build picks each hook's outward direction from the
+    # local geometry. Deduplicated by rounded position.
     open_endpoints = []
     if profile is not None:
+        seen = set()
         for chain in chain_curves(list(swept)):
-            if chain[0] == chain[-1] or len(chain) < 2:
-                continue
-            for idx in (0, -1):
-                pt = chain[idx]
-                open_endpoints.append([round(float(pt[0]), 4), round(float(pt[1]), 4)])
+            vertices = chain[:-1] if len(chain) > 1 and chain[0] == chain[-1] else chain
+            for pt in vertices:
+                key = (round(float(pt[0]), 4), round(float(pt[1]), 4))
+                if key in seen:
+                    continue
+                seen.add(key)
+                open_endpoints.append([key[0], key[1]])
 
     # Dome endings: load the target coordinates once (closure for build_frame).
     dome_ends_coords = []
@@ -1118,6 +1305,20 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                 dome_ends_coords = [np.asarray(pt, dtype=float) for pt in json.load(_fp)]
         except (OSError, ValueError, TypeError) as _e:
             raise ConvertError(f"Could not read dome-ends file: {_e}") from _e
+
+    # Hooks: each spec continues the main profile along a hook path at the open
+    # endpoint nearest its (x, y). Loaded once as a closure for build_frame.
+    hook_specs = []
+    if args.hooks:
+        try:
+            with open(args.hooks) as _fp:
+                hook_specs = list(json.load(_fp))
+        except (OSError, ValueError, TypeError) as _e:
+            raise ConvertError(f"Could not read hooks file: {_e}") from _e
+        for _spec in hook_specs:
+            if not (isinstance(_spec, dict) and all(math.isfinite(float(_spec.get(k, float("nan"))))
+                                                    for k in ("x", "y"))):
+                raise ConvertError("Each hook needs finite x and y endpoint coordinates")
 
     def build_frame(offsets=None, trim=None):
         """The swept frame and its connection ribs; None for flat walls.
@@ -1132,7 +1333,7 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         paths = repeat_paths(swept, offsets)
         frame_mesh = sweep_profile(profile, chain_curves(paths))
 
-        if args.cusps or args.round_ends or dome_ends_coords:
+        if args.cusps or args.round_ends or dome_ends_coords or hook_specs:
             solids = [frame_mesh]
             cusps = repeat_paths(cusp_curves, offsets, merge=False)
             end_section = cusp_section if args.cusps else profile
@@ -1169,6 +1370,31 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                         tangent = -forward if index == 0 else forward
                         normal = np.array([-tangent[1], tangent[0]])
                         solids.append(dome_ending(profile, point, normal, forward))
+            if hook_specs:
+                tol = max(1e-2, args.sagitta * 2)
+                overlap = max(args.sagitta * 2, 0.05)
+                # Hooks stand up out of the drawing plane. They all face the
+                # same way, along the drawing's -Y by default, whatever the
+                # path does at their vertex; `rotation` turns one about Z.
+                # One hook per vertex, even where several paths meet there.
+                placed = set()
+                for chain in chain_curves(paths, min_dot=-0.5):
+                    for point in path_frames(chain)[0]:
+                        key = (round(float(point[0]) / tol), round(float(point[1]) / tol))
+                        spec = next((s for s in hook_specs
+                                     if abs(float(s["x"]) - point[0]) <= tol
+                                     and abs(float(s["y"]) - point[1]) <= tol), None)
+                        if spec is None or key in placed:
+                            continue
+                        placed.add(key)
+                        turn = math.radians(float(spec.get("rotation", 0.0)))
+                        forward = np.array([math.sin(turn), -math.cos(turn)])
+                        try:
+                            # The profile is centred on both the path and the
+                            # hook, so the hook's root always overlaps the frame.
+                            solids.append(hook_solid(profile, point, forward, spec, overlap))
+                        except ValueError as error:
+                            raise ConvertError(str(error)) from error
             try:
                 frame_mesh = solid_union(solids)
             except (ValueError, RuntimeError) as error:
@@ -2421,6 +2647,14 @@ def main():
     ap.add_argument("--end-side", type=int, choices=[-1, 1], default=1)
     ap.add_argument("--dome-ends", default=None, metavar="FILE",
                     help="JSON file listing [[x,y],...] endpoint positions to cap with a dome ending")
+    ap.add_argument("--hooks", default=None, metavar="FILE",
+                    help="JSON file: list of {x,y,type,...} hooks swept from the main "
+                         "profile, standing up out of the drawing plane at path "
+                         "vertices, facing the drawing's -Y unless rotation (degrees, "
+                         "counter-clockwise) turns them. type is 'round' (small_radius, "
+                         "big_radius, angle) or 'straight' (length, angle, overhang); "
+                         "tip is 'quarter' (default), 'half' (180° roll plus an underside "
+                         "sweep) or 'square'")
     ap.add_argument("--frame-only", action="store_true", help="Generate tracery without glass faces")
     ap.add_argument("--boundary", default=None, metavar="FILE",
                     help="DXF/SVG holding a closed polygon that bounds the "

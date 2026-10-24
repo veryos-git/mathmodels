@@ -122,6 +122,28 @@ sweeps and endings are fused with Manifold before the mesh is sent to the previe
 or exported. Invalid solids produce a conversion error instead of a silent
 broken export.
 
+**Path endings & hooks** act on the vertices of the swept main path — free
+ends and corners alike, on open or closed paths — shown as markers in the 3D
+view. Pick what to apply, then click a marker to toggle it there: a **dome
+cap** rounds a free endpoint over. Hooks are swept from the same main profile
+and stand up out of the drawing plane. All hooks face the same way, down the
+drawing's vertical axis (−Y), whatever the path does at their vertex; the
+**Rotation** turns them counter-clockwise from there. A vertex shared by several
+paths still gets a single hook. A **round hook** is a reverse curve: a *small radius* arc
+rises from the endpoint into a *big radius* arc that curls over, ending at the
+*curl angle* measured round the big circle from the ground; the profile sits on
+the concave side of each arc, as in the reference model. A **straight hook** is
+a bracket: a bottom bar of the given *length* continues the path, a post stands
+at the endpoint, and a bar rising at *angle* from the bottom bar's far end rests
+on the post and *overhangs* it back over the frame; anything below the base
+plane is cut off. The **Tip** sets how the free end finishes: *quarter round* rolls the end
+section 90° forward (its profile edges can stay sharp); *half round + underside
+sweep* rolls it 180° so it hangs under the bar and, on a straight hook, sweeps
+that flipped section back to the post, giving a smooth half-round end with the
+moulding on both faces of the overhang (the post then stops at that underside);
+*square* leaves the cut. The endings and hooks are fused into the frame with
+Manifold, so they export as one printable body, and travel inside project files.
+
 Choose **Frame only** for an ornamental tracery object without faces.
 Keep it off for a swept frame with paintable infill. The input files, settings,
 workflow selection and material calibrations all travel inside project files.

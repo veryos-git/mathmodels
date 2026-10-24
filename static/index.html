@@ -892,9 +892,34 @@
     <p class="muted">Scales this section only. X runs across the path; profile Y becomes the model's vertical height. Lock keeps the current width/height ratio.</p>
   </div>
   <div id="domeEndsSection" hidden>
-    <strong>Open path endings</strong>
-    <p class="muted">Click an endpoint marker in the view to toggle. Hit Generate 3D to apply. <span id="domeEndCount"></span></p>
-    <button id="domeClearAll" class="ghost" hidden>Clear all dome endings</button>
+    <strong>Path endings &amp; hooks</strong>
+    <p class="muted">Every path vertex — free ends and corners, open or closed paths — is a marker. Pick what to apply, then click a marker in the view to toggle it there. Hit Generate 3D to apply. <span id="domeEndCount"></span></p>
+    <label for="endpointMode">Apply at endpoint</label>
+    <select id="endpointMode">
+      <option value="dome">Dome cap</option>
+      <option value="round">Round hook (crook)</option>
+      <option value="straight">Straight hook</option>
+    </select>
+    <div id="hookRoundParams" class="row" hidden>
+      <label>Small radius (mm)<input id="hookSmallRadius" type="number" min="0.5" step="0.5" value="6"></label>
+      <label>Big radius (mm)<input id="hookBigRadius" type="number" min="0.5" step="0.5" value="14"></label>
+      <label>Curl angle (deg)<input id="hookCurl" type="number" min="100" max="350" step="5" value="200"></label>
+    </div>
+    <div id="hookStraightParams" class="row" hidden>
+      <label>Length (mm)<input id="hookLength" type="number" min="1" step="1" value="33"></label>
+      <label>Angle (deg)<input id="hookAngle" type="number" min="5" max="80" step="1" value="26"></label>
+      <label>Overhang (mm)<input id="hookOverhang" type="number" min="0" step="1" value="13"></label>
+    </div>
+    <div id="hookCapRow" class="row" hidden>
+      <label>Rotation (deg)<input id="hookRotation" type="number" min="-180" max="180" step="15" value="0"></label>
+      <label>Tip<select id="hookTip">
+        <option value="quarter">Quarter round (90° roll)</option>
+        <option value="half">Half round + underside sweep (180°)</option>
+        <option value="square">Square cut</option>
+      </select></label>
+    </div>
+    <p class="muted">Hooks are swept from the main profile and stand up out of the frame. All hooks face the same way: down the drawing's vertical axis, or turned counter-clockwise by the rotation. Round: a small arc rises into a big arc that curls over; the curl angle is measured round the big circle from the ground. Straight: a bottom bar of the given length continues the path, a post stands at the endpoint, and a bar rising at the angle rests on the post and overhangs it back over the frame. A quarter-round tip can leave the profile's edges sharp; the half-round tip turns the end 180° and sweeps it back under the overhang for a smooth end.</p>
+    <button id="domeClearAll" class="ghost" hidden>Clear all endings</button>
   </div>
   <details id="gothicOptions">
     <summary>Cusp paths &amp; rounded endings</summary>
@@ -2515,11 +2540,16 @@ async function applyHoles() {
   }
 }
 
-/* --------------------------------------------------------- dome endings */
+/* ------------------------------------------------ open path endings & hooks */
 
 let domeEndpoints = [];      // [[x, y], ...] from the regions response
-let domeEndSelected = new Set();  // indices into domeEndpoints
+// index -> 'dome' | 'round' | 'straight'. Dome caps the endpoint; the hook
+// kinds continue the main profile along a hook path from it.
+let endpointMode = new Map();
+let pendingEndpointModes = null;  // [{x, y, mode}] restored from a project
 let domeEndMarkers = null;   // THREE.Group of marker meshes
+
+const ENDPOINT_COLORS = { dome: 0x60a5fa, round: 0x34d399, straight: 0xf59e0b };
 
 function clearDomeMarkers() {
   if (domeEndMarkers) {
@@ -2535,12 +2565,12 @@ function drawDomeMarkers() {
   domeEndMarkers = new THREE.Group();
   const r = 1.2;
   domeEndpoints.forEach(([x, y], i) => {
-    const selected = domeEndSelected.has(i);
+    const mode = endpointMode.get(i);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(r, 16, 8),
       new THREE.MeshBasicMaterial({
-        color: selected ? 0x60a5fa : 0x6b7280,
-        transparent: true, opacity: selected ? 0.9 : 0.5, depthTest: false,
+        color: mode ? ENDPOINT_COLORS[mode] : 0x6b7280,
+        transparent: true, opacity: mode ? 0.9 : 0.5, depthTest: false,
       }),
     );
     mesh.position.set(x + (layers[0]?.offset[0] ?? 0), y + (layers[0]?.offset[1] ?? 0), 0.5);
@@ -2551,38 +2581,53 @@ function drawDomeMarkers() {
   scene.add(domeEndMarkers);
 }
 
+/** Show only the parameter rows that belong to the chosen endpoint mode. */
+function hookParamsUI() {
+  const mode = $('endpointMode').value;
+  $('hookRoundParams').hidden = mode !== 'round';
+  $('hookStraightParams').hidden = mode !== 'straight';
+  $('hookCapRow').hidden = mode === 'dome';
+}
+
 function domeEndsUI() {
   const hasEndpoints = domeEndpoints.length > 0 && profilePicked;
   $('domeEndsSection').hidden = !hasEndpoints;
-  const n = domeEndSelected.size;
+  hookParamsUI();
+  const n = endpointMode.size;
   $('domeEndCount').textContent = n
-    ? `${n} of ${domeEndpoints.length} selected.`
-    : domeEndpoints.length ? `${domeEndpoints.length} endpoints — click to select.` : '';
+    ? `${n} of ${domeEndpoints.length} applied.`
+    : domeEndpoints.length ? `${domeEndpoints.length} endpoints — click to apply.` : '';
   $('domeClearAll').hidden = n === 0;
   drawDomeMarkers();
 }
 
 function setDomeEndpoints(eps) {
   const prev = domeEndpoints;
-  const prevSel = domeEndSelected;
+  const prevModes = endpointMode;
   domeEndpoints = eps ?? [];
-  // Re-map previously selected indices onto the new endpoint list by position.
-  domeEndSelected = new Set();
-  for (const i of prevSel) {
-    if (i >= prev.length) continue;
-    const [px, py] = prev[i];
+  endpointMode = new Map();
+  // A project restore supplies modes by position before the endpoints exist.
+  const byPosition = pendingEndpointModes
+    ? pendingEndpointModes.map(m => [[m.x, m.y], m.mode])
+    : [...prevModes].map(([i, mode]) => [prev[i], mode]);
+  pendingEndpointModes = null;
+  for (const [pos, mode] of byPosition) {
+    if (!pos) continue;
+    const [px, py] = pos;
     const j = domeEndpoints.findIndex(([x, y]) => Math.abs(x - px) < 0.1 && Math.abs(y - py) < 0.1);
-    if (j >= 0) domeEndSelected.add(j);
+    if (j >= 0) endpointMode.set(j, mode);
   }
   domeEndsUI();
 }
 
 $('domeClearAll').onclick = () => {
-  domeEndSelected.clear();
+  endpointMode.clear();
   domeEndsUI();
 };
 
-/** Toggle dome selection when the user clicks an endpoint marker. */
+$('endpointMode').onchange = hookParamsUI;
+
+/** Apply (or clear) the chosen ending when an endpoint marker is clicked. */
 function tryToggleDomeEnd(event) {
   if (!domeEndMarkers) return false;
   const rect = canvas.getBoundingClientRect();
@@ -2592,10 +2637,28 @@ function tryToggleDomeEnd(event) {
   const hits = raycaster.intersectObjects(domeEndMarkers.children, false);
   if (!hits.length) return false;
   const idx = hits[0].object.userData.domeEndIndex;
-  if (domeEndSelected.has(idx)) domeEndSelected.delete(idx);
-  else domeEndSelected.add(idx);
+  const mode = $('endpointMode').value;
+  // Clicking the same mode again clears it; a different mode replaces it.
+  if (endpointMode.get(idx) === mode) endpointMode.delete(idx);
+  else endpointMode.set(idx, mode);
   domeEndsUI();
   return true;
+}
+
+/** Build the hook spec a round/straight endpoint sends to the converter. */
+function hookSpec(x, y, mode) {
+  const tip = $('hookTip').value;
+  const rotation = Number($('hookRotation').value) || 0;
+  if (mode === 'round') {
+    return { x, y, type: 'round', tip, rotation,
+      small_radius: Number($('hookSmallRadius').value),
+      big_radius: Number($('hookBigRadius').value),
+      angle: Number($('hookCurl').value) };
+  }
+  return { x, y, type: 'straight', tip, rotation,
+    length: Number($('hookLength').value),
+    angle: Number($('hookAngle').value),
+    overhang: Number($('hookOverhang').value) };
 }
 
 /** Where in the model a click landed: on the solid, or on its base plane. */
@@ -5307,8 +5370,14 @@ function shapeForm({ placement = false } = {}) {
     if (!$('boundaryWall').checked) form.append('boundaryWall', '0');
   }
   if (layers[0].holes.length) form.append('holes', JSON.stringify(layers[0].holes));
-  const activeEnds = [...domeEndSelected].map(i => domeEndpoints[i]);
-  if (activeEnds.length) form.append('domeEnds', JSON.stringify(activeEnds));
+  const domeEnds = [], hooks = [];
+  for (const [i, mode] of endpointMode) {
+    const [x, y] = domeEndpoints[i];
+    if (mode === 'dome') domeEnds.push([x, y]);
+    else hooks.push(hookSpec(x, y, mode));
+  }
+  if (domeEnds.length) form.append('domeEnds', JSON.stringify(domeEnds));
+  if (hooks.length) form.append('hooks', JSON.stringify(hooks));
 
   // Stacked drawings carry their own scale, sublayer filter and holes under
   // the field name plus their 1-based place in the stack.
@@ -5725,6 +5794,12 @@ async function buildProject() {
       cusps: cuspPicked ? {name:cuspPicked.name,data:await fileBase64(cuspPicked),resource:cuspPicked.resource??null} : null,
       profile: cuspProfilePicked ? {name:cuspProfilePicked.name,data:await fileBase64(cuspProfilePicked),resource:cuspProfilePicked.resource??null} : null,
       roundEnds: $('roundEnds').checked, frameOnly: $('frameOnly').checked,
+      hookTip: $('hookTip').value,
+      // Endpoint endings and hooks, keyed by position so they survive a
+      // regeneration that renumbers the detected endpoints.
+      endpoints: [...endpointMode].map(([i, mode]) => ({
+        x: domeEndpoints[i]?.[0], y: domeEndpoints[i]?.[1], mode,
+      })).filter((e) => Number.isFinite(e.x) && Number.isFinite(e.y)),
     },
     drawing: { name: picked.name, data: await fileBase64(picked), resource: picked.resource ?? null },
     // A drawing that came from a trace keeps the raster and its settings, so
@@ -5753,7 +5828,8 @@ async function buildProject() {
     settings: Object.fromEntries(
       [...SHAPE_FIELDS, ...EFFECT_FIELDS, 'seed', 'layerHeight', 'ySize',
         ...PROFILE_TRANSFORM_FIELDS, 'endAngle', 'endSide', 'boundaryScale', 'boundaryX', 'boundaryY',
-        'subjectScale', 'subjectX', 'subjectY']
+        'subjectScale', 'subjectX', 'subjectY', 'endpointMode', 'hookSmallRadius',
+        'hookBigRadius', 'hookCurl', 'hookLength', 'hookAngle', 'hookOverhang', 'hookRotation']
         .map((id) => [id, $(id).value]),
     ),
     profileScaleLocks: profileScales.snapshotLocks(),
@@ -5900,6 +5976,11 @@ async function applyProject(project) {
   for (const [id,value] of Object.entries({cuspWidth:.55,cuspHeight:.55,cuspZ:0,endAngle:90,endSide:1})) $(id).value=value;
   $('roundEnds').checked = !!project.tracery?.roundEnds;
   $('frameOnly').checked = !!project.tracery?.frameOnly;
+  // Older projects stored a "Rounded tip" checkbox instead of the tip style.
+  $('hookTip').value = project.tracery?.hookTip
+    ?? (project.tracery?.hookCap === false ? 'square' : 'quarter');
+  // Applied once the regions response reports this drawing's endpoints again.
+  pendingEndpointModes = Array.isArray(project.tracery?.endpoints) ? project.tracery.endpoints : null;
   updateCuspLabels();
   setStatus('opening project…');
   for (const [id, value] of Object.entries(project.settings ?? {})) {
@@ -7716,6 +7797,9 @@ function setupWorkflowPanels() {
   $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
   $('modelPanel-shape').append($('holeBox'));
   setupAdditions();
+  // Hooks and endpoint endings are additions to the swept frame, so they live
+  // in the Additions step alongside the shelf.
+  $('modelPanel-additions').append($('domeEndsSection'));
   for(const button of $('modelSteps').querySelectorAll('button'))button.onclick=()=>showModelStep(button.dataset.step);
   showModelStep('inputs');setWorkflow('glass',false);
 }
