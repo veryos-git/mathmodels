@@ -104,10 +104,30 @@ The uploaded image and paint colours stay intact when switching views.
 Drag with **pan** to move the view, or hold **Space** / use the middle mouse
 button with any tool. Scroll to zoom around the pointer; **+**, **−** and
 **Fit image** also control the view. **Pen** and **eraser** edit the image in
-Original, Threshold or Overlay. **Undo/redo** (Ctrl/Cmd+Z and
-Ctrl/Cmd+Shift+Z) work for strokes, adjustments, mirrors and resetting the image; history
-keeps up to 20 edits within a 64 MB budget, with at least one undo for a large
-image. Navigation never changes the saved pixels.
+Original, Threshold or Overlay.
+
+Tools swap from the sidebar, from the keys shown on each button (H pan, B pen,
+E eraser, I pipette, L lasso, A adjust, M mirror, T templates), with **X** to
+jump between pen and eraser, or from a right-click menu on the image that also
+holds the brush size and colours. Each brush remembers its own size: drag the
+slider, type a pixel size, pick a preset, tap **`[`** / **`]`**, or Shift+scroll
+over the image. The **pipette** samples the colour under the pointer, either a
+single pixel or a 3×3, 5×5 or 11×11 average; hold **Ctrl** with any tool for a
+one-off pick, and the last six picked colours join the black and white swatches.
+
+Choose **lasso crop** to keep only the part that matters. Drag a freehand loop,
+or click corners and close the loop by clicking its first point, double-clicking
+or pressing Enter; Backspace removes the last corner and Escape starts over. The
+preview shades what will be cleared. **Crop to the selection** trims to the
+lasso with a white margin (in pixels), **Clear outside, keep the size** leaves
+the image dimensions alone, and **Erase inside the selection** cuts out the
+loop. Press Enter or the apply button; the edit is undoable and templates stay
+aligned.
+
+**Undo/redo** (Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z) work for strokes, lasso edits,
+adjustments, mirrors and resetting the image; history keeps up to 20 edits
+within a 64 MB budget, with at least one undo for a large image. Navigation
+never changes the saved pixels.
 
 Choose **adjust** for **contrast**, **lights**, **shadows**, **black point** and
 **white point**. Contrast, lights and shadows start at 0; positive values
@@ -140,10 +160,10 @@ restores the previous image size. The larger canvas is kept in traces and saves.
 
 White template backgrounds let the image show through. Original and Threshold
 views preview the combined result; SVG generation temporarily composites the
-layers onto a copy of the painted image. Painting, adjustments and mirroring
-keep the templates separate. Saved subjects and projects embed the template
-files and placements so they can still be moved after reopening, even if the
-library entry changes or is deleted.
+layers onto a copy of the painted image. Painting, lasso edits, adjustments and
+mirroring keep the templates separate. Saved subjects and projects embed the
+template files and placements so they can still be moved after reopening, even
+if the library entry changes or is deleted.
 
 **3D model** — the relief builder: walls, sizes, palette, painting, holes,
 boundary, and export. A **← Start** button returns to the landing screen. When
@@ -209,8 +229,8 @@ and removed after each request.
 `deno task dev` restarts on file changes, `deno task check` type-checks, and
 `deno task setup` prepares `.venv` without starting the server.
 `deno task test:editor` checks threshold previews against the Python tracer,
-tone adjustments and preview caching, arbitrary mirror lines, canvas expansion and
-undo/redo (requires the prepared `.venv`).
+tone adjustments and preview caching, arbitrary mirror lines, lasso crops,
+canvas expansion and undo/redo (requires the prepared `.venv`).
 
 Open the page and pick a starting point on the **Start** screen (trace a photo,
 open a drawing or a project, or use the example). Tune the sizes in the 3D

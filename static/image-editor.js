@@ -200,6 +200,60 @@ export function mirrorImage({ data, width, height }, a, b, sourceSide = null) {
     offsetX: Math.max(0, -minX), offsetY: Math.max(0, -minY) };
 }
 
+/** Apply a closed lasso polygon. Pixel centres inside it (nonzero winding, so a
+ * scribbled loop never punches holes) are kept and everything else turns white;
+ * with inside: true the selection is erased instead. trim crops a kept selection
+ * to its pixel bounds plus margin, clamped to the image. offsetX/offsetY locate
+ * the original origin in the result, as in mirrorImage, so they are <= 0.
+ */
+export function lassoImage({ data, width, height }, polygon, { inside = false, trim = false, margin = 0 } = {}) {
+  if (!(polygon?.length >= 3)) throw new Error('Close a lasso with at least three points.');
+  const mask = new Uint8Array(width * height), crossings = [];
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const yc = y + .5;
+    crossings.length = 0;
+    for (let i = 0; i < polygon.length; i++) {
+      const [x1, y1] = polygon[i], [x2, y2] = polygon[(i + 1) % polygon.length];
+      // Half-open in y, so a vertex on the scanline counts once.
+      if ((y1 <= yc) === (y2 <= yc)) continue;
+      crossings.push([x1 + (yc - y1) * (x2 - x1) / (y2 - y1), y1 <= yc ? 1 : -1]);
+    }
+    crossings.sort((a, b) => a[0] - b[0]);
+    let winding = 0;
+    for (let i = 0; i < crossings.length - 1; i++) {
+      winding += crossings[i][1];
+      if (!winding) continue;
+      // Pixels whose centre lies within [left, right).
+      const from = Math.max(0, Math.ceil(crossings[i][0] - .5));
+      const to = Math.min(width, Math.ceil(crossings[i + 1][0] - .5));
+      if (from >= to) continue;
+      mask.fill(1, y * width + from, y * width + to);
+      minX = Math.min(minX, from); maxX = Math.max(maxX, to - 1);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX < 0) throw new Error('The lasso does not cover any of the image.');
+  let left = 0, top = 0, outWidth = width, outHeight = height;
+  if (trim && !inside) {
+    const pad = Math.max(0, Math.round(margin) || 0);
+    left = Math.max(0, minX - pad); top = Math.max(0, minY - pad);
+    outWidth = Math.min(width, maxX + 1 + pad) - left;
+    outHeight = Math.min(height, maxY + 1 + pad) - top;
+  }
+  const output = new Uint8ClampedArray(outWidth * outHeight * 4).fill(255);
+  for (let y = 0; y < outHeight; y++) {
+    for (let x = 0; x < outWidth; x++) {
+      const index = (y + top) * width + x + left;
+      if (!mask[index] === inside) {
+        const src = index * 4, dst = (y * outWidth + x) * 4;
+        for (let c = 0; c < 4; c++) output[dst + c] = data[src + c];
+      }
+    }
+  }
+  return { data: output, width: outWidth, height: outHeight, offsetX: left ? -left : 0, offsetY: top ? -top : 0 };
+}
+
 /** Bounded full-image undo history. Call remember before a committed edit. */
 export class ImageHistory {
   constructor(maxBytes = 64 * 1024 * 1024, maxSteps = 20) {

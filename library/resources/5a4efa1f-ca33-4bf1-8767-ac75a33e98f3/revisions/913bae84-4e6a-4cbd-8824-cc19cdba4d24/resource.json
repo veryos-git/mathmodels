@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "5a4efa1f-ca33-4bf1-8767-ac75a33e98f3",
+  "name": "Minimalistische Schwarz-Weiss-Formenstudie",
+  "kind": "subject",
+  "created": "2026-10-28T11:53:42.585Z",
+  "updated": "2026-10-28T11:53:42.585Z",
+  "revision": "913bae84-4e6a-4cbd-8824-cc19cdba4d24",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/913bae84-4e6a-4cbd-8824-cc19cdba4d24/drawing.svg"
+    },
+    "original": {
+      "name": "Minimalistische Schwarz-Weiss-Formenstudie.png",
+      "path": "revisions/913bae84-4e6a-4cbd-8824-cc19cdba4d24/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/913bae84-4e6a-4cbd-8824-cc19cdba4d24/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 48,
+    "closeGaps": 1,
+    "strokeWidth": 2,
+    "simplify": 0.3,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10,
+    "templates": []
+  }
+}

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const source = readFileSync(new URL('../static/image-editor.js', import.meta.url), 'utf8');
-const { adjustImage, compositeLineArt, DEFAULT_IMAGE_ADJUSTMENTS, denoiseImage, thresholdImage, mirrorImage, lineSide, ImageHistory } =
+const { adjustImage, compositeLineArt, DEFAULT_IMAGE_ADJUSTMENTS, denoiseImage, thresholdImage, mirrorImage, lassoImage, lineSide, ImageHistory } =
   await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const image = (rows) => ({ width: rows[0].length, height: rows.length,
   data: new Uint8ClampedArray(rows.flatMap(row => row.flatMap(value => [value, value, value, 255]))) });
@@ -172,6 +172,54 @@ assert.deepEqual(previewRequest(extended).image,
   thresholdImage(denoiseImage(extended), extended.width, extended.height),
   'the threshold worker accepts expanded previews and invalidates its cached dimensions');
 
+// Lasso: pixel centres inside the polygon survive, the rest turns white.
+const grid = image(Array.from({ length: 6 }, (_, y) => Array.from({ length: 8 }, (_, x) => 10 * y + x)));
+const gridBefore = [...grid.data];
+const box = [[2, 1], [6, 1], [6, 4], [2, 4]];
+const W = 255;
+assert.deepEqual(rows(lassoImage(grid, box)), [
+  [W, W, W, W, W, W, W, W],
+  [W, W, 12, 13, 14, 15, W, W],
+  [W, W, 22, 23, 24, 25, W, W],
+  [W, W, 32, 33, 34, 35, W, W],
+  [W, W, W, W, W, W, W, W],
+  [W, W, W, W, W, W, W, W]], 'clearing outside keeps the size');
+assert.deepEqual(rows(lassoImage(grid, box, { inside: true }))[2], [20, 21, W, W, W, W, 26, 27],
+  'erasing inside keeps everything around the selection');
+const cropped = lassoImage(grid, box, { trim: true });
+assert.deepEqual(bounds(cropped), [4, 3, -2, -1], 'crop offsets locate the old origin');
+assert.deepEqual(rows(cropped), [[12, 13, 14, 15], [22, 23, 24, 25], [32, 33, 34, 35]]);
+assert.deepEqual(rows(lassoImage(grid, box, { trim: true, margin: 1 })), [
+  [W, W, W, W, W, W],
+  [W, 12, 13, 14, 15, W],
+  [W, 22, 23, 24, 25, W],
+  [W, 32, 33, 34, 35, W],
+  [W, W, W, W, W, W]], 'the margin is white paper around the selection');
+assert.deepEqual(bounds(lassoImage(grid, box, { trim: true, margin: 50 })), [8, 6, 0, 0],
+  'the margin never grows the image');
+assert.deepEqual(bounds(lassoImage(grid, [[-5, -5], [3, -5], [3, 2], [-5, 2]], { trim: true })), [3, 2, 0, 0],
+  'a lasso beyond the edges crops to the pixels it covers');
+assert.deepEqual(bounds(lassoImage(grid, box, { inside: true, trim: true })), [8, 6, 0, 0],
+  'erasing inside never crops');
+// A diagonal edge keeps the pixels whose centres lie inside it; a centre on
+// the edge itself, such as (3.5, .5) here, is outside like a span's right end.
+assert.deepEqual(rows(lassoImage(grid, [[0, 0], [4, 0], [0, 4]], { trim: true })),
+  [[0, 1, 2], [10, 11, W], [20, W, W]]);
+// A loop drawn twice or crossing itself keeps the overlap (nonzero winding).
+const twice = [...box, ...box];
+assert.deepEqual(lassoImage(grid, twice), lassoImage(grid, box), 'retracing a lasso keeps its inside');
+const bowtie = [[0, 0], [8, 6], [8, 0], [0, 6]];
+assert.deepEqual(rows(lassoImage(grid, bowtie))[2], [20, 21, 22, W, W, 25, 26, 27],
+  'a figure-eight keeps both loops, although they wind in opposite directions');
+assert.deepEqual(lassoImage(grid, [...box].reverse()), lassoImage(grid, box), 'winding direction does not matter');
+const rgbaLasso = lassoImage({ width: 2, height: 1, data: new Uint8ClampedArray([10, 20, 30, 40, 50, 60, 70, 80]) },
+  [[0, 0], [1, 0], [1, 1], [0, 1]], { trim: true });
+assert.deepEqual([...rgbaLasso.data], [10, 20, 30, 40], 'kept pixels preserve all RGBA channels');
+assert.deepEqual([...grid.data], gridBefore, 'the lasso never modifies its source');
+assert.throws(() => lassoImage(grid, [[0, 0], [4, 4]]), /three points/);
+assert.throws(() => lassoImage(grid, [[0, 0], [4, 4], [8, 8]]), /does not cover/);
+assert.throws(() => lassoImage(grid, [[20, 20], [30, 20], [30, 30]]), /does not cover/);
+
 const history = new ImageHistory(original.data.byteLength * 2);
 history.remember(original);
 assert.equal(history.undo(extended), original, 'undo restores the original dimensions and pixels');
@@ -256,4 +304,4 @@ templates.restore(JSON.parse(JSON.stringify(saved)));
 assert.equal(templates.items[0].x, 100);
 assert.throws(() => templates.restore([{ ...saved[0], width: -1 }]), /Invalid saved template/);
 await assert.rejects(() => templates.asset('https://example.com/image.svg'), /embedded SVG or PNG/);
-console.log(`Image editor checks passed: adjustments, templates, worker caching, ${fixtures.length} Python preview comparisons, mirroring and undo/redo.`);
+console.log(`Image editor checks passed: adjustments, templates, worker caching, ${fixtures.length} Python preview comparisons, mirroring, lasso crops and undo/redo.`);

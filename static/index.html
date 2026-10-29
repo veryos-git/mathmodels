@@ -260,10 +260,32 @@
   #templateProperties label { margin-top: 4px; }
   #templateStatus { margin: 6px 0; font-size: 12px; }
   #editTools, .edit-actions, #traceViewSwitch { flex-wrap: wrap; }
-  #mirrorControls, #adjustmentControls { margin: 10px 0; padding: 8px; border: 1px solid #374151; border-radius: 6px; }
+  #editTools button { padding: 5px 9px; }
+  #editTools kbd, #editHint kbd { margin-left: 4px; padding: 0 3px; border: 1px solid #374151; border-radius: 3px;
+              font: 10px ui-monospace, monospace; color: #6b7280; }
+  #editTools button.active kbd { color: #dbeafe; border-color: #93c5fd; }
+  #editHint kbd { margin: 0; }
+  #editSizeRow { grid-template-columns: 92px minmax(0, 1fr) 58px; }
+  #editSizeRow input[type=number] { padding: 3px 6px; }
+  #editSwatches, #traceContextMenu .menu-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+  .swatch { margin: 0; width: 22px; height: 22px; padding: 0; border-radius: 50%;
+              border: 2px solid #374151; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+  .swatch.active { border-color: #3b82f6; outline: 1px solid #3b82f6; outline-offset: 1px; }
+  #mirrorControls, #adjustmentControls, #lassoControls { margin: 10px 0; padding: 8px; border: 1px solid #374151; border-radius: 6px; }
   #adjustmentControls .slider-row { grid-template-columns: 76px minmax(0, 1fr) 30px; }
   #adjustmentHint { font-size: 12px; color: #9aa3af; margin: 6px 0; }
-  #mirrorHint, #tracePreviewHint { font-size: 12px; color: #9aa3af; margin: 6px 0; }
+  #mirrorHint, #lassoHint, #tracePreviewHint { font-size: 12px; color: #9aa3af; margin: 6px 0; }
+  #lassoControls .slider-row { grid-template-columns: 76px minmax(0, 1fr) 30px; }
+  .trace-layout .slider-row[hidden] { display: none; }   /* display:grid would otherwise win */
+  #traceLassoGuides { position: absolute; inset: 0; width: 100%; height: 100%;
+              pointer-events: none; overflow: visible; }
+  #traceLassoGuides .ants { animation: lasso-ants .8s linear infinite; }
+  @keyframes lasso-ants { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { #traceLassoGuides .ants { animation: none; } }
+  /* Outline of the brush footprint at the current zoom, legible on any image. */
+  #traceBrushCursor { position: absolute; z-index: 5; pointer-events: none; border-radius: 50%;
+              transform: translate(-50%, -50%); border: 1px solid #fff;
+              box-shadow: 0 0 0 1px rgba(0,0,0,.75), inset 0 0 0 1px rgba(0,0,0,.75); }
   .trace-navigation { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .trace-navigation button { width: auto; margin: 0; padding: 4px 10px; }
   #traceZoomVal { min-width: 48px; text-align: center; font-size: 12px; }
@@ -294,11 +316,14 @@
               text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
   #traceContextMenu .menu-size-val { color: #3b82f6; font-weight: 700; font-size: 13px; }
   #traceContextMenu input[type=range] { width: 100%; accent-color: #3b82f6; margin: 4px 0 10px; }
+  #traceContextMenu .menu-tools { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
+              margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #2a2e35; }
   #traceContextMenu .menu-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-  #traceContextMenu .menu-presets button { margin: 0; padding: 5px 0; font-size: 12px; width: 100%;
+  #traceContextMenu :is(.menu-presets, .menu-tools) button { margin: 0; padding: 5px 0; font-size: 12px; width: 100%;
               background: #23282f; color: #cbd5e1; border: 1px solid #2a2e35; border-radius: 6px; }
-  #traceContextMenu .menu-presets button:hover { border-color: #3b82f6; color: #fff; }
-  #traceContextMenu .menu-presets button.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  #traceContextMenu :is(.menu-presets, .menu-tools) button:hover { border-color: #3b82f6; color: #fff; }
+  #traceContextMenu :is(.menu-presets, .menu-tools) button.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  #traceContextMenu .menu-swatches { margin: 10px 0 0; }
   #traceContextMenu .menu-foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2e35;
               display: flex; }
   #traceContextMenu .menu-foot button { margin: 0; width: auto; padding: 5px 10px; font-size: 12px; }
@@ -502,14 +527,58 @@
     <aside>
       <div class="group-title">Edit image</div>
       <div class="segmented" id="editTools">
-        <button data-tool="pan" class="active" title="Drag to move the view">✋ pan</button>
-        <button data-tool="pen" title="Draw on the image">✏️ pen</button>
-        <button data-tool="eraser" title="Erase back to white">🧽 eraser</button>
-        <button data-tool="adjust" title="Adjust contrast, lights, shadows and black/white points">adjust</button>
-        <button data-tool="mirror" title="Reflect pixels across a line defined by two points">mirror</button>
-        <button data-tool="template" title="Select, move, rotate or resize line-art templates">templates</button>
+        <button data-tool="pan" class="active" title="Drag to move the view (H)">✋ pan<kbd>H</kbd></button>
+        <button data-tool="pen" title="Draw on the image (B; X swaps pen and eraser)">✏️ pen<kbd>B</kbd></button>
+        <button data-tool="eraser" title="Erase back to white (E; X swaps pen and eraser)">🧽 eraser<kbd>E</kbd></button>
+        <button data-tool="pipette" title="Pick the pen colour from the image (I, or hold Ctrl in any tool)">💧 pipette<kbd>I</kbd></button>
+        <button data-tool="lasso" title="Lasso the important part, then crop to it or clear around it (L)">➰ lasso crop<kbd>L</kbd></button>
+        <button data-tool="adjust" title="Adjust contrast, lights, shadows and black/white points (A)">adjust<kbd>A</kbd></button>
+        <button data-tool="mirror" title="Reflect pixels across a line defined by two points (M)">mirror<kbd>M</kbd></button>
+        <button data-tool="template" title="Select, move, rotate or resize line-art templates (T)">templates<kbd>T</kbd></button>
       </div>
-      <div id="adjustmentControls" hidden>
+      <div data-tools="pen pipette" hidden>
+        <div class="slider-row">
+          <label for="editColor">pen colour</label>
+          <input id="editColor" type="color" value="#000000">
+          <span class="val" id="editColorVal">#000000</span>
+        </div>
+        <div id="editSwatches" aria-label="Pen colours"></div>
+      </div>
+      <div class="slider-row" id="editSizeRow" data-tools="pen eraser" hidden>
+        <label for="editSize" id="editSizeLabel">pen size</label>
+        <input id="editSize" type="range" min="1" max="200" step="1" value="10">
+        <input id="editSizeNumber" type="number" min="1" max="200" step="1" value="10" aria-label="Size in image pixels">
+      </div>
+      <div data-tools="pipette" hidden>
+        <label for="pipetteSample">Sample</label>
+        <select id="pipetteSample">
+          <option value="1">Point (1 pixel)</option>
+          <option value="3">3 × 3 average</option>
+          <option value="5">5 × 5 average</option>
+          <option value="11">11 × 11 average</option>
+        </select>
+        <label class="check"><input id="pipetteReturn" type="checkbox" checked> back to the pen after picking</label>
+      </div>
+      <div id="lassoControls" data-tools="lasso" hidden>
+        <label for="lassoMode">Lasso operation</label>
+        <select id="lassoMode">
+          <option value="crop">Crop to the selection</option>
+          <option value="outside">Clear outside, keep the size</option>
+          <option value="inside">Erase inside the selection</option>
+        </select>
+        <div class="slider-row" id="lassoMarginRow">
+          <label for="lassoMargin" title="White border kept around the selection when cropping">margin</label>
+          <input id="lassoMargin" type="range" min="0" max="100" step="1" value="10">
+          <span class="val" id="lassoMarginVal">10</span>
+        </div>
+        <p id="lassoHint" role="status"></p>
+        <div class="segmented edit-actions">
+          <button id="lassoApply" disabled>Apply crop</button>
+          <button id="lassoCancel">Clear lasso</button>
+        </div>
+        <div class="muted">Drag around the important part for a freehand lasso. Or click corner points, then click the first point, double-click or press Enter to close. Backspace removes the last point. Cleared areas become white.</div>
+      </div>
+      <div id="adjustmentControls" data-tools="adjust" hidden>
         <div class="slider-row">
           <label for="editContrast" title="Increase or soften the difference between light and dark">contrast</label>
           <input id="editContrast" type="range" min="-100" max="100" step="1" value="0">
@@ -542,7 +611,7 @@
         </div>
         <div class="muted">Positive lights/shadows brighten; negative values darken. Switching tools or Escape discards the preview.</div>
       </div>
-      <div id="mirrorControls" hidden>
+      <div id="mirrorControls" data-tools="mirror" hidden>
         <label for="mirrorMode">Mirror operation</label>
         <select id="mirrorMode"><option value="copy">Copy one side across the line</option><option value="flip">Flip the whole image</option></select>
         <p id="mirrorHint" role="status">Click two points to define the mirror line.</p>
@@ -552,22 +621,12 @@
         </div>
         <div class="muted">Expands the image to include content beyond its original edges.</div>
       </div>
-      <div class="slider-row">
-        <label for="editColor">pen colour</label>
-        <input id="editColor" type="color" value="#000000">
-        <span class="val" id="editColorVal">#000000</span>
-      </div>
-      <div class="slider-row">
-        <label for="editSize">brush</label>
-        <input id="editSize" type="range" min="1" max="60" step="1" value="10">
-        <span class="val" id="editSizeVal">10</span>
-      </div>
       <div class="segmented edit-actions">
         <button id="editUndo" disabled title="Undo (Ctrl/Cmd+Z)">↶ undo</button>
         <button id="editRedo" disabled title="Redo (Ctrl/Cmd+Shift+Z)">↷ redo</button>
         <button id="editReset" title="Restore the uploaded image">↺ reset image</button>
       </div>
-      <div class="muted" id="editHint">Drag with Pan, Space + drag, or the middle mouse button. Scroll to zoom. Pen and eraser work in Original, Threshold and Overlay.</div>
+      <div class="muted" id="editHint">Drag with Pan, Space + drag, or the middle mouse button. Scroll to zoom. Pen and eraser work in Original, Threshold and Overlay. Keys: <kbd>[</kbd> <kbd>]</kbd> or Shift + scroll resize the brush, <kbd>X</kbd> swaps pen and eraser, hold Ctrl to pick a colour. Right-click the image for quick tools and sizes.</div>
 
       <div class="group-title" style="margin-top:14px">Line-art templates</div>
       <div class="segmented edit-actions">
@@ -662,18 +721,28 @@
           <div id="traceSvg"></div>
           <svg id="traceGuides" aria-hidden="true"></svg>
           <svg id="traceTemplateGuides" aria-hidden="true"></svg>
+          <svg id="traceLassoGuides" aria-hidden="true"></svg>
         </div>
+        <div id="traceBrushCursor" aria-hidden="true" hidden></div>
         <div id="traceContextMenu" hidden>
-          <div class="menu-head"><span>brush size</span><span class="menu-size-val" id="menuSizeVal"></span></div>
-          <input type="range" id="menuSize" min="1" max="60" step="1">
+          <div class="menu-tools" aria-label="Tools">
+            <button data-tool="pan" title="Pan (H)" aria-label="Pan">✋</button>
+            <button data-tool="pen" title="Pen (B)" aria-label="Pen">✏️</button>
+            <button data-tool="eraser" title="Eraser (E)" aria-label="Eraser">🧽</button>
+            <button data-tool="pipette" title="Pipette (I)" aria-label="Pipette">💧</button>
+            <button data-tool="lasso" title="Lasso crop (L)" aria-label="Lasso crop">➰</button>
+          </div>
+          <div class="menu-head"><span id="menuSizeLabel">pen size</span><span class="menu-size-val" id="menuSizeVal"></span></div>
+          <input type="range" id="menuSize" min="1" max="200" step="1">
           <div class="menu-presets">
             <button data-size="2">2</button>
             <button data-size="5">5</button>
             <button data-size="10">10</button>
             <button data-size="20">20</button>
-            <button data-size="40">40</button>
-            <button data-size="60">60</button>
+            <button data-size="50">50</button>
+            <button data-size="100">100</button>
           </div>
+          <div class="menu-swatches" id="menuSwatches" aria-label="Pen colours"></div>
           <div class="menu-foot">
             <button class="ghost" id="traceZoomReset">↺ reset zoom</button>
           </div>
@@ -1224,7 +1293,7 @@ import { ShaderInspector } from './shader-inspector.js';
 import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
-import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lineSide, mirrorImage } from './image-editor.js';
+import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lassoImage, lineSide, mirrorImage } from './image-editor.js';
 import { LineArtTemplates, TEMPLATE_FILE, templatePoint, templateHandles, templateCanvasBounds, hitTemplate, transformTemplate } from './lineart-templates.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -4325,6 +4394,7 @@ function traceApplyView() {
   $('traceTemplates').hidden = !lineArt.items.length || v === 'threshold' || v === 'svg';
   $('traceTemplateGuides').style.display = editTool === 'template' && v !== 'svg' ? 'block' : 'none';
   $('traceGuides').style.display = editTool === 'mirror' && v !== 'svg' ? 'block' : 'none';
+  $('traceLassoGuides').style.display = editTool === 'lasso' && v !== 'svg' ? 'block' : 'none';
   $('traceSvg').style.display = v === 'svg' || v === 'overlay' ? 'block' : 'none';
   $('traceSvg').style.opacity = v === 'overlay' ? Number($('traceOverlay').value) : 1;
   $('traceOverlay').disabled = v !== 'overlay';
@@ -4379,6 +4449,16 @@ const editHistory = new ImageHistory();
 const lineArt = new LineArtTemplates();
 let templateGesture = null, templateSession = 0, templateRenderedBounds = '';
 let mirrorPoints = [], mirrorSourcePoint = null, mirrorPreview = null;
+// Pen and eraser keep their own sizes. brushTool is the last of them used, so
+// the size controls and the right-click menu still mean something elsewhere.
+const BRUSH_SIZE_MAX = 200;
+const brushSizes = { pen: 10, eraser: 20 };
+let brushTool = 'pen', brushHover = null, brushWheel = 0;
+const BASE_SWATCHES = ['#000000', '#ffffff'];
+let recentColors = [];
+// Lasso points are image pixels. A drag that starts an empty lasso closes on
+// release; clicks add straight corners until the lasso is closed.
+let lassoPoints = [], lassoClosed = false, lassoClosedAt = 0, lassoPress = null, lassoHover = null;
 let adjustmentPreview = null;
 const ADJUSTMENT_CONTROLS = {
   contrast: 'editContrast', lights: 'editLights', shadows: 'editShadows',
@@ -4602,7 +4682,7 @@ function restoreEdit(direction) {
   clearAdjustments();
   const image = editHistory[direction](editorSnapshot());
   if (!image) return;
-  clearMirror();
+  clearMirror(); clearLasso();
   const resized = $('traceEdit').width !== image.width || $('traceEdit').height !== image.height;
   $('traceEdit').width = image.width; $('traceEdit').height = image.height;
   $('traceEdit').getContext('2d').putImageData(image, 0, 0);
@@ -4743,6 +4823,148 @@ $('mirrorApply').onclick = () => {
   updateTemplateControls();
   clearMirror(); imageEdited();
 };
+
+const LASSO_ACTIONS = { crop: 'Apply crop', outside: 'Clear outside', inside: 'Erase inside' };
+
+function updateLassoControls() {
+  const mode = $('lassoMode').value;
+  $('lassoApply').textContent = LASSO_ACTIONS[mode];
+  $('lassoApply').disabled = !lassoClosed;
+  $('lassoMarginRow').hidden = mode !== 'crop';
+  $('lassoMarginVal').textContent = $('lassoMargin').value;
+  $('lassoHint').textContent = lassoClosed
+    ? `Selection closed. ${LASSO_ACTIONS[mode]} (Enter) to keep it, or drag a new lasso.`
+    : lassoPoints.length ? 'Add corners, then click the first point, double-click or press Enter to close.'
+    : 'Drag around the important part, or click corner points.';
+  drawLassoGuides();
+}
+
+function clearLasso() {
+  lassoPoints = []; lassoClosed = false; lassoClosedAt = 0; lassoPress = null; lassoHover = null;
+  updateLassoControls();
+}
+
+function closeLasso() {
+  lassoPress = lassoHover = null;
+  if (lassoPoints.length < 3) {
+    clearLasso();
+    $('lassoHint').textContent = 'That lasso was too small. Drag around the part to keep.';
+    return;
+  }
+  lassoClosed = true;
+  lassoClosedAt = performance.now();
+  updateLassoControls();
+}
+
+/** Start a lasso, add a corner, or close it at its first point. Returns
+ * whether the press continues as a drag. */
+function pressLasso(point, e) {
+  const scale = traceFit().fit * traceView.zoom, first = lassoPoints[0];
+  const nearFirst = !!first && Math.hypot(point[0] - first[0], point[1] - first[1]) * scale < 8;
+  if (lassoClosed) {
+    // The second press of a double-click closes on the first and lands on the
+    // same corner; keep the finished selection instead of starting a new one.
+    if (nearFirst && performance.now() - lassoClosedAt < 500) return false;
+    clearLasso();   // a new press starts a new selection
+  }
+  if (lassoPoints.length >= 3 && nearFirst) {
+    closeLasso();
+    return false;
+  }
+  const last = lassoPoints.at(-1);
+  lassoPress = { x: e.clientX, y: e.clientY, starts: !lassoPoints.length, dragged: false };
+  // The second click of a double-click lands on the corner it closes.
+  if (!last || Math.hypot(point[0] - last[0], point[1] - last[1]) * scale >= 3) lassoPoints.push(point);
+  updateLassoControls();
+  return true;
+}
+
+function dragLasso(e) {
+  const point = toCanvasPoint(e), last = lassoPoints.at(-1);
+  if (Math.hypot(e.clientX - lassoPress.x, e.clientY - lassoPress.y) > 4) lassoPress.dragged = true;
+  if (lassoPress.dragged && Math.hypot(point[0] - last[0], point[1] - last[1]) * traceFit().fit * traceView.zoom >= 2) {
+    lassoPoints.push(point);
+    drawLassoGuides();
+  }
+}
+
+function releaseLasso() {
+  const { starts, dragged } = lassoPress;
+  lassoPress = null;
+  if (starts && dragged) closeLasso();
+  else updateLassoControls();
+}
+
+function drawLassoGuides() {
+  const svg = $('traceLassoGuides'), { width, height, offsetX, offsetY } = traceBounds();
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', `${-offsetX} ${-offsetY} ${width || 1} ${height || 1}`);
+  if (!lassoPoints.length) return;
+  const add = (tag, attrs, parent = svg) => {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    return parent.appendChild(element);
+  };
+  const canvas = $('traceEdit'), mode = $('lassoMode').value;
+  const points = lassoPoints.map((p) => p.join(',')).join(' ');
+  if (lassoClosed) {
+    // Shade what will turn white, with the same nonzero rule as lassoImage.
+    if (mode === 'inside') add('polygon', { points, fill: 'rgba(15,23,42,.55)' });
+    else {
+      const mask = add('mask', { id: 'traceLassoMask', maskUnits: 'userSpaceOnUse',
+        x: -offsetX, y: -offsetY, width, height });
+      add('rect', { x: 0, y: 0, width: canvas.width, height: canvas.height, fill: '#fff' }, mask);
+      add('polygon', { points, fill: '#000' }, mask);
+      add('rect', { x: 0, y: 0, width: canvas.width, height: canvas.height,
+        fill: 'rgba(15,23,42,.55)', mask: 'url(#traceLassoMask)' });
+    }
+    if (mode === 'crop') {
+      const xs = lassoPoints.map((p) => p[0]), ys = lassoPoints.map((p) => p[1]), margin = +$('lassoMargin').value;
+      const left = clamp(Math.round(Math.min(...xs)) - margin, 0, canvas.width);
+      const top = clamp(Math.round(Math.min(...ys)) - margin, 0, canvas.height);
+      const right = clamp(Math.round(Math.max(...xs)) + margin, 0, canvas.width);
+      const bottom = clamp(Math.round(Math.max(...ys)) + margin, 0, canvas.height);
+      add('rect', { x: left, y: top, width: right - left, height: bottom - top, fill: 'none',
+        stroke: '#f59e0b', 'stroke-width': 1.5, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke' });
+    }
+  }
+  // Marching ants: a dashed dark line over a solid light one reads on any image.
+  const tag = lassoClosed ? 'polygon' : 'polyline';
+  const outline = !lassoClosed && lassoHover ? `${points} ${lassoHover.join(',')}` : points;
+  add(tag, { points: outline, fill: 'none', stroke: '#fff', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+  add(tag, { points: outline, fill: 'none', stroke: '#111', 'stroke-width': 1.5, 'stroke-dasharray': '6 6',
+    class: 'ants', 'vector-effect': 'non-scaling-stroke' });
+  if (!lassoClosed) add('circle', { cx: lassoPoints[0][0], cy: lassoPoints[0][1], r: 5 / (traceFit().fit * traceView.zoom),
+    fill: '#38bdf8', stroke: '#fff', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+}
+
+function applyLasso() {
+  if (!editLoaded || !lassoClosed) return;
+  const mode = $('lassoMode').value;
+  let result;
+  try {
+    result = lassoImage(canvasPixels(), lassoPoints,
+      { inside: mode === 'inside', trim: mode === 'crop', margin: +$('lassoMargin').value });
+  } catch (error) {
+    $('lassoHint').textContent = error.message;
+    return;
+  }
+  editHistory.remember(editorSnapshot());
+  const canvas = $('traceEdit'), resized = canvas.width !== result.width || canvas.height !== result.height;
+  canvas.width = result.width; canvas.height = result.height;
+  canvas.getContext('2d').putImageData(new ImageData(result.data, result.width, result.height), 0, 0);
+  // Templates stay editable layers. Keep them over the same pixels.
+  for (const layer of lineArt.items) { layer.x += result.offsetX; layer.y += result.offsetY; }
+  updateTemplateControls();
+  clearLasso();
+  if (resized) traceResetView();
+  imageEdited();
+}
+
+$('lassoMode').onchange = updateLassoControls;
+$('lassoMargin').oninput = updateLassoControls;
+$('lassoApply').onclick = applyLasso;
+$('lassoCancel').onclick = clearLasso;
 $('editUndo').onclick = () => restoreEdit('undo');
 $('editRedo').onclick = () => restoreEdit('redo');
 
@@ -4793,7 +5015,7 @@ function applyTraceTransform() {
     layer.style.height = `${100 * $('traceEdit').height / c.height}%`;
   }
   $('traceZoomVal').textContent = `${Math.round(traceView.zoom * 100)}%`;
-  drawMirrorGuides();
+  drawMirrorGuides(); drawLassoGuides(); updateBrushCursor();
   if (templateRenderedBounds !== `${c.width},${c.height},${c.offsetX},${c.offsetY}`) renderTemplates();
   else drawTemplateGuides();
 }
@@ -4840,6 +5062,7 @@ function loadEditCanvas({ reset = false } = {}) {
       renderTemplates();
       clearAdjustments();
       clearMirror();
+      clearLasso();
       const expanded = extendTemplateCanvas();
       updateEditHistory();
       updateTemplateControls();
@@ -4890,7 +5113,7 @@ function toCanvasPoint(e) {
 
 function drawStrokeTo(p) {
   const ctx = $('traceEdit').getContext('2d');
-  ctx.lineWidth = Number($('editSize').value);
+  ctx.lineWidth = brushSizes[editTool];
   ctx.lineCap = ctx.lineJoin = 'round';
   ctx.globalCompositeOperation = 'source-over';
   ctx.strokeStyle = editTool === 'eraser' ? '#ffffff' : $('editColor').value;
@@ -4923,7 +5146,8 @@ editViewport.addEventListener('pointerdown', (e) => {
     panStart = { x: e.clientX, y: e.clientY, tx: traceView.tx, ty: traceView.ty };
   } else {
     const point = toCanvasPoint(e), canvas = $('traceEdit');
-    if (editTool === 'template' && !eyedropping) {
+    const picking = eyedropping || editTool === 'pipette';
+    if (editTool === 'template' && !picking) {
       const hit = hitTemplate(lineArt.items, lineArt.selected, point, 7 / (traceFit().fit * traceView.zoom));
       lineArt.selected = hit?.layer.id ?? null;
       updateTemplateControls(); drawTemplateGuides();
@@ -4931,8 +5155,10 @@ editViewport.addEventListener('pointerdown', (e) => {
       editHistory.remember(editorSnapshot());
       templateGesture = { ...hit, start: point, original: { ...hit.layer } };
       invalidateTrace();
+    } else if (editTool === 'lasso' && !picking) {
+      if (!pressLasso(point, e)) return;
     } else {
-      if (editTool === 'mirror' && !eyedropping) {
+      if (editTool === 'mirror' && !picking) {
         const { width, height, offsetX, offsetY } = traceBounds();
         if (point[0] >= -offsetX && point[1] >= -offsetY && point[0] < width - offsetX && point[1] < height - offsetY) {
           addMirrorPoint(point);
@@ -4940,7 +5166,7 @@ editViewport.addEventListener('pointerdown', (e) => {
         return;
       }
       if (point[0] < 0 || point[1] < 0 || point[0] >= canvas.width || point[1] >= canvas.height) return;
-      if (eyedropping) { pickColorAt(e); return; }
+      if (picking) { pickColorAt(e); return; }
       editHistory.remember(editorSnapshot());
       // Invalidate an in-flight SVG as soon as the first pixel changes.
       invalidateTrace();
@@ -4954,6 +5180,7 @@ editViewport.addEventListener('pointerdown', (e) => {
   updateEditCursor();
 });
 editViewport.addEventListener('pointermove', (e) => {
+  trackEditHover(e);
   if (e.pointerId !== editPointer) return;
   if (panStart) {
     traceView.tx = panStart.tx + e.clientX - panStart.x;
@@ -4961,6 +5188,7 @@ editViewport.addEventListener('pointermove', (e) => {
     applyTraceTransform();
   }
   if (stroking) drawStrokeTo(toCanvasPoint(e));
+  if (lassoPress) dragLasso(e);
   if (templateGesture) {
     Object.assign(templateGesture.layer, transformTemplate(templateGesture.original, templateGesture,
       toCanvasPoint(e), $('templateAspect').checked));
@@ -4979,11 +5207,41 @@ function endEditPointer(e) {
     imageEdited();
   }
   finishStroke();
+  if (lassoPress) releaseLasso();
   if (pointer !== null && editViewport.hasPointerCapture(pointer)) editViewport.releasePointerCapture(pointer);
   updateEditCursor();
 }
 for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
   editViewport.addEventListener(event, endEditPointer);
+}
+editViewport.addEventListener('pointerleave', () => {
+  brushHover = null; updateBrushCursor();
+  if (lassoHover) { lassoHover = null; drawLassoGuides(); }
+});
+editViewport.addEventListener('dblclick', () => {
+  if (editTool === 'lasso' && !lassoClosed && lassoPoints.length >= 3) closeLasso();
+});
+
+/** Follow the pointer for the brush outline and the lasso's next straight edge. */
+function trackEditHover(e) {
+  const r = editViewport.getBoundingClientRect();
+  brushHover = e.target.closest('#traceContextMenu') ? null
+    : [e.clientX - r.left - editViewport.clientLeft, e.clientY - r.top - editViewport.clientTop];
+  updateBrushCursor();
+  if (editTool === 'lasso' && lassoPoints.length && !lassoClosed && !lassoPress) {
+    lassoHover = brushHover && toCanvasPoint(e);
+    drawLassoGuides();
+  }
+}
+
+/** Outline the pen or eraser footprint at the current zoom. */
+function updateBrushCursor() {
+  const cursor = $('traceBrushCursor');
+  cursor.hidden = !brushHover || !editLoaded || !['pen', 'eraser'].includes(editTool) || !!panStart
+    || spacePanning || eyedropping || traceState.view === 'svg';
+  if (cursor.hidden) return;
+  const diameter = `${brushSizes[editTool] * traceFit().fit * traceView.zoom}px`;
+  Object.assign(cursor.style, { left: `${brushHover[0]}px`, top: `${brushHover[1]}px`, width: diameter, height: diameter });
 }
 
 function resetEdit() {
@@ -4996,22 +5254,78 @@ function setEditTool(tool) {
   endEditPointer();
   if (editTool === 'adjust' && tool !== 'adjust') clearAdjustments();
   if (editTool === 'mirror' && tool !== 'mirror') clearMirror();
+  if (editTool === 'lasso' && tool !== 'lasso') clearLasso();
   editTool = tool;
-  $('editTools').querySelectorAll('button')
+  if (tool === 'pen' || tool === 'eraser') brushTool = tool;
+  $('traceScreen').querySelectorAll('[data-tool]')
     .forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
-  $('mirrorControls').hidden = tool !== 'mirror';
-  $('adjustmentControls').hidden = tool !== 'adjust';
+  // Each tool shows only its own options.
+  $('traceScreen').querySelectorAll('[data-tools]')
+    .forEach((element) => { element.hidden = !element.dataset.tools.split(' ').includes(tool); });
   if (tool === 'adjust') traceState.view = 'original';
   if (tool !== 'pan' && traceState.view === 'svg') traceState.view = 'original';
+  syncBrushControls();
   traceApplyView();
+}
+
+/** Show the active (or last used) brush's size everywhere it can be changed. */
+function syncBrushControls({ typing = false } = {}) {
+  const size = brushSizes[brushTool];
+  $('editSize').value = size;
+  if (!typing) $('editSizeNumber').value = size;
+  $('editSizeLabel').textContent = $('menuSizeLabel').textContent = `${brushTool} size`;
+  $('menuSize').value = size;
+  $('menuSizeVal').textContent = size;
+  $('traceContextMenu').querySelectorAll('.menu-presets button').forEach((b) =>
+    b.classList.toggle('active', +b.dataset.size === size));
+  updateBrushCursor();
+}
+
+function setBrushSize(size, options) {
+  brushSizes[brushTool] = clamp(Math.round(size) || 1, 1, BRUSH_SIZE_MAX);
+  syncBrushControls(options);
+}
+
+/** [ and ] change the size by about 15%, and always by at least a pixel. */
+const stepBrushSize = (direction) => {
+  const size = brushSizes[brushTool];
+  setBrushSize(direction > 0 ? Math.max(size + 1, size * 1.15) : Math.min(size - 1, size / 1.15));
+};
+
+function setPenColor(hex, remember = true) {
+  $('editColor').value = hex;
+  $('editColorVal').textContent = hex;
+  if (remember && !BASE_SWATCHES.includes(hex)) recentColors = [hex, ...recentColors.filter((c) => c !== hex)].slice(0, 6);
+  renderSwatches();
+}
+
+/** Black, white and the latest picked colours, in the sidebar and the menu. */
+function renderSwatches() {
+  for (const container of [$('editSwatches'), $('menuSwatches')]) {
+    container.replaceChildren(...[...BASE_SWATCHES, ...recentColors].map((color) => {
+      const swatch = document.createElement('button');
+      swatch.className = 'swatch';
+      swatch.style.background = color;
+      swatch.title = `Draw with ${color}`;
+      swatch.classList.toggle('active', color === $('editColor').value);
+      swatch.onclick = () => { setPenColor(color); setEditTool('pen'); closeContextMenu(); };
+      return swatch;
+    }));
+  }
 }
 
 $('editTools').querySelectorAll('button').forEach((btn) => {
   btn.onclick = () => setEditTool(btn.dataset.tool);
 });
-$('editColor').oninput = () => { $('editColorVal').textContent = $('editColor').value; };
-$('editSize').oninput = () => { $('editSizeVal').textContent = $('editSize').value; };
+$('editColor').oninput = () => setPenColor($('editColor').value, false);
+$('editColor').onchange = () => setPenColor($('editColor').value);
+$('editSize').oninput = () => setBrushSize(+$('editSize').value);
+$('editSizeNumber').oninput = () => {
+  if ($('editSizeNumber').value !== '') setBrushSize(+$('editSizeNumber').value, { typing: true });
+};
+$('editSizeNumber').onchange = () => syncBrushControls();
 $('editReset').onclick = resetEdit;
+renderSwatches();
 
 /* Zoom the trace viewport with the wheel, anchored at the cursor. */
 function zoomTrace(factor, mx = editViewport.clientWidth / 2, my = editViewport.clientHeight / 2) {
@@ -5029,7 +5343,15 @@ $('traceViewport').addEventListener('wheel', (e) => {
   if (!traceState.source || e.target.closest('#traceContextMenu')) return;
   e.preventDefault();
   const r = editViewport.getBoundingClientRect();
-  const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? editViewport.clientHeight : 1);
+  // Browsers may turn Shift + scroll into a horizontal scroll.
+  const delta = (e.shiftKey ? e.deltaY || e.deltaX : e.deltaY)
+    * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? editViewport.clientHeight : 1);
+  if (e.shiftKey) {
+    // One step per mouse notch; trackpads accumulate their small deltas first.
+    brushWheel += delta;
+    if (Math.abs(brushWheel) >= 50) { stepBrushSize(-Math.sign(brushWheel)); brushWheel = 0; }
+    return;
+  }
   zoomTrace(Math.exp(-delta * 0.0015), e.clientX - r.left - editViewport.clientLeft,
     e.clientY - r.top - editViewport.clientTop);
 }, { passive: false });
@@ -5048,19 +5370,12 @@ new ResizeObserver(() => {
   applyTraceTransform();
 }).observe($('traceViewport'));
 
-/* Right-click menu: quick brush sizes plus a zoom reset. */
+/* Right-click menu: quick tools, brush sizes and colours, plus a zoom reset. */
 const traceContextMenu = $('traceContextMenu');
 
-function syncContextMenu() {
-  const size = $('editSize').value;
-  $('menuSize').value = size;
-  $('menuSizeVal').textContent = size;
-  traceContextMenu.querySelectorAll('.menu-presets button').forEach((b) =>
-    b.classList.toggle('active', b.dataset.size === size));
-}
-
 function openContextMenu(x, y) {
-  syncContextMenu();
+  brushHover = null;   // the outline would show through beside the menu
+  syncBrushControls();
   traceContextMenu.hidden = false;
   const vp = $('traceViewport');
   const w = traceContextMenu.offsetWidth, h = traceContextMenu.offsetHeight;
@@ -5076,18 +5391,12 @@ $('traceViewport').addEventListener('contextmenu', (e) => {
   openContextMenu(e.clientX - r.left, e.clientY - r.top);
 });
 
-$('menuSize').addEventListener('input', () => {
-  $('editSize').value = $('menuSize').value;
-  $('editSizeVal').textContent = $('menuSize').value;
-  syncContextMenu();
-});
+$('menuSize').addEventListener('input', () => setBrushSize(+$('menuSize').value));
 traceContextMenu.querySelectorAll('.menu-presets button').forEach((b) => {
-  b.onclick = () => {
-    $('editSize').value = b.dataset.size;
-    $('editSizeVal').textContent = b.dataset.size;
-    syncContextMenu();
-    closeContextMenu();
-  };
+  b.onclick = () => { setBrushSize(+b.dataset.size); closeContextMenu(); };
+});
+traceContextMenu.querySelectorAll('.menu-tools button').forEach((b) => {
+  b.onclick = () => { setEditTool(b.dataset.tool); closeContextMenu(); };
 });
 $('traceZoomReset').onclick = () => { traceResetView(); closeContextMenu(); };
 
@@ -5098,8 +5407,8 @@ window.addEventListener('pointerdown', (e) => {
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeContextMenu(); });
 window.addEventListener('wheel', closeContextMenu, { passive: true });
 
-/* Eyedropper: hold Ctrl to turn the cursor into a picker, click to sample the
-   colour under it into the pen. */
+/* Eyedropper: the pipette tool, or hold Ctrl to turn any tool into a picker.
+   Click to sample the colour under it into the pen. */
 let eyedropping = false;
 const PICKER_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">`
@@ -5114,24 +5423,49 @@ function setEyedropping(on) {
 function updateEditCursor() {
   $('traceViewport').style.cursor = panStart ? 'grabbing'
     : spacePanning || editTool === 'pan' || editTool === 'adjust' || traceState.view === 'svg' ? 'grab'
-    : eyedropping ? PICKER_CURSOR : 'crosshair';
+    : eyedropping || editTool === 'pipette' ? PICKER_CURSOR : 'crosshair';
+  updateBrushCursor();
 }
 
+/** Average a square around the pointer, clipped to the image. */
 function pickColorAt(e) {
-  const [x, y] = toCanvasPoint(e);
-  const d = $('traceEdit').getContext('2d')
-    .getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
-  const hex = `#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-  $('editColor').value = hex;
-  $('editColorVal').textContent = hex;
+  const canvas = $('traceEdit'), [x, y] = toCanvasPoint(e).map(Math.floor), half = +$('pipetteSample').value >> 1;
+  const left = Math.max(0, x - half), top = Math.max(0, y - half);
+  const width = Math.min(canvas.width, x + half + 1) - left, height = Math.min(canvas.height, y + half + 1) - top;
+  const d = canvas.getContext('2d').getImageData(left, top, width, height).data, sum = [0, 0, 0];
+  for (let p = 0; p < d.length; p += 4) for (let c = 0; c < 3; c++) sum[c] += d[p + c];
+  setPenColor(`#${sum.map((v) => Math.round(v / (width * height)).toString(16).padStart(2, '0')).join('')}`);
+  if (editTool === 'pipette' && $('pipetteReturn').checked) setEditTool('pen');
 }
+
+const TOOL_KEYS = { h: 'pan', b: 'pen', e: 'eraser', i: 'pipette', l: 'lasso', a: 'adjust', m: 'mirror', t: 'template' };
 
 window.addEventListener('keydown', (e) => {
   if (currentScreen !== 'trace') return;
-  if (e.key === 'Escape') { endEditPointer(); clearMirror(); clearAdjustments(); return; }
+  if (e.key === 'Escape') { endEditPointer(); clearMirror(); clearAdjustments(); clearLasso(); return; }
   if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
   if (!$('libraryPicker').hidden || !$('libEditor').hidden) return;
   if (editTool === 'template' && ['Delete', 'Backspace'].includes(e.key)) { e.preventDefault(); deleteTemplate(); return; }
+  // AltGr reports Ctrl + Alt on Windows, and many layouts need it for brackets.
+  if (['[', ']'].includes(e.key) && !e.metaKey) { e.preventDefault(); stepBrushSize(e.key === ']' ? 1 : -1); return; }
+  if (editTool === 'lasso' && !lassoPress) {
+    if (e.key === 'Enter' && !e.target.closest('button')) {
+      e.preventDefault();
+      if (lassoClosed) applyLasso(); else closeLasso();
+      return;
+    }
+    if (['Delete', 'Backspace'].includes(e.key) && !lassoClosed && lassoPoints.length) {
+      e.preventDefault();
+      lassoPoints.pop();
+      updateLassoControls();
+      return;
+    }
+  }
+  if (editLoaded && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+    const key = e.key.toLowerCase();
+    const tool = key === 'x' ? (editTool === 'pen' ? 'eraser' : editTool === 'eraser' ? 'pen' : brushTool) : TOOL_KEYS[key];
+    if (tool) { e.preventDefault(); setEditTool(tool); return; }
+  }
   if (e.key === 'Control') setEyedropping(true);
   if (e.code === 'Space') { e.preventDefault(); spacePanning = true; updateEditCursor(); }
   if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) {
@@ -5156,6 +5490,7 @@ function clearTrace() {
   previewWorker?.terminate(); previewWorker = null; previewDirty = true; previewBusy = false;
   clearAdjustments();
   clearMirror();
+  clearLasso();
   $('traceThreshold').width = $('traceThreshold').height = 0;
   $('traceMirrorPreview').width = $('traceMirrorPreview').height = 0;
   traceState.original = traceState.resource = null;

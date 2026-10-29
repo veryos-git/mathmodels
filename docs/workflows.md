@@ -10,7 +10,9 @@ cusp paths → Load Onshape Spitzbogen example**. See the
 
 ## Image → reusable subject → stained glass
 
-1. Start with **Trace a photo**. Clean up the original with the pen and eraser.
+1. Start with **Trace a photo**. Clean up the original with the pen and eraser,
+   pick colours with the pipette, and **lasso crop** away everything outside
+   the part you want to keep.
 2. In centerline mode, **Large black areas → Keep their outlines** preserves
    eyes and spots as closed outlines. Set the minimum dark-feature width above
    the width of ordinary pen strokes. Outline mode already retains their

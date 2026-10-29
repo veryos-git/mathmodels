@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "0f079c95-72bf-4d2b-bcb1-e180e3d4a641",
+  "name": "bat2",
+  "kind": "subject",
+  "created": "2026-10-27T20:44:22.766Z",
+  "updated": "2026-10-27T20:44:22.766Z",
+  "revision": "1dd6105a-1634-405f-9828-e02271053325",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/1dd6105a-1634-405f-9828-e02271053325/drawing.svg"
+    },
+    "original": {
+      "name": "WhatsApp Image 2026-10-27 at 21.41.26 (2).jpeg",
+      "path": "revisions/1dd6105a-1634-405f-9828-e02271053325/original.jpeg"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/1dd6105a-1634-405f-9828-e02271053325/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 134,
+    "closeGaps": 3,
+    "strokeWidth": 2,
+    "simplify": 1.5,
+    "smoothing": 0.5,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10,
+    "templates": []
+  }
+}
