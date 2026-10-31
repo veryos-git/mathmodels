@@ -2,11 +2,44 @@ import { builtins } from './vendor/shadertrace/templates.js';
 import { convertVector } from './vendor/shadertrace/vector-import/index.js';
 import { LIMITS } from './vendor/shadertrace/vector-import/geometry.js';
 
-export const SHADER_STYLES = builtins.filter(item => item.kind === 'visualization');
+// The default preview: style 8 (Neon tube) in #ffc100. Every ripple is an exact
+// offset of the source paths, which only a geometrically correct field can draw.
+const AMBER_NEON = {
+  id: 'amber-neon', kind: 'visualization', category: 'Featured', name: 'Amber neon',
+  description: 'A white-hot tube with a breathing #ffc100 halo. Faint ripples travel outward along exact offsets of the paths.',
+  code: `// Amber neon — the default preview.
+// A white-hot tube with a #ffc100 halo. The halo breathes, and faint echoes travel
+// outward along exact offset curves: every ripple stays parallel to the source path.
+
+const float neonTau = 6.28318530718;
+const vec3 neonAmber = vec3(1.0, 0.757, 0.0); // #ffc100
+
+vec3 shade(vec2 p, float d) {
+    float phase = neonTau * u_time / u_duration;
+    float breath = 0.5 + 0.5 * sin(2.0 * phase); // two slow breaths per loop
+
+    // Distance to the tube: the stroke itself, or a thin band inside a filled edge.
+    float r = max(d, 0.0) + max(-d - 0.008, 0.0);
+
+    float reach = mix(0.010, 0.020, breath);
+    float halo = reach / (r + reach) * mix(0.85, 1.0, breath);
+    float echo = pow(0.5 + 0.5 * cos(neonTau * r / 0.075 - 4.0 * phase), 24.0);
+    echo *= 0.40 * exp(-r / 0.10) * smoothstep(0.015, 0.05, r);
+    float core = exp(-220.0 * r);
+
+    return vec3(0.020, 0.014, 0.008) + neonAmber * (halo + echo) + vec3(1.0, 0.96, 0.86) * core;
+}`,
+};
+
+export const SHADER_STYLES = [AMBER_NEON, ...builtins.filter(item => item.kind === 'visualization')];
 export const SHADER_DEFAULTS = Object.freeze({
-  source: '', style: 'contours', mode: 'auto', tolerance: .002,
+  source: '', style: AMBER_NEON.id, mode: 'auto', tolerance: .002,
   strokeWidth: .012, resolution: 512, duration: 8, playing: true,
+  exportSize: 512, gifFps: 20,
 });
+// Square PNG/GIF export sizes. GIF frame delays are whole hundredths of a second.
+export const EXPORT_SIZES = [256, 512, 1024, 2048, 4096];
+export const GIF_FRAME_RATES = [10, 20, 25, 50];
 const allowed = (value, values, fallback) => values.includes(value) ? value : fallback;
 
 export function shaderSettings(value = {}) {
@@ -22,6 +55,8 @@ export function shaderSettings(value = {}) {
     duration: Number.isFinite(Number(value.duration))
       ? Math.max(1, Math.min(60, Number(value.duration))) : 8,
     playing: typeof value.playing === 'boolean' ? value.playing : true,
+    exportSize: allowed(Number(value.exportSize), EXPORT_SIZES, 512),
+    gifFps: allowed(Number(value.gifFps), GIF_FRAME_RATES, 20),
   };
 }
 

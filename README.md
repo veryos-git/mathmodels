@@ -53,8 +53,8 @@ can be previewed before saving or generating a model.
 **Shader preview** in the model toolbar, or **Shader** beside a vector preview,
 turns any loaded DXF/SVG drawing or cross-section into an animated GPU distance
 field. Choose among 60 visual styles, switch between outlines and filled shapes,
-adjust curve detail and line width, pause or scrub the animation, and save a PNG
-or a complete GLSL shader bundle. It includes stacked drawings, sweep/groove/cusp
+adjust curve detail and line width, pause or scrub the animation, and save a PNG,
+a seamlessly looping GIF (up to 4096 × 4096) or a complete GLSL shader bundle. It includes stacked drawings, sweep/groove/cusp
 profiles, boundaries, lid sketches and shelf inputs. Preview settings travel with
 the project. See [shader previews](docs/shader-previews.md) for formats and limits.
 

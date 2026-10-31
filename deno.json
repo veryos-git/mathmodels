@@ -24,7 +24,7 @@
     "test:profile-editor": "deno run tools/test_profile_editor.mjs",
     "test:shelf-editor": "deno run tools/test_shelf_editor.mjs",
     "test:tip-editor": "deno run --allow-read --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_tip_editor.mjs",
-    "test:shaders": "deno test --allow-read tools/shader_preview_test.mjs tools/shader_vector_test.mjs",
+    "test:shaders": "deno test --allow-read tools/shader_preview_test.mjs tools/shader_vector_test.mjs tools/gif_encoder_test.mjs",
     "install": {
       "command": "deno run --allow-run --allow-sys=uid tools/install.ts",
       "dependencies": [

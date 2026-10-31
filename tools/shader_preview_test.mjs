@@ -21,6 +21,14 @@ test('Settings from older or malformed projects have safe defaults', () => {
   assert(SHADER_STYLES.every(s => s.code.includes('vec3 shade(')));
 });
 
+test('Export size and GIF frame rate accept only supported values', () => {
+  assert.deepEqual([shaderSettings().exportSize, shaderSettings().gifFps], [512, 20]);
+  const s = shaderSettings({ exportSize: '4096', gifFps: '25' });
+  assert.deepEqual([s.exportSize, s.gifFps], [4096, 25]);
+  const bad = shaderSettings({ exportSize: 8192, gifFps: 30 });
+  assert.deepEqual([bad.exportSize, bad.gifFps], [512, 20], 'GIF delays must be whole hundredths');
+});
+
 test('Input roles, selected DXF layers and mode changes generate different fields', async () => {
   const source = { file, id: 'profile', mode: 'filled', layers: ['frame'] };
   const filled = await sourceShader(source, shaderSettings());

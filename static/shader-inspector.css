@@ -28,6 +28,9 @@
 .shader-inspector button.ghost { width: auto; padding: 7px 10px; margin: 0; min-height: 32px; }
 .shader-description, .shader-note, .shader-stats { color: #a1b2c9; font-size: 12px; margin: 8px 0 14px; }
 .shader-warnings { color: #f0c18b; font-size: 12px; }
+.shader-export { color: #a1b2c9; font-size: 12px; margin: 0 0 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.shader-export:empty { display: none; }
+.shader-export.failed { color: #ffbd9b; }
 .shader-controls a { color: #90beff; }
 .shader-controls output { float: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 720px) {

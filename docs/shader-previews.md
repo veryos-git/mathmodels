@@ -25,7 +25,22 @@ render resolution. Source choice, style and preview controls are saved in
 `.v2sproj` under `shaderPreview`. Older projects use defaults. Shader inspection
 does not rebuild or alter the 3D model.
 
-- **Save PNG** captures the current animation frame at the selected resolution.
+- **Save PNG** captures the current animation frame at the selected export size.
+- **Save GIF** renders one full loop at the selected export size and GIF frame
+  rate (10, 20, 25 or 50 fps; an 8 s loop at 20 fps is 160 frames). Frames are
+  spaced evenly over the loop length, so the GIF repeats seamlessly forever. All
+  frames share one 255-colour palette chosen from 24 frames across the loop, and
+  each frame after the first stores only the pixels that changed. Progress is
+  shown under the buttons; the button becomes **Cancel GIF** while it runs, and
+  closing the dialog cancels it too.
+
+Export size (256 to 4096 px, square) is independent of the live preview
+resolution. Exports that differ from the preview resolution compile the shader
+on a separate offscreen canvas and draw in 1024 px tiles, so the preview keeps
+running and large frames don't trip the GPU watchdog. GIF encoding runs in the
+page between frames: 512 px encodes in a few seconds, 4096 px roughly 0.3 s per
+frame plus render time, and large smooth GIFs can reach hundreds of MB. GPUs
+smaller than the chosen size report their limit.
 - **Save shader bundle** downloads `.shader.json` containing generated SDF GLSL,
   style GLSL, complete GLSL ES 3.00 vertex/fragment stages, uniforms, normalized
   geometry bounds, source metadata, warnings and draw-pass instructions. Particle

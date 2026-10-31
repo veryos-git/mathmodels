@@ -1,10 +1,53 @@
 import { ShaderRenderer } from './vendor/shadertrace/renderer.js';
-import { SHADER_STYLES, shaderSettings, sourceShader, shaderBundle } from './shader-preview.js';
+import { SHADER_STYLES, EXPORT_SIZES, GIF_FRAME_RATES, shaderSettings, sourceShader, shaderBundle } from './shader-preview.js';
+import { GifEncoder } from './gif-encoder.js';
+
+const EXPORT_FIELDS = new Set(['exportSize', 'gifFps']);
+const TILE = 1024;
+const GIF_PALETTE_SAMPLES = 24;
 
 function download(blob, name) {
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const megabytes = bytes => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
+
+// Lets the browser paint and handle input between export frames. Unlike timers,
+// message tasks keep running at full speed when the tab is in the background.
+const nextTask = () => new Promise(resolve => {
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => { channel.port1.close(); resolve(); };
+  channel.port2.postMessage(null);
+});
+
+function releaseRenderer(renderer) {
+  renderer.dispose();
+  renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
+}
+
+/** Draws one frame in tiles, so no single draw call of a large export trips the GPU watchdog. */
+function renderTiled(renderer, time, duration) {
+  const gl = renderer.gl, size = renderer.canvas.width;
+  gl.enable(gl.SCISSOR_TEST);
+  for (let y = 0; y < size; y += TILE) {
+    for (let x = 0; x < size; x += TILE) {
+      gl.scissor(x, y, Math.min(TILE, size - x), Math.min(TILE, size - y));
+      renderer.render(time, duration, Math.floor(time * 30));
+      gl.flush();
+    }
+  }
+  gl.disable(gl.SCISSOR_TEST);
+}
+
+/** Renders and reads one frame as top-down RGBA (WebGL rows run bottom-up). */
+function readFrame(renderer, time, duration, raw, rgba) {
+  renderTiled(renderer, time, duration);
+  renderer.readPixels(raw);
+  const row = renderer.canvas.width * 4, rows = renderer.canvas.height;
+  for (let y = 0; y < rows; y++) rgba.set(raw.subarray((rows - 1 - y) * row, (rows - y) * row), y * row);
+  return rgba;
 }
 
 /** One GPU canvas, shared by project inputs and library/file previews. */
@@ -70,12 +113,19 @@ export class ShaderInspector {
             <input data-time type="range" min="0" max="8" step="0.01" value="0"></label>
           <p class="shader-stats"></p>
           <p class="shader-warnings" role="status"></p>
+          <div class="shader-control-row">
+            <label>Export size<select data-field="exportSize"></select></label>
+            <label>GIF frame rate<select data-field="gifFps"></select></label>
+          </div>
           <div class="shader-actions">
             <button type="button" class="ghost" data-action="png" disabled>Save PNG</button>
+            <button type="button" class="ghost" data-action="gif" disabled>Save GIF</button>
             <button type="button" class="ghost" data-action="shader" disabled>Save shader bundle</button>
           </div>
+          <p class="shader-export" role="status"></p>
           <p class="shader-note">Sources are centered and fitted to the canvas. Preview settings are saved with the project.
-            The shader bundle contains GLSL, uniforms and draw passes.</p>
+            A GIF covers one full loop and repeats seamlessly; at 2048 and above it can take minutes and
+            hundreds of MB. The shader bundle contains GLSL, uniforms and draw passes.</p>
           <p class="shader-note">Powered by <a href="https://github.com/jonasfrey/shadertracev2" target="_blank" rel="noopener">Shadertrace</a> · WebGL 2</p>
         </div>
       </div>`;
@@ -83,6 +133,8 @@ export class ShaderInspector {
     this.canvas = dialog.querySelector('canvas');
     this.message = dialog.querySelector('.shader-message');
     this.fields = Object.fromEntries([...dialog.querySelectorAll('[data-field]')].map(el => [el.dataset.field, el]));
+    this.fields.exportSize.append(...EXPORT_SIZES.map(size => new Option(`${size} × ${size}`, size)));
+    this.fields.gifFps.append(...GIF_FRAME_RATES.map(fps => new Option(`${fps} fps`, fps)));
     const categories = new Map();
     for (const style of SHADER_STYLES) {
       if (!categories.has(style.category)) {
@@ -91,7 +143,8 @@ export class ShaderInspector {
         categories.set(style.category, group);
         this.fields.style.append(group);
       }
-      categories.get(style.category).append(new Option(`${style.catalogNumber}. ${style.name}`, style.id));
+      const number = style.catalogNumber ? `${style.catalogNumber}. ` : '';
+      categories.get(style.category).append(new Option(`${number}${style.name}`, style.id));
     }
     dialog.addEventListener('keydown', event => event.stopPropagation());
     dialog.addEventListener('close', () => {
@@ -100,6 +153,7 @@ export class ShaderInspector {
       if (dialog.open) return;
       this.revision++;
       this.stop();
+      if (this.gifJob) this.gifJob.cancelled = true;
       this.renderer?.dispose();
       this.renderer = null;
       this.ready = false;
@@ -117,12 +171,14 @@ export class ShaderInspector {
       if (action === 'restart') { this.time = 0; this.lastFrame = 0; this.render(); }
       if (action === 'retry') this.compile();
       if (action === 'png') this.savePng();
+      if (action === 'gif') this.saveGif();
       if (action === 'shader') this.saveShader();
     });
     for (const [name, field] of Object.entries(this.fields)) {
       field.addEventListener('change', () => {
         this.settings = shaderSettings({ ...this.settings, [name]: field.value });
         this.syncControls();
+        if (EXPORT_FIELDS.has(name)) return; // used by the next export
         if (name === 'duration') {
           this.time %= this.settings.duration; this.render();
         } else if (name === 'resolution' && this.ready) {
@@ -165,6 +221,7 @@ export class ShaderInspector {
     this.fields.source.replaceChildren(...this.sources.map(item =>
       new Option(`${item.label} · ${item.file?.name || item.name}`, item.id)));
     this.fields.source.disabled = !this.sources.length;
+    if (!this.gifJob) this.exportStatus('');
     this.syncControls();
     if (!this.dialog.open) this.dialog.showModal();
     this.compile();
@@ -188,6 +245,26 @@ export class ShaderInspector {
       this.dialog.querySelector(`[data-action="${name}"]`).disabled = value !== 'ready';
     }
     this.dialog.querySelector('[data-time]').disabled = value !== 'ready';
+    this.syncGifButton();
+  }
+
+  /** The GIF button doubles as Cancel while an export runs, whatever the preview is doing. */
+  syncGifButton() {
+    const button = this.dialog.querySelector('[data-action="gif"]');
+    button.textContent = this.gifJob ? 'Cancel GIF' : 'Save GIF';
+    button.disabled = !this.gifJob && this.dialog.dataset.state !== 'ready';
+  }
+
+  exportStatus(text, failed = false) {
+    const status = this.dialog.querySelector('.shader-export');
+    status.textContent = text;
+    status.classList.toggle('failed', failed);
+  }
+
+  /** The controls panel scrolls, so bring export progress into view as an export starts. */
+  startExport(text) {
+    this.exportStatus(text);
+    this.dialog.querySelector('.shader-export').scrollIntoView({ block: 'nearest' });
   }
 
   async compile() {
@@ -240,6 +317,20 @@ export class ShaderInspector {
     this.updateTime();
   }
 
+  /** A separate offscreen renderer at export size, so exports leave the live preview alone. */
+  exportRenderer(style, conversion, size) {
+    const renderer = new ShaderRenderer(document.createElement('canvas'));
+    try {
+      const result = renderer.compile(conversion.code, style.code);
+      if (!result.ok) throw new Error(result.errors.map(error => error.message).join('\n'));
+      renderer.resize(size, size);
+      return renderer;
+    } catch (error) {
+      releaseRenderer(renderer);
+      throw error;
+    }
+  }
+
   updateTime() {
     if (!this.dialog) return;
     this.dialog.querySelector('[data-action="play"]').textContent = this.settings.playing ? 'Pause' : 'Play';
@@ -273,11 +364,77 @@ export class ShaderInspector {
     return `${this.current.source.file.name.replace(/\.(svg|dxf)$/i, '')}-${this.settings.style}`;
   }
 
-  savePng() {
+  async savePng() {
     if (!this.ready) return;
-    this.render();
-    const name = this.exportName();
-    this.canvas.toBlob(blob => { if (blob) download(blob, `${name}.png`); }, 'image/png');
+    const settings = this.snapshot(), size = settings.exportSize, time = this.time, name = this.exportName();
+    if (size === settings.resolution) {
+      this.render();
+      this.canvas.toBlob(blob => { if (blob) download(blob, `${name}.png`); }, 'image/png');
+      return;
+    }
+    const style = SHADER_STYLES.find(item => item.id === settings.style), { conversion } = this.current;
+    let renderer;
+    this.startExport(`Rendering ${size} × ${size} PNG…`);
+    await nextTask();
+    try {
+      renderer = this.exportRenderer(style, conversion, size);
+      renderTiled(renderer, time, settings.duration);
+      const blob = await new Promise(resolve => renderer.canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('The browser could not encode the PNG.');
+      download(blob, `${name}.png`);
+      this.exportStatus(`Saved ${name}.png · ${size} × ${size} · ${megabytes(blob.size)}`);
+    } catch (error) {
+      this.exportStatus(`PNG export failed: ${error.message}`, true);
+    } finally {
+      if (renderer) releaseRenderer(renderer);
+    }
+  }
+
+  async saveGif() {
+    if (this.gifJob) { this.gifJob.cancelled = true; return; }
+    if (!this.ready) return;
+    const settings = this.snapshot(), { exportSize: size, duration, gifFps } = settings;
+    const style = SHADER_STYLES.find(item => item.id === settings.style), { conversion } = this.current;
+    const name = this.exportName(), count = Math.max(2, Math.round(duration * gifFps));
+    const job = this.gifJob = { cancelled: false };
+    this.syncGifButton();
+    let renderer;
+    try {
+      this.startExport(`Preparing ${size} × ${size} GIF…`);
+      await nextTask();
+      if (job.cancelled) return;
+      renderer = this.exportRenderer(style, conversion, size);
+      const encoder = new GifEncoder(size, size);
+      const raw = new Uint8Array(size * size * 4), rgba = new Uint8Array(raw.length);
+      // Frames sit evenly on the loop, so the last one leads straight back into the first.
+      const frame = i => readFrame(renderer, i * duration / count, duration, raw, rgba);
+      const samples = Math.min(count, GIF_PALETTE_SAMPLES);
+      for (let i = 0; i < samples; i++) {
+        encoder.sample(frame(Math.floor(i * count / samples)));
+        this.exportStatus(`Choosing GIF colours… ${Math.round(100 * (i + 1) / samples)}%`);
+        await nextTask();
+        if (job.cancelled) return;
+      }
+      const parts = [];
+      for (let i = 0; i < count; i++) {
+        encoder.addFrame(frame(i), 100 / gifFps);
+        // Wrapping each frame in a Blob lets the browser keep finished frames outside the JS heap.
+        parts.push(new Blob(encoder.take()));
+        this.exportStatus(`Encoding GIF frame ${i + 1} of ${count} · ${megabytes(encoder.size)}`);
+        await nextTask();
+        if (job.cancelled) return;
+      }
+      const blob = new Blob([...parts, ...encoder.finish()], { type: 'image/gif' });
+      download(blob, `${name}.gif`);
+      this.exportStatus(`Saved ${name}.gif · ${size} × ${size} · ${count} frames at ${gifFps} fps · ${megabytes(blob.size)}`);
+    } catch (error) {
+      if (!job.cancelled) this.exportStatus(`GIF export failed: ${error.message}`, true);
+    } finally {
+      if (renderer) releaseRenderer(renderer);
+      if (job.cancelled) this.exportStatus('GIF export cancelled.');
+      if (this.gifJob === job) this.gifJob = null;
+      if (this.dialog) this.syncGifButton();
+    }
   }
 
   saveShader() {
