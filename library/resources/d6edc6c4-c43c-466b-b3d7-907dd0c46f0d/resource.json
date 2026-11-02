@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "d6edc6c4-c43c-466b-b3d7-907dd0c46f0d",
+  "name": "hornheadbeast",
+  "kind": "subject",
+  "created": "2026-11-02T00:07:56.498Z",
+  "updated": "2026-11-02T00:08:40.027Z",
+  "revision": "fab589dd-a315-44a6-9b92-0de0fc3bb35f",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/fab589dd-a315-44a6-9b92-0de0fc3bb35f/drawing.svg"
+    },
+    "original": {
+      "name": "Stilisierte Fuchs-Silhouette mit Negativformen.png",
+      "path": "revisions/fab589dd-a315-44a6-9b92-0de0fc3bb35f/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/fab589dd-a315-44a6-9b92-0de0fc3bb35f/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "outline",
+    "blackMinWidth": 3,
+    "traceMode": "centerline",
+    "threshold": 143,
+    "closeGaps": 1,
+    "strokeWidth": 2,
+    "simplify": 3,
+    "smoothing": 0.1,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 2,
+    "templates": []
+  }
+}
