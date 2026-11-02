@@ -63,6 +63,21 @@ try {
   assert.match(await value('kfProjectName'), / keyfob$/, 'a project name is suggested');
   assert.equal(await page.locator('#kfPreview .kf-ring').count(), 2);
   assert.equal(await page.locator('#kfPreview .kf-silhouette').count(), 1, 'original silhouette shown');
+  // The key ring hangs from the fold: its wire's centre line runs through it.
+  const keyRing = () => page.locator('#kfPreview .kf-keyring')
+    .evaluate(c => ({ c: [Number(c.getAttribute('cx')), Number(c.getAttribute('cy'))], r: Number(c.getAttribute('r')) }));
+  let ring = await keyRing();
+  assert.ok(Math.abs(ring.r - (25 - 2.5) / 2) < 1e-6);
+  assert.ok(Math.abs(apart(ring.c, await ringMm('fold')) - ring.r) < 1e-3, 'wire through the fold');
+  await page.locator('#kfRingShow').uncheck();
+  assert.equal(await page.locator('#kfPreview .kf-keyring').count(), 0);
+  await page.locator('#kfRingShow').check();
+  await page.locator('#kfRingDiameter').fill('30');
+  ring = await keyRing();
+  assert.ok(Math.abs(ring.r - (30 - 2.5) / 2) < 1e-6, 'diameter applies without a rebuild');
+  await page.locator('#kfRingDiameter').fill('12');
+  assert.match(await page.locator('#kfStatus').textContent(), /wider than the key ring's 7\.0 mm opening/);
+  await page.locator('#kfRingDiameter').fill('30');
   await page.screenshot({ path: `${artifacts}/silhouette.png` });
 
   data = await rebuild(() => page.locator('input[name="kfMirror"][value="full"]').check());
@@ -127,6 +142,7 @@ try {
   assert.equal(await page.locator('input[name="kfMirror"][value="full"]').isChecked(), true);
   assert.equal(await page.locator('#kfStitch').isChecked(), true);
   assert.equal(await page.locator('#kfFoldMark').isChecked(), true);
+  assert.equal(await value('kfRingDiameter'), '30');
   assert.ok(apart(await ringMm('base'), moved) < 0.01, 'small ring restored');
 
   // A downloaded project file reopens through Start → Open a project file.

@@ -220,6 +220,10 @@ and the back half lies exactly behind the front.
   stays where it is on screen; **Fit** shows the whole keyfob again. The
   subject's whole original silhouette is always drawn as a grey dashed line,
   including the part the neck covers; it is a guide only and not in the SVG.
+- **Key ring (preview only)** — a key ring hangs from the fold as a size
+  reference, its wire through the fold and the ring beyond it, following the
+  neck as you drag. Set its outer diameter (25 mm) and wire width (2.5 mm), or
+  hide it. The status line warns when the neck is wider than the ring's opening.
   If the subject bulges past the neck's root, the neck is lengthened so the
   halves cannot overlap, and the status line says so.
 - **Corner rounding** — rounds the inside corners where the neck meets the

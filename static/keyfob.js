@@ -12,6 +12,7 @@ const NUMBER_FIELDS = {
 const DEFAULTS = {
   size: 50, neckWidth: 12, neckLength: 30, neckAngle: 0, neckOffset: 0, fillet: 3, closeGaps: 0.6,
   mirror: 'silhouette', stitch: false, stitchOffset: 3, foldMark: false, anchorAlong: 0,
+  keyRing: true, keyRingDiameter: 25, keyRingWire: 2.5,
 };
 const REBUILD_DELAY = 300;
 const FOLD_PX = 9;
@@ -49,6 +50,17 @@ export function neckThrough(from, to, snap = 1) {
 export function anchorPoint(angle, offset, along) {
   const { d, n } = axis(angle);
   return [offset * n[0] + along * d[0], offset * n[1] + along * d[1]];
+}
+
+/**
+ * The key ring as it hangs on the finished keyfob: its wire runs through the
+ * fold, and the ring lies beyond it along the neck's direction `u` (unit, the
+ * SVG's y-down coordinates). Null when the sizes cannot make a ring.
+ */
+export function keyRingAt(fold, u, diameter, wire) {
+  if (!(wire > 0) || !(diameter > 2 * wire)) return null;
+  const radius = (diameter - wire) / 2;          // the wire's centre line
+  return { cx: fold[0] + radius * u[0], cy: fold[1] + radius * u[1], radius, wire, diameter };
 }
 
 /** A file name turned into a project name the server accepts. */
@@ -91,6 +103,8 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
       mirror: document.querySelector('input[name="kfMirror"]:checked').value,
       stitch: $('kfStitch').checked, stitchOffset: Number($('kfStitchOffset').value),
       foldMark: $('kfFoldMark').checked, anchorAlong: along,
+      keyRing: $('kfRingShow').checked, keyRingDiameter: Number($('kfRingDiameter').value),
+      keyRingWire: Number($('kfRingWire').value),
     };
   }
 
@@ -106,6 +120,31 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
     $('kfStitchOffset').disabled = !$('kfStitch').checked;
     $('kfFoldMark').checked = !!value('foldMark');
     along = Number(value('anchorAlong')) || 0;
+    $('kfRingShow').checked = !!value('keyRing');
+    $('kfRingDiameter').value = Number(value('keyRingDiameter')) || DEFAULTS.keyRingDiameter;
+    $('kfRingWire').value = Number(value('keyRingWire')) || DEFAULTS.keyRingWire;
+    ringInputs();
+  }
+
+  function ringInputs() {
+    for (const id of ['kfRingDiameter', 'kfRingWire']) $(id).disabled = !$('kfRingShow').checked;
+    $('kfLegendRing').hidden = !$('kfRingShow').checked;
+  }
+
+  /** The key ring for the current fold, or while a ring is dragged, the aimed one. */
+  function keyRing(fold = result.fold, u = result.direction) {
+    if (!$('kfRingShow').checked) return null;
+    return keyRingAt(fold, u, number('kfRingDiameter'), number('kfRingWire'));
+  }
+
+  /** What the view has to show: the keyfob and the key ring hanging from it. */
+  function extent() {
+    const [x, y, w, h] = result.view;
+    const ring = keyRing();
+    if (!ring) return [x, y, w, h];
+    const r = ring.diameter / 2 + 2;
+    const x0 = Math.min(x, ring.cx - r), y0 = Math.min(y, ring.cy - r);
+    return [x0, y0, Math.max(x + w, ring.cx + r) - x0, Math.max(y + h, ring.cy + r) - y0];
   }
 
   function say(text, error = false) {
@@ -172,7 +211,12 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
       `neck ${i.neckLength.toFixed(1)} mm between the halves`];
     if (i.details) parts.push(`${i.details} detail line${i.details === 1 ? '' : 's'} on the front`
       + (i.back ? ', mirrored on the back' : ''));
-    say(parts.join(' · ') + (i.notes.length ? `. Note: ${i.notes.join('; ')}.` : '.'));
+    const notes = [...i.notes];
+    const ring = keyRing(), opening = ring && ring.diameter - 2 * ring.wire;
+    if (ring && number('kfNeckWidth') > opening) {
+      notes.push(`the ${number('kfNeckWidth')} mm neck is wider than the key ring's ${opening.toFixed(1)} mm opening`);
+    }
+    say(parts.join(' · ') + (notes.length ? `. Note: ${notes.join('; ')}.` : '.'));
     for (const [id, key] of [['kfLegendBack', 'back'], ['kfLegendStitch', 'stitch'], ['kfLegendDetails', 'details']]) {
       $(id).hidden = !i[key];
     }
@@ -183,7 +227,7 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
 
   function fit(user = true) {
     if (!result) return;
-    view = [...result.view];
+    view = extent();
     userView = false;
     if (user) paint();
   }
@@ -199,7 +243,7 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
     const scale = ctm.a;                                   // px per mm now
     const [cx, cy] = result.centre;
     const px = ctm.a * cx + ctm.e - box.left, py = ctm.d * cy + ctm.f - box.top;
-    const [x, y, w, h] = result.view;
+    const [x, y, w, h] = extent();
     const limits = [scale];
     if (x < cx) limits.push(px / (cx - x));
     if (x + w > cx) limits.push((box.width - px) / (x + w - cx));
@@ -248,6 +292,18 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
     const px = mmPerPx();
     const base = onScreen(drag?.base ?? anchorPoint(number('kfNeckAngle'), number('kfNeckOffset'), along));
     const fold = drag?.fold ? onScreen(drag.fold) : result.fold;
+    // While a ring is dragged the neck points from the small ring to the big one.
+    const length = Math.hypot(fold[0] - base[0], fold[1] - base[1]);
+    const u = drag?.ring && length > 1e-9
+      ? [(fold[0] - base[0]) / length, (fold[1] - base[1]) / length] : result.direction;
+    const ring = keyRing(fold, u);
+    if (ring) {
+      // A steel band the width of the wire, with its two edges drawn crisp.
+      element('circle', { cx: ring.cx, cy: ring.cy, r: ring.radius, 'stroke-width': ring.wire, class: 'kf-keyring' });
+      for (const r of [ring.radius - ring.wire / 2, ring.radius + ring.wire / 2]) {
+        element('circle', { cx: ring.cx, cy: ring.cy, r, class: 'kf-keyring-edge' }).style.strokeWidth = `${px}`;
+      }
+    }
     if (drag && !drag.pan) {
       // The neck as it will be aimed, at its real width.
       element('line', { x1: base[0], y1: base[1], x2: fold[0], y2: fold[1], class: 'kf-aim' })
@@ -361,6 +417,10 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
       $('kfStitchOffset').disabled = !$('kfStitch').checked;
       schedule();
     });
+  }
+  $('kfRingShow').addEventListener('change', () => { ringInputs(); if (result) { paint(); describe(); } });
+  for (const id of ['kfRingDiameter', 'kfRingWire']) {
+    $(id).addEventListener('input', () => { if (result) { paint(); describe(); } });
   }
   for (const button of document.querySelectorAll('#kfAimButtons button')) {
     button.onclick = () => { $('kfNeckAngle').value = button.dataset.angle; build(); };
