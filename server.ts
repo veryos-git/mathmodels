@@ -233,6 +233,22 @@ function handlePreview(req: Request): Promise<Response> {
   });
 }
 
+/** POST /api/keyfob — the drawing's silhouette with a neck, mirrored into a fold-over keyfob SVG. */
+function handleKeyfob(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    const { form, paths } = await takeUpload(req, dir);
+    return Response.json(await runScript([
+      paths[0], "--mirror", form.get("mirror") === "full" ? "full" : "silhouette",
+      ...numericFlags(form, {
+        size: "--size", neckWidth: "--neck-width", neckLength: "--neck-length",
+        neckAngle: "--neck-angle", neckOffset: "--neck-offset", fillet: "--fillet",
+        closeGaps: "--close-gaps", stitch: "--stitch", sagitta: "--sagitta",
+      }),
+      ...(form.get("foldMark") === "1" ? ["--fold-mark"] : []),
+    ], "tools/keyfob.py"));
+  });
+}
+
 /** POST /api/sketch — a DXF subject's exact lines and arcs, for the tip editor. */
 function handleSketch(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
@@ -1537,6 +1553,7 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/inspect" && req.method === "POST") return await handleInspect(req);
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
     if (url.pathname === "/api/sketch" && req.method === "POST") return await handleSketch(req);
+    if (url.pathname === "/api/keyfob" && req.method === "POST") return await handleKeyfob(req);
     if (url.pathname === "/api/sketch/apply" && req.method === "POST") return await handleSketchApply(req);
     if (url.pathname === "/api/profiles/preview" && req.method === "POST") return await handleProfileSections(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);

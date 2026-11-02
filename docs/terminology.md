@@ -21,6 +21,17 @@ The pipeline in one line:
 | **tracery** | The network of ornament lines of a gothic subject. |
 | **pointy tip** | Where two arcs of a subject meet at an angle — in CAD, two overlapping circles. Reshaped in the tip editor. Not to be confused with **cusp paths**, the finer tracery swept with their own profile. |
 
+## Keyfobs
+
+| Term | Meaning |
+| --- | --- |
+| **keyfob** | The fold-over cutting template made from a subject: its silhouette, a neck, and the silhouette mirrored across the fold. |
+| **neck** | The strip joining the two halves of a keyfob; it wraps around the key ring. |
+| **fold** | The line across the middle of the neck that the keyfob is folded on; the back half is the front mirrored across it. |
+| **cut line** | The keyfob's outer edge, the one line always cut. |
+| **detail line** | A subject line inside its silhouette (a ghost's eyes); on the front only, or mirrored onto the back with *Whole subject*. |
+| **stitching line** | An optional line a set distance inside the cut line, around both halves. |
+
 ## 3D result
 
 | Term | Meaning |

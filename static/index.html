@@ -294,6 +294,45 @@
   #editColor { width: 100%; height: 26px; padding: 0; border: 1px solid #2a2e35;
               border-radius: 6px; background: #1d2127; cursor: pointer; }
   #editHint { margin-top: 8px; font-size: 11px; color: #6b7280; }
+  /* keyfob screen: settings beside a pan/zoom preview of the finished keyfob,
+     on paper so the lines show in the colours the downloaded SVG uses */
+  #kfPreviewBox { flex: 1; position: relative; min-height: 320px; margin-bottom: 8px;
+              background: #f4f6f9; border: 1px solid #2a2e35; border-radius: 10px; overflow: hidden; }
+  #kfPreview { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab;
+              touch-action: none; transition: opacity .15s; }
+  #kfPreviewBox[aria-busy=true] #kfPreview { opacity: .55; }
+  #kfPreview.panning { cursor: grabbing; }
+  #kfPreview:focus-visible { outline: 2px solid #3b82f6; outline-offset: -3px; }
+  #kfPreview path { vector-effect: non-scaling-stroke; stroke-width: 1.6px; }
+  #kfPreview #cut path { fill: rgba(196, 132, 82, .2); stroke-width: 2px; }
+  #kfPreview #stitch path { stroke-dasharray: 6 4; }
+  #kfPreview #fold path { stroke-dasharray: 8 5; }
+  #kfPreview .kf-ring { fill: rgba(249, 115, 22, .25); stroke: #f97316; cursor: grab; }
+  #kfPreview .kf-ring:hover { fill: rgba(249, 115, 22, .45); }
+  #kfPreview .kf-axis { stroke: #f97316; opacity: .7; pointer-events: none; }
+  #kfPreview .kf-aim { stroke: rgba(249, 115, 22, .3); pointer-events: none; }
+  #kfPreview text { fill: #c2410c; font-family: system-ui, sans-serif; font-weight: 600; pointer-events: none; }
+  #kfEmpty { position: absolute; inset: 0; display: grid; place-content: center; gap: 4px;
+              padding: 24px; text-align: center; color: #475569; background: #edf1f7; }
+  #kfEmpty[hidden] { display: none; }
+  #kfEmpty .btn-row { width: min(380px, 80vw); margin: 0 auto; }
+  #kfZoom { min-width: 48px; text-align: center; font-size: 12px; }
+  #kfStatus { margin: 0 0 4px; }
+  #kfStatus.error { color: #f87171; }
+  .kf-hint { margin: 0; }
+  .kf-aim-buttons { display: flex; gap: 6px; margin-top: 10px; }
+  .kf-aim-buttons button { margin: 0; padding: 4px 0; flex: 1; }
+  .kf-legend { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: #9aa3af; }
+  .kf-key[hidden] { display: none; }
+  .kf-key::before { content: ''; display: inline-block; width: 16px; margin-right: 5px;
+              vertical-align: middle; border-top: 2px solid; }
+  .kf-key.cut::before { border-color: #e11d48; }
+  .kf-key.details::before { border-color: #2563eb; }
+  .kf-key.back::before { border-color: #7c3aed; }
+  .kf-key.stitch::before { border-top-style: dashed; border-color: #16a34a; }
+  .kf-key.fold::before { border-top-style: dashed; border-color: #64748b; }
+  .kf-advanced { margin-top: 14px; font-size: 12px; color: #9aa3af; }
+  .kf-advanced summary { cursor: pointer; }
   .slider-row { display: grid; grid-template-columns: 92px 1fr 34px; gap: 8px;
               align-items: center; margin: 7px 0; }
   .slider-row label { margin: 0; }
@@ -490,6 +529,10 @@
       <button class="start-card" id="startGothic">
         <span class="icon">♜</span>Gothic tracery
         <small>Main frame, finer cusp paths and rounded endings.</small>
+      </button>
+      <button class="start-card" id="startKeyfob">
+        <span class="icon">🔑</span>Keyfob
+        <small>Add a neck to a subject and mirror it into a fold-over keyfob SVG.</small>
       </button>
       <button class="start-card" id="startExample">
         <span class="icon">✨</span>
@@ -753,6 +796,94 @@
         <input id="traceOverlay" type="range" min="0" max="1" step="0.05" value="0.5">
         <span class="val" id="traceOverlayVal">0.5</span>
       </div>
+    </main>
+  </div>
+</section>
+
+<section id="keyfobScreen" class="screen" hidden>
+  <header class="screen-bar">
+    <button class="ghost" id="kfBack">← Start</button>
+    <span class="title">Keyfob <span class="muted" id="kfTitleName"></span></span>
+    <input type="text" id="kfProjectName" class="bar-name" placeholder="project name"
+           title="Names the keyfob project — used when you save it">
+    <button class="ghost" id="kfSave" disabled title="Save this keyfob project on the server">Save</button>
+    <button class="ghost" id="kfSaveFile" disabled title="Download this keyfob project as a .v2sproj file">Download project</button>
+    <button id="kfDownload" disabled>Download SVG</button>
+  </header>
+  <div class="trace-layout">
+    <aside>
+      <div class="group-title">Subject</div>
+      <div class="btn-row">
+        <button class="ghost" id="kfOpen">Open SVG / DXF…</button>
+        <button class="ghost" id="kfLibrary">From library…</button>
+      </div>
+      <div class="muted" id="kfName">no subject loaded</div>
+      <asset-preview id="kfSource" hidden></asset-preview>
+      <input type="file" id="kfFile" accept=".dxf,.svg,application/dxf,image/svg+xml" hidden>
+      <label title="The silhouette's longest side; the neck comes on top of this">Subject size (longest side, mm)<input id="kfSize" type="number" value="50" min="5" max="1000" step="1"></label>
+
+      <fieldset>
+        <legend>Back side</legend>
+        <label class="check" title="The back half is the plain silhouette; the subject's detail lines stay on the front"><input type="radio" name="kfMirror" value="silhouette" checked> Silhouette only</label>
+        <label class="check" title="The detail lines are mirrored onto the back too, so cut-outs go through both thicknesses"><input type="radio" name="kfMirror" value="full"> Whole subject</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Neck</legend>
+        <div class="row">
+          <label title="How wide the neck strip is">Width (mm)<input id="kfNeckWidth" type="number" value="12" min="1" max="200" step="0.5"></label>
+          <label title="Clear length between the two halves; the fold, where the ring sits, is in its middle">Length (mm)<input id="kfNeckLength" type="number" value="30" min="1" max="500" step="1"></label>
+          <label title="Direction the neck leaves the subject: 0° is up, turning clockwise. Or drag the orange rings in the preview.">Angle (°)<input id="kfNeckAngle" type="number" value="0" min="-360" max="360" step="1"></label>
+          <label title="Slides the neck sideways from the middle of the subject (positive is to the right, looking along the neck)">Offset (mm)<input id="kfNeckOffset" type="number" value="0" min="-500" max="500" step="0.5"></label>
+        </div>
+        <div id="kfAimButtons" class="kf-aim-buttons" role="group" aria-label="Point the neck">
+          <button class="ghost" data-angle="0" title="Neck up">↑</button>
+          <button class="ghost" data-angle="90" title="Neck to the right">→</button>
+          <button class="ghost" data-angle="180" title="Neck down">↓</button>
+          <button class="ghost" data-angle="270" title="Neck to the left">←</button>
+        </div>
+        <label title="Rounds the inside corners where the neck meets the silhouette; 0 keeps them sharp">Corner rounding (mm)<input id="kfFillet" type="number" value="3" min="0" max="50" step="0.5"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Extras</legend>
+        <label class="check" title="A line inside the cut edge around both halves, stopping at the neck where the ring sits"><input type="checkbox" id="kfStitch"> Stitching line</label>
+        <label title="How far the stitching runs inside the cut edge">Stitch distance from edge (mm)<input id="kfStitchOffset" type="number" value="3" min="0.5" max="50" step="0.5" disabled></label>
+        <label class="check" title="Adds a dashed fold line across the neck to the SVG"><input type="checkbox" id="kfFoldMark"> Mark the fold line</label>
+      </fieldset>
+
+      <details class="kf-advanced">
+        <summary>Silhouette</summary>
+        <label title="Breaks in the subject's outer line narrower than this are closed before the silhouette is taken">Close gaps up to (mm)<input id="kfCloseGaps" type="number" value="0.6" min="0" max="20" step="0.1"></label>
+        <p class="muted">The silhouette is the region the subject's outermost line encloses. Loose strokes outside it are left out; every line inside becomes a detail line.</p>
+      </details>
+    </aside>
+    <main>
+      <div class="trace-navigation" aria-label="Preview navigation">
+        <button class="ghost" id="kfZoomOut" aria-label="Zoom out">−</button>
+        <span id="kfZoom">100%</span>
+        <button class="ghost" id="kfZoomIn" aria-label="Zoom in">+</button>
+        <button class="ghost" id="kfFit">Fit</button>
+        <span class="kf-legend" aria-label="Line colours">
+          <span class="kf-key cut">cut</span>
+          <span class="kf-key details" id="kfLegendDetails" hidden>details (front)</span>
+          <span class="kf-key back" id="kfLegendBack" hidden>details (back)</span>
+          <span class="kf-key stitch" id="kfLegendStitch" hidden>stitching</span>
+          <span class="kf-key fold" id="kfLegendFold" hidden>fold</span>
+        </span>
+      </div>
+      <div id="kfPreviewBox" aria-busy="false">
+        <svg id="kfPreview" tabindex="0" role="img" aria-label="Keyfob preview. Scroll to zoom, drag to pan, drag the small or big orange ring to move the neck. Plus, minus or 0 to fit." preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="kfEmpty">
+          <p>Load a subject — its silhouette gets a neck and is mirrored into a fold-over keyfob.</p>
+          <div class="btn-row">
+            <button id="kfEmptyOpen">Open SVG / DXF…</button>
+            <button class="ghost" id="kfEmptyLibrary">From library…</button>
+          </div>
+        </div>
+      </div>
+      <p id="kfStatus" class="muted" role="status" aria-live="polite">Fold the neck through a key ring and the back half lies exactly behind the front.</p>
+      <p class="muted kf-hint">Scroll to zoom · drag to pan · the neck runs from the small orange ring to the big one: drag either to move it (Shift snaps to 15°)</p>
     </main>
   </div>
 </section>
@@ -1293,6 +1424,7 @@ import { ShaderInspector } from './shader-inspector.js';
 import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
+import { initKeyfob } from './keyfob.js';
 import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lassoImage, lineSide, mirrorImage } from './image-editor.js';
 import { LineArtTemplates, TEMPLATE_FILE, templatePoint, templateHandles, templateCanvasBounds, hitTemplate, transformTemplate } from './lineart-templates.js';
 import * as THREE from 'three';
@@ -4421,6 +4553,7 @@ function showScreen(name) {
   $('traceScreen').hidden = name !== 'trace';
   $('modelScreen').hidden = name !== 'model';
   $('libraryScreen').hidden = name !== 'library';
+  $('keyfobScreen').hidden = name !== 'keyfob';
   if (name === 'library') showLibrary();
 }
 let traceReturn = 'start';   // where "Back" from the trace screen returns
@@ -6318,7 +6451,7 @@ async function loadProject(file) {
   } catch {
     return setStatus('that project file is not valid JSON', true);
   }
-  return applyProject(project);
+  return applyProject(project, file.name.replace(PROJECT, ''));
 }
 
 /**
@@ -6382,10 +6515,11 @@ async function restoreTrace(project) {
   populateTrace();
 }
 
-async function applyProject(project) {
+async function applyProject(project, name = '') {
   if (project?.format !== PROJECT_FORMAT) {
     return setStatus('that does not look like a vector2stl project', true);
   }
+  if (project.workflow === 'keyfob') return keyfob.restore(project, name);
   if (!project.drawing?.data) {
     return setStatus('that project has no drawing in it', true);
   }
@@ -6938,8 +7072,8 @@ async function openFromServer(name) {
     const res = await fetch(`/api/projects/${encodeURIComponent(name)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
-    $('projectName').value = name;
-    await applyProject(data);
+    if (data?.workflow !== 'keyfob') $('projectName').value = name;
+    await applyProject(data, name);
   } catch (e) {
     setStatus(String(e.message ?? e), true);
   }
@@ -7274,6 +7408,11 @@ const fromBase64 = (b64) => {
   return bytes;
 };
 
+// Set up here, below the project helpers it saves and reopens keyfobs with.
+const keyfob = initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemember, filePreview,
+  fileBase64, fromBase64, refreshShelf, projectFormat: PROJECT_FORMAT });
+$('startKeyfob').onclick = () => keyfob.open();
+
 $('exportZip').onclick = async () => {
   if (!baseModel()) return;
   const form = buildForm();      // the stacks already carry each layer's colour
@@ -7553,6 +7692,10 @@ const PICKER_INFO = {
     title: 'Sweep profile from the library',
     note: 'the drawing becomes the cross-section swept along the frame',
   },
+  keyfob: {
+    title: 'Keyfob subject from the library',
+    note: 'its silhouette gets a neck and is mirrored into a fold-over keyfob',
+  },
 };
 
 async function openPicker(slot) {
@@ -7580,7 +7723,7 @@ function closePicker() {
 }
 
 function renderPickerGrid() {
-  const kind = ['subject', 'stack', 'cusps', 'lidSketch', 'additionOutline'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile', 'additionProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
+  const kind = ['subject', 'stack', 'cusps', 'lidSketch', 'additionOutline', 'keyfob'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile', 'additionProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
   const resources = pickerResources.filter((r) => pickerSlot === 'template' || r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
@@ -7596,6 +7739,7 @@ function renderPickerGrid() {
 
 /** Feed a chosen library drawing to the slot it was picked for. */
 async function applyFileToSlot(slot, file) {
+  if (slot === 'keyfob') return keyfob.setSubject(file);
   if (slot === 'additionOutline' || slot === 'additionProfile') return setAdditionFile(slot, file);
   if (slot === 'lidSketch') return applyLidSketchFile(file);
   if (slot === 'template') return addTemplateFile(file);

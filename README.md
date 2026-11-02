@@ -85,6 +85,8 @@ The app is three full-screen steps, each using the whole window:
   of a sketch.
 - **Open SVG / DXF** — start from an existing vector drawing.
 - **Open a project file** — reopen a downloaded `.v2sproj`.
+- **Keyfob** — turn a subject into a fold-over keyfob SVG (see
+  [Keyfobs](#keyfobs)).
 - **Saved projects** — the grid below lists everything saved on the server,
   with a thumbnail each. Click one to reopen it; **⧉ duplicates** it and **✕**
   deletes it. **Example sketch** loads the bundled gothic window.
@@ -195,6 +197,49 @@ smoothing limits its curve handles around short corner segments to avoid oversho
 faint breaks and inspect the Threshold view. It applies a square morphological
 closing before speck removal and skeletonization; **0** (the default) leaves gaps
 unchanged. Higher radii can merge intentional spaces between neighbouring lines.
+
+## Keyfobs
+
+**Keyfob** on Start turns any SVG or DXF subject into a cutting template for a
+fold-over keyfob, e.g. in leather. The subject's *silhouette* — the region its
+outermost line encloses — gets a neck, and the piece is mirrored across a fold
+line in the middle of that neck. Cut it out, fold the neck through a key ring,
+and the back half lies exactly behind the front.
+
+- **Back side** — *Silhouette only* (default) keeps the subject's detail lines,
+  such as a ghost's eyes, on the front only; the back is the plain silhouette.
+  *Whole subject* mirrors them onto the back too, so cut-outs go through both
+  thicknesses and line up once folded.
+- **Subject size** — the silhouette's longest side, in mm.
+- **Neck** — width, length (the clear length between the two halves; the fold
+  is in its middle), angle (0° is up, clockwise) and a sideways offset. In the
+  preview the neck runs from the small orange ring to the big one at the fold:
+  drag the small ring to move the neck's base (it pivots around the big ring),
+  or the big ring to swing the neck around the small one; Shift snaps the angle
+  to 15°. The ↑ → ↓ ← buttons point it straight. After a change the subject
+  stays where it is on screen; **Fit** shows the whole keyfob again.
+  If the subject bulges past the neck's root, the neck is lengthened so the
+  halves cannot overlap, and the status line says so.
+- **Corner rounding** — rounds the inside corners where the neck meets the
+  silhouette, and only those; the subject's own notches stay crisp.
+- **Stitching line** — an optional line that far inside the cut edge, around
+  both halves, stopping at the neck where the ring sits. **Mark the fold line**
+  adds a dashed fold across the neck.
+- **Silhouette → Close gaps** — breaks in the outer line narrower than this
+  are closed first. Loose strokes outside the silhouette are left out (the
+  status line counts them); every line inside becomes a detail line.
+
+**Save** keeps the keyfob as a project on the server, listed under *Saved
+projects* on Start with a thumbnail; **Download project** writes the same as a
+`.v2sproj` file for *Open a project file*. A keyfob project embeds its subject
+and every setting, including where the neck's rings sit. The **Keyfob** card
+on Start always begins a new, empty keyfob.
+
+**Download SVG** saves the keyfob in millimetres with one Inkscape layer per
+kind of line: `cut` (red), `details` (blue, front), `details-back` (purple,
+mirrored), `stitch` (green, dashed) and `fold` (grey, dashed). Choose in your
+cutter whether detail lines are cut, scored or engraved. The CLI is
+`tools/keyfob.py subject.svg --size 50 --mirror full --neck-angle 30 --stitch 3 --output keyfob.svg`.
 
 ## Running it
 
@@ -1057,6 +1102,7 @@ go to stderr.
 | `POST /api/trace/upload` | multipart `image` (.png/.jpg/.gif/.webp) → `{id, name}`; held in memory for re-tracing |
 | `POST /api/trace` | JSON `{id, params}` → `{svg, stats}`; runs `tools/trace.py` |
 | `POST /api/inspect` | multipart `file` (.dxf or .svg) → `{layers, skipped, curves, size}` |
+| `POST /api/keyfob` | multipart `file` + `size`, `mirror` (`silhouette`/`full`), `neckWidth`, `neckLength`, `neckAngle`, `neckOffset`, `fillet`, `closeGaps`, `stitch`, `foldMark=1` → `{svg, view, centre, fold, direction, info}`; runs `tools/keyfob.py` |
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/cylinder` | JSON cylinder dimensions and lid/thread options → base64 body and optional lid STLs in assembled coordinates |
 | `GET /api/cylinder/defaults` | Current SCAD size defaults and lid/chamfer/alignment dimensions |
@@ -1103,6 +1149,7 @@ so `/api/export` still returns one file per colour plus the walls.
 - `server.ts` — Deno HTTP server; validates uploads, shells out to the converter
 - `tools/dxf2stl.py` — DXF/SVG → shapely → trimesh → STL
 - `tools/trace.py` — raster (photo/scan) → clean line SVG; the trace step
+- `tools/keyfob.py`, `static/keyfob.js` — keyfobs: silhouette + neck, mirrored at the fold
 - `tools/setup.ts` — builds `.venv` from `requirements.txt`; runs before `start`
 - `static/index.html` — the whole frontend, three.js loaded from a CDN
 - `tools/recover-project.js` — console rescue for pre-project sessions
