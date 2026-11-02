@@ -217,7 +217,9 @@ and the back half lies exactly behind the front.
   drag the small ring to move the neck's base (it pivots around the big ring),
   or the big ring to swing the neck around the small one; Shift snaps the angle
   to 15°. The ↑ → ↓ ← buttons point it straight. After a change the subject
-  stays where it is on screen; **Fit** shows the whole keyfob again.
+  stays where it is on screen; **Fit** shows the whole keyfob again. The
+  subject's whole original silhouette is always drawn as a grey dashed line,
+  including the part the neck covers; it is a guide only and not in the SVG.
   If the subject bulges past the neck's root, the neck is lengthened so the
   halves cannot overlap, and the status line says so.
 - **Corner rounding** — rounds the inside corners where the neck meets the

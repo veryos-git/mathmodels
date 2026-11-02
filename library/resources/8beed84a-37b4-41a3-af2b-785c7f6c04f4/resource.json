@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "8beed84a-37b4-41a3-af2b-785c7f6c04f4",
+  "name": "sarg",
+  "kind": "subject",
+  "created": "2026-11-02T01:08:28.797Z",
+  "updated": "2026-11-02T01:08:28.797Z",
+  "revision": "29c5151d-c39d-4d35-87c2-7072d17e01f2",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/29c5151d-c39d-4d35-87c2-7072d17e01f2/drawing.svg"
+    },
+    "original": {
+      "name": "Umriss eines Sargs mit Kreuz.png",
+      "path": "revisions/29c5151d-c39d-4d35-87c2-7072d17e01f2/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/29c5151d-c39d-4d35-87c2-7072d17e01f2/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "none",
+    "blackMinWidth": 3,
+    "traceMode": "centerline",
+    "threshold": 60,
+    "closeGaps": 1,
+    "strokeWidth": 2,
+    "simplify": 2.1,
+    "smoothing": 0.55,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 0,
+    "templates": []
+  }
+}

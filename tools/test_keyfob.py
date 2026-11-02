@@ -157,6 +157,14 @@ class KeyfobTests(unittest.TestCase):
             capture_output=True, text=True, cwd=TOOLS, check=True)
         data = json.loads(out.stdout)
         self.assertTrue(data['svg'].startswith('<?xml'))
+        # The whole original silhouette comes along for the preview, not in the SVG.
+        outline = data['silhouette']
+        self.assertTrue(outline.startswith('M') and outline.endswith('Z'))
+        points = [tuple(map(float, p.split())) for p in outline[1:-2].split(' L')]
+        xs, ys = [x for x, _ in points], [y for _, y in points]
+        self.assertAlmostEqual(max(ys) - min(ys), 40, places=2)
+        self.assertAlmostEqual(max(xs) - min(xs), 40 * 40 / 60, places=1)
+        self.assertNotIn(outline, data['svg'])
         self.assertEqual(data['direction'], [-1, 0])
         self.assertLess(data['fold'][0], -20)
         self.assertEqual(data['info']['back'], 2)

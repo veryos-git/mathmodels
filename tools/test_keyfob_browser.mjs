@@ -62,6 +62,7 @@ try {
   assert.match(await page.locator('#kfStatus').textContent(), /^Keyfob /);
   assert.match(await value('kfProjectName'), / keyfob$/, 'a project name is suggested');
   assert.equal(await page.locator('#kfPreview .kf-ring').count(), 2);
+  assert.equal(await page.locator('#kfPreview .kf-silhouette').count(), 1, 'original silhouette shown');
   await page.screenshot({ path: `${artifacts}/silhouette.png` });
 
   data = await rebuild(() => page.locator('input[name="kfMirror"][value="full"]').check());
@@ -105,6 +106,7 @@ try {
   const svg = await readFile(await svgFile.path(), 'utf8');
   for (const layer of ['cut', 'details-back', 'stitch']) assert.match(svg, new RegExp(`<g id="${layer}"`));
   assert.match(svg, /width="[\d.]+mm"/);
+  assert.doesNotMatch(svg, /kf-silhouette/, 'the original silhouette is a preview guide only');
 
   // Save on the server, then reopen it from the Start screen's project grid.
   const saved = { angle: await value('kfNeckAngle'), offset: await value('kfNeckOffset') };

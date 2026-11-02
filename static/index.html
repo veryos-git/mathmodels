@@ -307,6 +307,8 @@
   #kfPreview #cut path { fill: rgba(196, 132, 82, .2); stroke-width: 2px; }
   #kfPreview #stitch path { stroke-dasharray: 6 4; }
   #kfPreview #fold path { stroke-dasharray: 8 5; }
+  #kfPreview .kf-silhouette { fill: none; stroke: #8b95a5; stroke-width: 1.4px; stroke-dasharray: 4 4;
+              pointer-events: none; }
   #kfPreview .kf-ring { fill: rgba(249, 115, 22, .25); stroke: #f97316; cursor: grab; }
   #kfPreview .kf-ring:hover { fill: rgba(249, 115, 22, .45); }
   #kfPreview .kf-axis { stroke: #f97316; opacity: .7; pointer-events: none; }
@@ -331,6 +333,7 @@
   .kf-key.back::before { border-color: #7c3aed; }
   .kf-key.stitch::before { border-top-style: dashed; border-color: #16a34a; }
   .kf-key.fold::before { border-top-style: dashed; border-color: #64748b; }
+  .kf-key.original::before { border-top-style: dashed; border-color: #8b95a5; }
   .kf-advanced { margin-top: 14px; font-size: 12px; color: #9aa3af; }
   .kf-advanced summary { cursor: pointer; }
   .slider-row { display: grid; grid-template-columns: 92px 1fr 34px; gap: 8px;
@@ -870,6 +873,7 @@
           <span class="kf-key back" id="kfLegendBack" hidden>details (back)</span>
           <span class="kf-key stitch" id="kfLegendStitch" hidden>stitching</span>
           <span class="kf-key fold" id="kfLegendFold" hidden>fold</span>
+          <span class="kf-key original" title="The subject's whole silhouette as drawn — shown here only, not in the SVG">original silhouette</span>
         </span>
       </div>
       <div id="kfPreviewBox" aria-busy="false">

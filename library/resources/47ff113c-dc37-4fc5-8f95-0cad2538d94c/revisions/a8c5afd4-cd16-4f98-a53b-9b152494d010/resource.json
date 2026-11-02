@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "47ff113c-dc37-4fc5-8f95-0cad2538d94c",
+  "name": "Geisterumriss in Schwarz-Weiss",
+  "kind": "subject",
+  "created": "2026-11-02T01:09:27.272Z",
+  "updated": "2026-11-02T01:09:27.272Z",
+  "revision": "a8c5afd4-cd16-4f98-a53b-9b152494d010",
+  "files": {
+    "drawing": {
+      "name": "pattern.svg",
+      "path": "revisions/a8c5afd4-cd16-4f98-a53b-9b152494d010/drawing.svg"
+    },
+    "original": {
+      "name": "Geisterumriss in Schwarz-Weiss.png",
+      "path": "revisions/a8c5afd4-cd16-4f98-a53b-9b152494d010/original.png"
+    },
+    "edited": {
+      "name": "edited.png",
+      "path": "revisions/a8c5afd4-cd16-4f98-a53b-9b152494d010/edited.png"
+    }
+  },
+  "trace": {
+    "blackAreas": "none",
+    "blackMinWidth": 8,
+    "traceMode": "centerline",
+    "threshold": 83,
+    "closeGaps": 0,
+    "strokeWidth": 2,
+    "simplify": 1.2,
+    "smoothing": 0.65,
+    "skeletonize": false,
+    "invert": false,
+    "minArea": 10,
+    "templates": []
+  }
+}

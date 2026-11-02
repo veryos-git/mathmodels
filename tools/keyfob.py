@@ -337,6 +337,9 @@ def keyfob(args):
         "centre": [0, 0],
         "fold": [round(fold[0], 3), round(-fold[1], 3)],
         "direction": [round(d[0], 6), round(-d[1], 6)],
+        # The subject's whole silhouette as drawn, including what the neck
+        # swallows; a reference for the preview, never part of the SVG.
+        "silhouette": path_data(sil.exterior.coords, True),
         "info": {
             "width": round(maxx - minx, 2), "height": round(maxy - miny, 2),
             "subject": [round(smaxx - sminx, 2), round(smaxy - sminy, 2)],

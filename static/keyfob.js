@@ -152,7 +152,12 @@ export function initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemembe
 
   function render(fresh) {
     const doc = new DOMParser().parseFromString(result.svg, 'image/svg+xml');
-    content.replaceChildren(...[...doc.documentElement.children]
+    // The original silhouette goes underneath: it shows through the keyfob's
+    // translucent fill, and the cut line stays solid where the two coincide.
+    const original = document.createElementNS(SVG_NS, 'path');
+    original.setAttribute('d', result.silhouette);
+    original.setAttribute('class', 'kf-silhouette');
+    content.replaceChildren(original, ...[...doc.documentElement.children]
       .map((node) => document.importNode(node, true)));
     $('kfEmpty').hidden = true;
     if (fresh || !view) fit(false);
