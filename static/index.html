@@ -138,6 +138,19 @@
             word-break: break-word; }
   #status.error { color: #f87171; }
   #stats { margin-top: 8px; font-size: 12px; color: #6b7280; white-space: pre-wrap; }
+  /* Status and export messages float top centre, in view whatever the sidebar
+     is scrolled to. Settled messages dim; hover brings them back; errors stay. */
+  #statusDock { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 20;
+                width: max-content; max-width: min(560px, calc(100vw - 32px)); display: grid; gap: 4px;
+                justify-items: center; pointer-events: none; }
+  #statusDock > div { pointer-events: auto; margin: 0; padding: 7px 12px; border-radius: 8px;
+                      background: #111827ee; border: 1px solid #334155; box-shadow: 0 6px 18px #0009;
+                      color: #cbd5e1; transition: opacity .4s; }
+  #statusDock > #stats { color: #94a3b8; font-size: 11px; }
+  #statusDock > div:empty { display: none; }
+  #statusDock > #status.error { color: #fca5a5; border-color: #7f1d1d; }
+  #statusDock.idle > div:not(.error) { opacity: .45; }
+  #statusDock.idle:hover > div { opacity: 1; }
   .muted { color: #6b7280; font-size: 12px; }
   .check { display: flex; align-items: center; gap: 7px; margin: 0; padding: 7px 0;
            color: #ddd; font-size: 13px; cursor: pointer; }
@@ -3489,9 +3502,17 @@ const status = $('status');
 const stats = $('stats');
 let picked = null;
 
+let statusIdle;
 function setStatus(text, isError = false) {
   status.textContent = text;
   status.className = isError ? 'error' : '';
+  // A fresh message shows at full strength, then settles so it does not
+  // cover the model; errors keep their full strength.
+  const dock = $('statusDock');
+  if (!dock) return;
+  dock.classList.remove('idle');
+  clearTimeout(statusIdle);
+  statusIdle = setTimeout(() => dock.classList.add('idle'), 6000);
 }
 
 /**
@@ -8452,6 +8473,9 @@ function setupWorkflowPanels() {
   // in the Additions step alongside the shelf.
   $('modelPanel-additions').append($('domeEndsSection'));
   for(const button of $('modelSteps').querySelectorAll('button'))button.onclick=()=>showModelStep(button.dataset.step);
+  // Status and export results float top centre instead of below the panels.
+  const dock=document.createElement('div');dock.id='statusDock';dock.setAttribute('aria-live','polite');
+  dock.append($('status'),$('stats'));$('modelScreen').append(dock);
   showModelStep('inputs');setWorkflow('glass',false);
 }
 function showModelStep(step) {

@@ -5,7 +5,7 @@ and **Export**. The preview and project Save button remain visible. Frame-only
 projects omit Paint. Switching panels does not discard work.
 
 For the measured Onshape tracery example, open **Inputs → Sweep profiles &
-cusp paths → Load Onshape Spitzbogen example**. See the
+cusp paths → Examples → Onshape Spitzbogen**. See the
 [construction and STEP comparison](spitzbogen.md) for dimensions and validation.
 
 ## Image → reusable subject → stained glass
@@ -111,9 +111,48 @@ Choose **Gothic tracery** on Start. In **Inputs**, choose:
 - An optional independent cusp profile; otherwise a reduced main profile is used.
 
 The finer paths share the main frame's scale and base plane. They are not an
-extra layered subject above it. In **Shape**, control the cusp width and height
-multipliers and elevation. Uploading a custom section starts its multipliers at
-1, preserving its physical dimensions. The reduced main-section default is 0.55.
+extra layered subject above it. Select **Cusp** in the profile graph to set its
+width, height and vertical offset. Uploading a custom section starts it at its
+drawn size, preserving its physical dimensions. The reduced main section
+defaults to 0.55 of the main profile as drawn.
+
+### Multicolour profiles
+
+A swept frame can print in several filaments. In the profile graph, select the
+main or cusp section and click **+ Colour**: a colour region appears as a band
+over the section's top third. Move it, resize it from its corners, or type its
+**Left / Right / Bottom / Top** edges in millimetres. Whatever part of the
+section lies inside the region is filled with its colour in the graph, and
+that share of the frame prints in it. Regions may overhang the outline; only
+the material inside counts. **Mirror X** adds a copy across the centre line
+(the sweep path) and **Mirror Y** one across the section's mid-height. Remove
+a region with × or Delete. Regions follow their section when it is resized
+or moved, and travel inside the project.
+
+The colour follows the section everywhere it is swept. Main-section colours
+run along the main paths, connection ribs, dome caps, hooks and (without cusp
+paths) revolved endings; cusp-section colours run along the cusp paths and
+their revolved endings, and need cusp paths to print. The groove is cut
+first, so a colour never fills it. Where two regions claim the same material
+— overlapping rectangles, or a cusp sweep entering the main frame at a join —
+the region added first keeps it.
+
+The finished frame is split, not rebuilt: the colour parts and the rest are
+cut from the same solid, so they share their faces exactly and are each
+closed. The 3D preview shows every part in its colour. **Export STLs by
+colour** writes one `frame-rrggbb.stl` per colour (regions with the same
+colour share a file) plus `walls.stl` for the uncoloured frame; a CLI `.3mf`
+output gives each its own part and extruder. **Download STL** keeps the whole
+frame as one solid, and the 3MF colour-variation dialog still prints the
+frame in black.
+
+CLI: `--profile-colors colours.json`, a JSON list of
+`{"section": "main" | "cusp", "color": "#rrggbb", "rect": [x0, y0, x1, y1],
+"mirrorX": bool, "mirrorY": bool}`. `rect` is in the section's own,
+unscaled coordinates — those of `--profile-sections`: x across the path from
+the section's centre, y up from its base. The section's width, height and
+offset flags are applied to it. The build routes accept the same list as the
+`profileColors` form field.
 
 **Revolve open cusp endings** turns their terminal sections around a vertical
 axis along the chosen lateral edge, normally through 90°. Use the other axis
@@ -308,7 +347,7 @@ Existing projects retain their exact placement.
 
 ### Reference example and derivation
 
-**Load reference gothic example** loads the provided complex tracery, including
+**Examples → Reference gothic** loads the provided complex tracery, including
 its two different sections and quarter-revolved endings. The prepared inputs
 are under `examples/gothic/`:
 

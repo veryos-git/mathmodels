@@ -403,7 +403,9 @@ export class ProfileEditor {
 
   updatePanels(state, roles) {
     const item = this.selectedColour(state);
-    this.panels.colour.hidden = !item; this.panels.section.hidden = !!item;
+    // Without a main profile there is nothing to draw: just the prompt.
+    this.stage.hidden = !state.files.main;
+    this.panels.colour.hidden = !item; this.panels.section.hidden = !!item || !state.files.main;
     this.addButton.disabled = !roles.some(role => COLOURED.includes(role));
     const section = this.geometry?.[this.selected], transform = state.values[this.selected];
     for (const input of Object.values(this.inputs)) input.disabled = !section;
@@ -419,7 +421,7 @@ export class ProfileEditor {
       if (document.activeElement !== this.colourInputs.color) this.colourInputs.color.value = item.colour.color;
       this.colourInputs.mirrorX.checked = !!item.colour.mirrorX;
       this.colourInputs.mirrorY.checked = !!item.colour.mirrorY;
-      edges.forEach((value, i) => { this.colourInputs[i].value = round(value); });
+      edges.forEach((value, i) => { this.colourInputs[i].value = Number(value.toFixed(3)); });
     }
     const count = (state.colours ?? []).filter(colour => colour.section === this.selected && roles.includes(colour.section)).length;
     const name = state.files[this.selected]?.name || (this.selected === 'cusp' ? 'scaled main profile' : '');

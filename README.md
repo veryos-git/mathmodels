@@ -58,16 +58,32 @@ a seamlessly looping GIF (up to 4096 × 4096) or a complete GLSL shader bundle. 
 profiles, boundaries, lid sketches and shelf inputs. Preview settings travel with
 the project. See [shader previews](docs/shader-previews.md) for formats and limits.
 
-**Profile alignment**, under **Inputs → Sweep profiles & cusp paths**, shows
-the main profile (blue), groove cutter (pink) and cusp section (green) together
-on one millimetre grid. Click an outline or its named button to select it.
+**Inputs → Sweep profiles & cusp paths** is one graph for every section:
+the main profile (blue), groove cutter (pink) and cusp section (green) on one
+millimetre grid. Below it, one row per input — **Profile**, **Groove**,
+**Cusp** and **Cusp paths** — shows the loaded file; click the file to upload
+another, **Library…** to pick a saved one, ✕ (↺ for the cusp) to remove it,
+and ◱ to preview the cusp paths. Click a row's name, or a section's outline,
+to select that section. The fields under the graph always belong to the
+selection: width, height and vertical offset for a section, colour and
+mirroring for a colour region.
+
 Drag the selected section vertically to change its offset in **0.1 mm** steps;
 horizontal dragging cannot reposition it. Up/Down keys move by the same step.
 Drag the square handles to resize width, height or both, with **Keep proportions**
-available for each section. The exact width, height and vertical offset can
-also be entered below the preview. Escape cancels an active drag.
+available for each section. Escape cancels an active drag.
 
-Scroll to zoom, drag empty space to pan, use **Fit all**, or **Expand** for a
+**+ Colour** adds a colour region to the selected main or cusp section (the
+groove only removes material). The part of the frame the region covers prints
+in that colour: the graph fills exactly that part. Drag the region (or its ✥
+handle) to move it, its corner squares to resize it, and × or Delete to remove
+it; arrow keys move it by 0.1 mm (Shift: 1 mm). **Mirror X** adds a copy
+across the centre line, **Mirror Y** across the section's mid-height; dragging
+a copy moves the original the mirrored way. Exact edges can be typed in.
+Regions follow their section's width, height and offset. See
+[multicolour profiles](docs/workflows.md#multicolour-profiles).
+
+Scroll to zoom, drag empty space to pan, use **Fit**, or **Expand** for a
 larger editor. The groove retains its registration to the main drawing's
 original centre and base; a cusp without its own profile uses the unscaled
 main section. Each section's size and vertical offset are independent. These
@@ -693,12 +709,11 @@ classic behaviour: every curve buffered to *wall width* and extruded to *wall
 height*). The example under `advanced_profile_sweep/` (a triangular section on
 a gothic window) shows the shape of it.
 
-Under **Inputs → Sweep profiles & cusp paths**, the main, cusp and groove
-profiles each have **width · X (×)** and **height · Y (×)** sliders with exact
-numeric inputs. Each slider changes only that section's dimension and keeps
-the drawing's path scale fixed. **Lock X/Y proportions** makes either slider
-resize both dimensions while preserving their current ratio. Unlock it to
-adjust width and height separately. Changes rebuild an existing preview.
+Under **Inputs → Sweep profiles & cusp paths**, select the main, cusp or
+groove section in the graph to set its **width** and **height** in millimetres,
+by handle or by typing. Each changes only that section's dimension and keeps
+the drawing's path scale fixed. **Keep proportions** resizes both dimensions
+while preserving their current ratio. Changes rebuild an existing preview.
 
 The profile's own axes become the sweep's: **x runs across the path**,
 **y is the height**. It is re-anchored to the centre of its base — draw the
@@ -739,9 +754,9 @@ so it works at any width. The result is checked at STL precision before preview 
 Projects carry all section scales and their proportion locks. Older projects
 retain their existing section dimensions when opened. Without a separate cusp
 profile, cusp scales use the main profile as originally drawn, independently
-of the main section's sliders.
+of the main section's own width and height.
 
-**Groove profile (subtract)** under **Inputs → Sweep profiles & cusp paths**
+The **Groove** row under **Inputs → Sweep profiles & cusp paths**
 loads an optional second DXF/SVG section, from a file or the library. Generate
 3D to sweep it along the main frame's paths and subtract it after the sweeps
 are joined. This clears the groove through path intersections as well. Clear
@@ -749,9 +764,9 @@ the groove profile to restore the uncut frame.
 
 Draw both sections in the **same coordinates**: the groove keeps its sideways
 offset and height relative to the main profile's centre and bottom. It is not
-independently centred or lowered onto the base. The groove's own X/Y sliders
+independently centred or lowered onto the base. The groove's own width and height
 scale its coordinates relative to that shared origin; neither section scales
-with the subject. Use the same X/Y factors on both profiles to resize them together.
+with the subject. Scale both profiles by the same factors to resize them together.
 For the supplied `hgc/examples/example6_groove/` files, load
 `Part Studio 2 - paths.dxf` as the subject, `Part Studio 2 - profile.dxf` as the main profile,
 and `Part Studio 2 - profile_remover_groove.dxf` as the groove profile. Disable

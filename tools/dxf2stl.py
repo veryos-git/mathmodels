@@ -1440,7 +1440,7 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                 (late if groove_profile is not None and not args.groove_last
                  else solids).append(hook)
             try:
-                frame_mesh = solid_union(solids)
+                frame_mesh = solid_union(solids, recover=True)
             except (ValueError, RuntimeError) as error:
                 raise ConvertError(f"Could not fuse tracery: {error}") from error
 
@@ -1448,7 +1448,7 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         connection_mesh = sweep_profile(profile, chain_curves(ribs)) if ribs else None
         if args.frame_only and connection_mesh is not None:
             try:
-                frame_mesh = solid_union([frame_mesh, connection_mesh])
+                frame_mesh = solid_union([frame_mesh, connection_mesh], recover=True)
             except (ValueError, RuntimeError) as error:
                 raise ConvertError(f"Could not fuse the frame connections: {error}") from error
 

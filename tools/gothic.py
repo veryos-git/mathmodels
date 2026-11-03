@@ -77,7 +77,14 @@ def stepped_profile_sweep(profile, chains, miter_limit=4.0):
     return solid_union(solids)
 
 
-def solid_union(meshes):
+def solid_union(meshes, recover=False):
+    """Fuse closed meshes into solids that stay closed at STL (float32) precision.
+
+    Raises ValueError when they do not. Sweeps rely on that to retry with
+    another construction. `recover` is for fusing finished solids that have
+    no other construction to fall back on: then a failed check repairs the
+    sub-micron contacts STL rounding welds (see cylinder.printable_mesh).
+    """
     solids = []
     for mesh in meshes:
         mesh = mesh.copy()
@@ -93,7 +100,7 @@ def solid_union(meshes):
                 solids.append(part)
     if not solids:
         raise ValueError("No solid geometry was produced")
-    result = trimesh.boolean.union(solids, engine="manifold")
+    union = result = trimesh.boolean.union(solids, engine="manifold")
     simplified = manifold3d.Manifold(manifold3d.Mesh(
         vert_properties=np.asarray(result.vertices, dtype=np.float32),
         tri_verts=np.asarray(result.faces, dtype=np.uint32),
@@ -119,6 +126,16 @@ def solid_union(meshes):
         if abs(local.volume) > 1e-6:
             parts.append(part)
     if not parts or any(not p.is_volume for p in parts):
+        if recover:
+            # Which widths fail here is chance: a grazing contact (a dome cap
+            # or hook root just touching the sweep) that STL rounding welds
+            # into an edge shared by four faces. Join or merge those
+            # sub-micron contacts, as after a groove cut.
+            from cylinder import manifold, printable_mesh
+            try:
+                return printable_mesh(manifold(union))
+            except ValueError:
+                pass
         raise ValueError("The fused geometry is not watertight at STL precision")
     return trimesh.util.concatenate(parts)
 

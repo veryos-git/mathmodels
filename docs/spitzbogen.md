@@ -1,7 +1,7 @@
 # Spitzbogen: reproducing the Onshape geometry
 
-In **Inputs → Sweep profiles & cusp paths**, choose **Load Onshape Spitzbogen
-example**. It loads the original-size paths and the measured stepped profile,
+In **Inputs → Sweep profiles & cusp paths**, choose **Examples → Onshape
+Spitzbogen**. It loads the original-size paths and the measured stepped profile,
 generates a frame-only model, and disables silhouette confinement. STL, 3MF
 and SVG slices use the same generated geometry.
 

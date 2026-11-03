@@ -18,6 +18,7 @@ The pipeline in one line:
 | **boundary** | A closed shape that crops the subject and defines the finished outline and size (for example to fit a lantern). |
 | **profile** | A closed cross-section swept along the subject's lines to form the frame. |
 | **groove profile** | A second closed cross-section swept along the main frame's paths and subtracted from it; its coordinates set the groove position and depth relative to the main profile. |
+| **colour region** | A rectangle over the main or cusp profile, in the section's own coordinates (optionally mirrored across its centre line or mid-height); the share of the swept frame it covers prints in its own colour. |
 | **tracery** | The network of ornament lines of a gothic subject. |
 | **pointy tip** | Where two arcs of a subject meet at an angle — in CAD, two overlapping circles. Reshaped in the tip editor. Not to be confused with **cusp paths**, the finer tracery swept with their own profile. |
 
