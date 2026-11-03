@@ -503,9 +503,26 @@
   .resource-slot > span { display:block; margin-top:5px; overflow-wrap:anywhere; }
   .resource-slot > div:not(.profile-scale-controls) { display:flex; gap:5px; }
   .resource-slot button { width:auto; flex:1; padding:7px 5px; }
-  #sweepInputs .seed-row { display:flex; flex-wrap:wrap; gap:5px; }
-  #sweepInputs .seed-row button { width:auto; padding:7px; }
-  #sweepInputs .seed-row span { overflow-wrap:anywhere; }
+  /* Sweep profiles: one graph, then a compact row per source file. */
+  #sweepInputs .profile-editor { margin: 8px 0 6px; }
+  .profile-sources { display:grid; gap:2px; font-size:12px; }
+  .profile-source { display:grid; grid-template-columns:74px minmax(0,1fr) auto auto auto; align-items:center; gap:4px;
+                    padding:2px 4px; border:1px solid transparent; border-radius:6px; }
+  .profile-source[aria-current=true] { border-color:#3b4b63; background:#1a2230; }
+  .profile-source button { width:auto; margin:0; padding:5px 7px; font-size:11px; }
+  .profile-source button[hidden] { display:none; }
+  .profile-source .profile-source-clear { padding:5px 6px; }
+  .profile-source-label { display:flex; align-items:center; gap:5px; color:#cbd5e1; font-weight:600; text-align:left;
+                          background:none; border:0; padding:5px 0 !important; cursor:pointer; white-space:nowrap; }
+  span.profile-source-label { cursor:default; font-weight:500; }
+  .profile-source-label i { width:8px; height:8px; flex:none; border-radius:50%; background:var(--profile-color); }
+  .profile-source-label i.profile-source-paths { border-radius:0; height:2px; width:10px; background:#cbd5e1; }
+  .profile-source-file { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; text-align:left; }
+  .profile-source-file > span[aria-hidden] { flex:none; color:#64748b; }
+  .profile-source-name { min-width:0; color:#cbd5e1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .profile-source.empty .profile-source-name, .profile-source-file:disabled .profile-source-name { color:#6b7280; font-style:italic; }
+  .profile-examples { display:flex; align-items:center; gap:5px; margin-top:8px; font-size:11px; }
+  .profile-examples button { width:auto; margin:0; padding:5px 8px; font-size:11px; }
   #modelSteps button[aria-current="step"] { background:#2563eb; }
   .model-panel[hidden] { display:none; }
   #workflowProgress { margin-bottom:12px; }
@@ -1074,40 +1091,53 @@
   <label class="check" title="Trace the outermost lines along the inside of the wall, so the model comes out no wider than the subject — instead of the frame standing half a wall width outside it">
     <input type="checkbox" id="confineWalls" checked> keep walls inside the silhouette</label>
   <p id="gothicConfineWarning" role="status" hidden>Gothic tracery does not work well with this option enabled: it moves and trims the sweep paths, which can distort arches and cusp joins. Leave it off to preserve the drawn geometry.</p>
-  <div class="seed-row" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
-    <button class="ghost" id="profilePick">sweep profile…</button>
-    <span class="muted" id="profileName">off — flat walls</span>
-    <button class="ghost" id="profileClear" hidden title="Back to flat walls">✕</button>
-  </div>
-  <div class="seed-row" style="margin-top:6px">
-    <button class="ghost" id="profileLibrary" title="Sweep the frame along a cross-section saved in the library">from library…</button>
-    <span class="muted" style="align-self:center">saved section</span>
-  </div>
-  <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
-  <section id="profileEditor" aria-label="Shared profile editor"></section>
-  <div class="resource-slot" id="grooveInputs">
-    <strong>Groove profile (subtract)</strong><span id="grooveProfileName" class="muted">No groove profile</span>
-    <div><button id="grooveProfilePick" class="ghost">Upload…</button><button id="grooveProfileLibrary" class="ghost">Library…</button><button id="grooveProfileClear" class="ghost" hidden>Clear</button></div>
-    <input id="grooveProfileFile" type="file" accept=".svg,.dxf" hidden>
-    <p class="muted" id="grooveProfileNote">Load a main sweep profile first. The groove profile is swept along the same paths and subtracted from the frame.</p>
-    <div id="grooveScaleRow" class="profile-scale-controls" hidden>
-      <label for="grooveWidth">Groove width · X (×)</label>
-      <div class="profile-scale-axis"><input id="grooveWidthSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Groove width X scale"><input id="grooveWidth" type="number" min="0.01" step="0.01" value="1"></div>
-      <label for="grooveHeight">Groove height · Y (×)</label>
-      <div class="profile-scale-axis"><input id="grooveHeightSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Groove height Y scale"><input id="grooveHeight" type="number" min="0.01" step="0.01" value="1"></div>
-      <label class="check"><input id="grooveScaleLock" type="checkbox"> Lock groove X/Y proportions</label>
-      <label for="grooveZ">Groove vertical offset (mm)</label><input id="grooveZ" type="number" step="0.1" value="0">
+  <div id="profileSweep">
+    <section id="profileEditor" aria-label="Profile sections and colours"></section>
+    <div class="profile-sources" role="group" aria-label="Profile sources">
+      <div class="profile-source" data-role="main" title="Advanced: a DXF/SVG holding one closed cross-section, swept along every path to form the frame — instead of flat walls">
+        <button type="button" class="profile-source-label" data-select="main"><i style="--profile-color:#60a5fa" aria-hidden="true"></i>Profile</button>
+        <button id="profilePick" class="ghost profile-source-file" title="Upload a .svg or .dxf cross-section"><span class="profile-source-name" id="profileName">off — flat walls</span><span aria-hidden="true">↑</span></button>
+        <button class="ghost profile-source-library" id="profileLibrary" title="Sweep the frame along a cross-section saved in the library">Library…</button>
+        <button class="ghost profile-source-clear" id="profileClear" hidden title="Back to flat walls" aria-label="Remove the sweep profile">✕</button>
+      </div>
+      <div class="profile-source" data-role="groove" title="Swept along the same paths and subtracted from the frame. Draw it in the main profile's coordinates, then align it in the graph above.">
+        <button type="button" class="profile-source-label" data-select="groove"><i style="--profile-color:#fb7185" aria-hidden="true"></i>Groove</button>
+        <button id="grooveProfilePick" class="ghost profile-source-file" title="Upload a .svg or .dxf groove cutter"><span class="profile-source-name" id="grooveProfileName">No groove profile</span><span aria-hidden="true">↑</span></button>
+        <button id="grooveProfileLibrary" class="ghost profile-source-library" title="Use a groove section saved in the library">Library…</button>
+        <button id="grooveProfileClear" class="ghost profile-source-clear" hidden title="Remove the groove" aria-label="Remove the groove profile">✕</button>
+      </div>
+      <div class="profile-source" data-role="cusp" title="The cusp paths' own section; without one they use the main profile as drawn, reduced">
+        <button type="button" class="profile-source-label" data-select="cusp"><i style="--profile-color:#34d399" aria-hidden="true"></i>Cusp</button>
+        <button id="cuspProfilePick" class="ghost profile-source-file" title="Upload a .svg or .dxf cusp section"><span class="profile-source-name" id="cuspProfileName">Reduced main profile</span><span aria-hidden="true">↑</span></button>
+        <button id="cuspProfileLibrary" class="ghost profile-source-library" title="Use a cusp section saved in the library">Library…</button>
+        <button id="cuspProfileClear" class="ghost profile-source-clear" title="Use the reduced main profile again" aria-label="Reset the cusp profile">↺</button>
+      </div>
+      <div class="profile-source" data-role="paths" title="Finer paths in the main frame's coordinates and scale, swept with the cusp section on the same base plane">
+        <span class="profile-source-label"><i class="profile-source-paths" aria-hidden="true"></i>Cusp paths</span>
+        <button id="cuspPick" class="ghost profile-source-file" title="Upload .svg or .dxf cusp paths"><span class="profile-source-name" id="cuspName">No cusp paths</span><span aria-hidden="true">↑</span></button>
+        <button id="cuspLibrary" class="ghost profile-source-library" title="Use cusp paths saved in the library">Library…</button>
+        <button id="cuspView" class="ghost profile-source-clear" hidden title="Preview the cusp paths" aria-label="Preview the cusp paths">◱</button>
+        <button id="cuspClear" class="ghost profile-source-clear" hidden title="Remove the cusp paths" aria-label="Remove the cusp paths">✕</button>
+      </div>
     </div>
-  </div>
-  <div id="profileDimensions" class="muted" hidden></div>
-  <div class="profile-scale-controls" id="profileScaleRow" hidden>
-    <label for="profileScale">Main profile width · X (×)</label>
-    <div class="profile-scale-axis"><input id="profileScaleSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Main profile width X scale"><input id="profileScale" type="number" min="0.01" step="0.01" value="1"></div>
-    <label for="profileHeightScale">Main profile height · Y (×)</label>
-    <div class="profile-scale-axis"><input id="profileHeightScaleSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Main profile height Y scale"><input id="profileHeightScale" type="number" min="0.01" step="0.01" value="1"></div>
-    <label class="check"><input id="profileScaleLock" type="checkbox"> Lock main X/Y proportions</label>
-    <label for="profileZ">Main vertical offset (mm)</label><input id="profileZ" type="number" step="0.1" value="0">
-    <p class="muted">Scales this section only. X runs across the path; profile Y becomes the model's vertical height. Lock keeps the current width/height ratio.</p>
+    <input type="file" id="profileFile" accept=".dxf,.svg,application/dxf,image/svg+xml">
+    <input id="grooveProfileFile" type="file" accept=".svg,.dxf" hidden>
+    <input id="cuspFile" type="file" accept=".svg,.dxf" hidden>
+    <input id="cuspProfileFile" type="file" accept=".svg,.dxf" hidden>
+    <div class="profile-examples"><span class="muted">Examples</span><button id="gothicExample" class="ghost" title="Load the reference gothic frame, cusp paths and both sections">Reference gothic</button><button id="spitzbogenExample" class="ghost" title="Load the measured Onshape Spitzbogen frame and profile">Onshape Spitzbogen</button></div>
+    <!-- The sections' scales and offsets, edited in the graph above. These
+         inputs stay the single source of truth for builds and projects. -->
+    <div id="profileTransforms" hidden>
+      <input id="profileScaleSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Main profile width X scale"><input id="profileScale" type="number" min="0.01" step="0.01" value="1">
+      <input id="profileHeightScaleSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Main profile height Y scale"><input id="profileHeightScale" type="number" min="0.01" step="0.01" value="1">
+      <input id="profileScaleLock" type="checkbox"><input id="profileZ" type="number" step="0.1" value="0">
+      <input id="grooveWidthSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Groove width X scale"><input id="grooveWidth" type="number" min="0.01" step="0.01" value="1">
+      <input id="grooveHeightSlider" type="range" min="0.01" max="10" step="0.01" value="1" aria-label="Groove height Y scale"><input id="grooveHeight" type="number" min="0.01" step="0.01" value="1">
+      <input id="grooveScaleLock" type="checkbox"><input id="grooveZ" type="number" step="0.1" value="0">
+      <input id="cuspWidthSlider" type="range" min="0.01" max="10" step="0.01" value="0.55" aria-label="Cusp width X scale"><input id="cuspWidth" type="number" min="0.01" step="0.01" value="0.55">
+      <input id="cuspHeightSlider" type="range" min="0.01" max="10" step="0.01" value="0.55" aria-label="Cusp height Y scale"><input id="cuspHeight" type="number" min="0.01" step="0.01" value="0.55">
+      <input id="cuspScaleLock" type="checkbox"><input id="cuspZ" type="number" value="0" step="0.1">
+    </div>
   </div>
   <div id="domeEndsSection" hidden>
     <strong>Path endings &amp; hooks</strong>
@@ -1144,31 +1174,10 @@
   <details id="gothicOptions">
     <summary>Cusp paths &amp; rounded endings</summary>
     <p class="muted">Cusp paths use the frame's coordinates and scale. They share its base plane, with their own smaller section.</p>
-    <div id="cuspInputs">
-      <div class="resource-slot"><strong>Cusp paths</strong><span id="cuspName" class="muted">No cusp paths</span>
-        <div><button id="cuspPick" class="ghost">Upload…</button><button id="cuspLibrary" class="ghost">Library…</button><button id="cuspClear" class="ghost">Clear</button></div>
-        <input id="cuspFile" type="file" accept=".svg,.dxf" hidden>
-        <asset-preview id="cuspPreview" hidden></asset-preview></div>
-      <div class="resource-slot"><strong>Cusp profile</strong><span id="cuspProfileName" class="muted">Reduced main profile</span>
-        <div><button id="cuspProfilePick" class="ghost">Upload…</button><button id="cuspProfileLibrary" class="ghost">Library…</button><button id="cuspProfileClear" class="ghost">Reset</button></div>
-        <input id="cuspProfileFile" type="file" accept=".svg,.dxf" hidden>
-        </div>
-      <div id="cuspScaleRow" class="profile-scale-controls">
-        <label for="cuspWidth">Cusp width · X (×)</label>
-        <div class="profile-scale-axis"><input id="cuspWidthSlider" type="range" min="0.01" max="10" step="0.01" value="0.55" aria-label="Cusp width X scale"><input id="cuspWidth" type="number" min="0.01" step="0.01" value="0.55"></div>
-        <label for="cuspHeight">Cusp height · Y (×)</label>
-        <div class="profile-scale-axis"><input id="cuspHeightSlider" type="range" min="0.01" max="10" step="0.01" value="0.55" aria-label="Cusp height Y scale"><input id="cuspHeight" type="number" min="0.01" step="0.01" value="0.55"></div>
-        <label class="check"><input id="cuspScaleLock" type="checkbox"> Lock cusp X/Y proportions</label>
-        <label for="cuspZ">Cusp vertical offset (mm)</label><input id="cuspZ" type="number" value="0" step="0.1">
-        <p class="muted">Uses its own section, or the main profile as drawn, with independent scales.</p>
-      </div>
-    </div>
     <label class="check"><input id="roundEnds" type="checkbox"> Revolve open cusp endings</label>
     <div class="row"><label>Turn (degrees)<input id="endAngle" type="number" value="90" min="1" max="180" step="5"></label><label>Axis side<select id="endSide"><option value="1">Left edge</option><option value="-1">Right edge</option></select></label></div>
     <p class="muted">Without cusp paths, endings apply to open main-frame paths. Closed paths and cusp connections to the main frame are left joined. Switch axis side if the roll faces the wrong way.</p>
     <label class="check" title="Print the frame without faces. With a boundary, connection ribs are generated where the subject would otherwise float, so the frame prints as one piece"><input id="frameOnly" type="checkbox"> Frame only (no faces)</label>
-    <button id="gothicExample" class="ghost">Load reference gothic example</button>
-    <button id="spitzbogenExample" class="ghost">Load Onshape Spitzbogen example</button>
   </details>
   <div class="row">
     <div><label for="wallOverlap" title="How far each face reaches into the wall around it, so the two fuse when printed">wall overlap (mm)</label>
@@ -1432,7 +1441,7 @@
 </script>
 <script type="module">
 import { remapPaint } from './region-paint.js';
-import { filePreview } from './file-preview.js';
+import { filePreview, inspectPreview } from './file-preview.js';
 import { bindProfileScales, PROFILE_SCALE_GROUPS, PROFILE_POSITION_FIELDS, PROFILE_TRANSFORM_FIELDS } from './profile-scales.js';
 import { ProfileEditor } from './profile-editor.js';
 import { ShelfEditor } from './shelf-editor.js';
@@ -2342,6 +2351,7 @@ function newLayer(file = null) {
     stepGeom: [],       // effects: the prism of each terrace above the first
     wallGeom: [],       // the unit prism of each wall piece
     sweptGeom: null,    // profile mode: the swept frame as one ready-made mesh
+    sweptParts: [],     // profile colours: [{ geom, color }] cut from that frame
     wallMeshes: [],     // the frame's slabs
     group: new THREE.Group(),          // position.z = zBase, .visible toggled
     stacks: [],         // index === region id, [{hue, t}] bottom-up
@@ -2398,6 +2408,8 @@ function disposeLayer(l) {
   for (const steps of l.stepGeom) for (const g of steps ?? []) g.dispose();
   for (const g of l.wallGeom) g.dispose();
   if (l.sweptGeom) l.sweptGeom.dispose();
+  for (const part of l.sweptParts) part.geom.dispose();
+  l.sweptParts = [];
   l.model = null;
   l.regionMeshes = [];
   l.regionGeom = [];
@@ -2489,15 +2501,20 @@ function rebuildFrame(li) {
   l.wallMeshes = [];
   if (!l.model) return;
 
-  // Profile mode: the swept frame arrives as a finished mesh — show it as is.
-  if (l.sweptGeom) {
-    const mesh = new THREE.Mesh(l.sweptGeom, new THREE.MeshStandardMaterial({
-      color: $('workflowMode').value === 'gothic' ? 0xb9c4d2 : 0x2b2f36, metalness: 0.1, roughness: 0.8, wireframe,
-    }));
-    mesh.userData = { layer: li, region: null };
-    l.group.add(mesh);
-    l.wallMeshes.push(mesh);
-    wrapPreviewMesh(mesh,l,true);
+  // Profile mode: the swept frame arrives as a finished mesh — show it as is,
+  // with each profile colour's share of it as its own mesh in that colour.
+  if (l.sweptGeom || l.sweptParts.length) {
+    const frame = $('workflowMode').value === 'gothic' ? 0xb9c4d2 : 0x2b2f36;
+    const pieces = [...(l.sweptGeom ? [{ geom: l.sweptGeom, color: frame }] : []), ...l.sweptParts];
+    for (const piece of pieces) {
+      const mesh = new THREE.Mesh(piece.geom, new THREE.MeshStandardMaterial({
+        color: piece.color, metalness: 0.1, roughness: 0.8, wireframe,
+      }));
+      mesh.userData = { layer: li, region: null };
+      l.group.add(mesh);
+      l.wallMeshes.push(mesh);
+      wrapPreviewMesh(mesh,l,true);
+    }
     return;
   }
 
@@ -2641,9 +2658,13 @@ function buildLayer(li, data, lo, hi, rng, keep = null) {
   l.offset = data.offset ?? [0, 0];
   l.group.position.z = l.zBase;
 
-  // A swept frame cannot be extruded here, so the server sends it as a mesh.
-  if (data.wallMesh) {
-    l.sweptGeom = new STLLoader().parse(fromBase64(data.wallMesh).buffer);
+  // A swept frame cannot be extruded here, so the server sends it as a mesh,
+  // split into its profile colours when it has any.
+  if (data.wallMesh || data.wallParts?.length) {
+    l.sweptGeom = data.wallMesh ? new STLLoader().parse(fromBase64(data.wallMesh).buffer) : null;
+    l.sweptParts = (data.wallParts ?? []).map((part) => ({
+      geom: new STLLoader().parse(fromBase64(part.mesh).buffer), color: new THREE.Color(part.color ?? '#94a3b8'),
+    }));
   } else {
     l.wallGeom = data.walls.map((poly) => unitPrism(poly));
   }
@@ -3619,6 +3640,7 @@ let grooveProfilePicked = null;
 let profileRevision = 0;
 let profileLoad = 0;
 let profileDims = null;    // { x, y } mm — what the profile measures
+let profileColours = [];   // colour regions over the main/cusp sections, in section coordinates
 
 /** Settings a swept frame takes over get out of the way while one is set. */
 function profileUI() {
@@ -3630,14 +3652,9 @@ function profileUI() {
   $('grooveProfileClear').hidden = !grooveProfilePicked;
   grooveLastUI();
   $('grooveProfilePick').disabled = $('grooveProfileLibrary').disabled = !on;
-  $('grooveProfileNote').textContent = on
-    ? 'Sweeps along the same paths and subtracts from the frame. Draw both profiles in the same coordinates; adjust their alignment in the shared preview. Each section has independent size and vertical offset.'
-    : 'Load a main sweep profile first. The groove profile is swept along the same paths and subtracted from the frame.';
-  $('profileScaleRow').hidden = !on;
-  $('grooveScaleRow').hidden = !on || !grooveProfilePicked;
-  $('profileDimensions').hidden = !on;
+  $('grooveProfilePick').title = on ? 'Upload a .svg or .dxf groove cutter' : 'Load a main sweep profile first';
+  profileSourceUI();
   $('wallWidth').closest('.row').hidden = on;
-  $('profileDimensions').textContent = profileDims ? `Main section: ${scaledProfileWidth().toFixed(2)} mm wide × ${(profileDims.y * Number($('profileHeightScale').value)).toFixed(2)} mm high` : '';
   if (on && $('sweepDetails')) $('sweepDetails').open = true;
   $('wallWidth').disabled = $('wallHeight').disabled = on;
   $('blackFrame').closest('label').hidden = on;
@@ -3654,7 +3671,7 @@ async function setProfile(file) {
   const dimensions = file ? await inspectSize(file) : null;
   if (request !== profileLoad) return false;
   profilePicked = file;
-  if (!file) { grooveProfilePicked = null; $('profileZ').value = $('grooveZ').value = '0'; }
+  if (!file) { grooveProfilePicked = null; profileColours = []; $('profileZ').value = $('grooveZ').value = '0'; }
   profileRevision++;
   profileDims = dimensions;
   if (file && allHoles().length) {
@@ -3739,10 +3756,24 @@ for (const id of PROFILE_POSITION_FIELDS) $(id).onchange = () => {
 };
 for (const group of PROFILE_SCALE_GROUPS) $(group.lock).addEventListener('change', () => profileEditor?.sync());
 
+/** Dim the source rows that have no file, so the loaded inputs stand out. */
+function profileSourceUI() {
+  const files = { main: profilePicked, groove: grooveProfilePicked, cusp: cuspProfilePicked, paths: cuspPicked };
+  for (const row of document.querySelectorAll('.profile-source')) row.classList.toggle('empty', !files[row.dataset.role]);
+}
+
+/** Mark the source row of the section selected in the graph. */
+function showProfileSelection(role) {
+  for (const row of document.querySelectorAll('.profile-source')) {
+    if (row.dataset.role === role) row.setAttribute('aria-current', 'true'); else row.removeAttribute('aria-current');
+  }
+}
+
 function profileEditorState() {
   return {
     files: { main: profilePicked, groove: grooveProfilePicked, cusp: cuspProfilePicked },
-    hasCusp: !!(cuspPicked || cuspProfilePicked), sagitta: $('sagitta').value,
+    hasCusp: !!(cuspPicked || cuspProfilePicked), hasCuspPaths: !!cuspPicked, sagitta: $('sagitta').value,
+    colours: profileColours,
     values: Object.fromEntries(PROFILE_SCALE_GROUPS.map(group => [group.name, {
       sx: Number($(group.width).value), sy: Number($(group.height).value),
       z: Number($(group.position).value), locked: $(group.lock).checked,
@@ -3761,6 +3792,26 @@ function editProfileSection(name, value, commit) {
   profileScales.sync(); profileUI(); showYSize();
   // Dragging updates only the shared view; rebuild once when the gesture ends.
   if (commit) refit(`${name === 'main' ? 'Main' : name === 'groove' ? 'Groove' : 'Cusp'} profile updated.`);
+}
+
+/**
+ * Colour regions over the main and cusp sections (see profile-editor-geometry.js).
+ * Dragging only redraws the graph; the model rebuilds when the gesture ends.
+ */
+function editProfileColours(next, commit) {
+  profileColours = next;
+  profileEditor?.render();
+  if (commit) refit(next.length ? `Profile colours updated (${count(next.length, 'colour region')}).` : 'Profile colours removed.');
+}
+
+/** Colours as saved and sent to the converter: valid entries only, ids kept for the editor. */
+function profileColourSettings(list) {
+  const valid = colour => colour && ['main', 'cusp'].includes(colour.section) && /^#[0-9a-f]{6}$/i.test(colour.color)
+    && Array.isArray(colour.rect) && colour.rect.length === 4 && colour.rect.every(Number.isFinite);
+  return (Array.isArray(list) ? list : []).filter(valid).map((colour, i) => ({
+    id: typeof colour.id === 'string' ? colour.id : `saved${i}`, section: colour.section, color: colour.color.toLowerCase(),
+    rect: colour.rect.map(Number), mirrorX: !!colour.mirrorX, mirrorY: !!colour.mirrorY,
+  }));
 }
 
 /** The profile's width after the user's stretch, in model millimetres. */
@@ -5936,6 +5987,9 @@ function shapeForm({ placement = false } = {}) {
   if (profilePicked) {
     form.append('profile', profilePicked);
     if (grooveProfilePicked) form.append('grooveProfile', grooveProfilePicked);
+    // Cusp colours only print along cusp paths; the converter skips them otherwise.
+    const colours = profileColourSettings(profileColours).map(({ id, ...colour }) => colour);
+    if (colours.length) form.append('profileColors', JSON.stringify(colours));
   }
   if (boundaryPicked) {
     form.append('boundary', boundaryPicked);
@@ -6396,6 +6450,8 @@ async function buildProject() {
     profile: profilePicked
       ? { name: profilePicked.name, data: await fileBase64(profilePicked), resource: profilePicked.resource ?? null }
       : null,
+    // Colour regions over the main and cusp sections, in section coordinates.
+    profileColors: profilePicked ? profileColourSettings(profileColours) : [],
     grooveProfile: grooveProfilePicked
       ? { name: grooveProfilePicked.name, data: await fileBase64(grooveProfilePicked), resource: grooveProfilePicked.resource ?? null }
       : null,
@@ -6554,6 +6610,7 @@ async function applyProject(project, name = '') {
   lidSketchPicked=embeddedFile(project.lidSketch); lidSketchRevision++; lidSketchUI();
   cuspPicked = embeddedFile(project.tracery?.cusps);
   cuspProfilePicked = embeddedFile(project.tracery?.profile);
+  profileColours = profileColourSettings(project.profileColors);
   for (const [id,value] of Object.entries({cuspWidth:.55,cuspHeight:.55,cuspZ:0,endAngle:90,endSide:1})) $(id).value=value;
   $('roundEnds').checked = !!project.tracery?.roundEnds;
   $('frameOnly').checked = !!project.tracery?.frameOnly;
@@ -8382,9 +8439,10 @@ function setupWorkflowPanels() {
     for(const node of nodes)panel.append(node);
     aside.insertBefore(panel,$('status'));
   }
-  const sweeps=document.createElement('fieldset'); sweeps.id='sweepInputs';
-  const legend=document.createElement('legend');legend.textContent='Sweep profiles & cusp paths';sweeps.append(legend);
-  for(const node of [$('profilePick').closest('.seed-row'),$('profileLibrary').closest('.seed-row'),$('profileFile'),$('profileEditor'),$('profileDimensions'),$('profileScaleRow'),$('grooveInputs'),$('cuspInputs'),$('gothicExample'),$('spitzbogenExample')])sweeps.append(node);
+  // One graph manages every section and its colours; the source rows below it
+  // load each file. Their scale inputs stay hidden as the build's state.
+  const sweeps=document.createElement('div'); sweeps.id='sweepInputs';
+  sweeps.append($('profileSweep'));
   const sweepDetails=document.createElement('details');sweepDetails.id='sweepDetails';
   const sweepSummary=document.createElement('summary');sweepSummary.textContent='Sweep profiles & cusp paths';sweepDetails.append(sweepSummary,sweeps);
   $('modelPanel-inputs').insertBefore(sweepDetails,$('layerBox'));
@@ -8433,7 +8491,7 @@ async function newWorkflow(mode) {
   restoreRing(null);
   restoreLighter(null);
   resetLayers();picked=null;clearTrace();
-  cuspPicked=cuspProfilePicked=null;
+  cuspPicked=cuspProfilePicked=null;profileColours=[];
   clearTimeout(profileScaleTimer);profileScales.restore();
   await setProfile(null);await setBoundary(null);
   $('projectName').value='';$('roundEnds').checked=false;
@@ -8443,11 +8501,13 @@ async function newWorkflow(mode) {
   setWorkflow(mode);updateCuspLabels();setStatus('Choose inputs to begin.');
 }
 function updateCuspLabels() {
-  $('cuspPreview').source = filePreview(cuspPicked);
   profileEditor?.sync();
   profileScales.sync();
   $('cuspName').textContent=cuspPicked?.name??'No cusp paths';
+  $('cuspView').hidden=$('cuspClear').hidden=!cuspPicked;
   $('cuspProfileName').textContent=cuspProfilePicked?.name??'Reduced main profile';
+  $('cuspProfileClear').hidden=!cuspProfilePicked;
+  profileSourceUI();
 }
 
 function projectShaderSources() {
@@ -8481,6 +8541,7 @@ $('cuspProfilePick').onclick=()=>$('cuspProfileFile').click();
 $('cuspFile').onchange=(e)=>{if(e.target.files[0])setCuspFile('cusps',e.target.files[0]);e.target.value='';};
 $('cuspProfileFile').onchange=(e)=>{if(e.target.files[0])setCuspFile('cuspProfile',e.target.files[0]);e.target.value='';};
 $('cuspClear').onclick=()=>setCuspFile('cusps',null);
+$('cuspView').onclick=(event)=>inspectPreview(filePreview(cuspPicked),event.currentTarget);
 $('cuspProfileClear').onclick=()=>setCuspFile('cuspProfile',null);
 $('cuspLibrary').onclick=()=>openPicker('cusps');
 $('cuspProfileLibrary').onclick=()=>openPicker('cuspProfile');
@@ -8492,7 +8553,7 @@ $('gothicExample').onclick=async()=>{
     const get=async(name)=>{const r=await fetch('/api/gothic-example/'+name);if(!r.ok)throw new Error('Could not load gothic reference');return new File([await r.blob()],name);};
     const [frame,cusps,profile,cuspProfile]=await Promise.all(['frame.dxf','cusps.dxf','frame-profile.svg','cusp-profile.svg'].map(get));
     clearTimeout(profileScaleTimer);profileScales.restore();
-    await setBoundary(null);grooveProfilePicked=null;await setProfile(profile);cuspPicked=cusps;cuspProfilePicked=cuspProfile;
+    await setBoundary(null);grooveProfilePicked=null;profileColours=[];await setProfile(profile);cuspPicked=cusps;cuspProfilePicked=cuspProfile;
     $('profileScale').value=1;$('cuspWidth').value=1;$('cuspHeight').value=1;$('cuspZ').value=0;$('roundEnds').checked=true;$('endAngle').value=90;$('endSide').value=1;
     setWorkflow('gothic');updateCuspLabels();$('projectName').value='Gothic reference';
     await pickFile(frame,false);$('scale').value=1;showModelStep('shape');await generate(null);
@@ -8526,7 +8587,9 @@ filamentManager=initFilaments({changed:()=>rangeChanged(),layerHeight:()=>Number
 $('startFilaments').onclick=() => filamentManager.open();
 $('modelFilaments').onclick=() => filamentManager.open();
 setupWorkflowPanels();
-profileEditor = new ProfileEditor({ host: $('profileEditor'), read: profileEditorState, change: editProfileSection });
+profileEditor = new ProfileEditor({ host: $('profileEditor'), read: profileEditorState, change: editProfileSection,
+  changeColours: editProfileColours, select: showProfileSelection });
+for (const button of document.querySelectorAll('.profile-source-label[data-select]')) button.onclick = () => profileEditor.select(button.dataset.select);
 $('sagitta').addEventListener('change', () => profileEditor.sync());
 </script>
 </body>

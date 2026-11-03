@@ -41,3 +41,30 @@
 .tip-editor .profile-editor-status.error { color: #f87171; }
 .tip-editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 10px 10px; }
 .tip-editor-actions button { width: auto; margin: 0; padding: 8px 14px; }
+
+/* Profile sections & colours (ProfileEditor). The sidebar copy is compact:
+   section selection lives in the source rows below it, help in Expand. */
+.section-editor header { padding: 6px 8px; }
+.section-editor header .profile-editor-view { padding: 0; flex-wrap: wrap; }
+.section-editor:not(.profile-editor-dialog) .profile-editor-legend,
+.section-editor:not(.profile-editor-dialog) .profile-editor-help { display: none; }
+.section-editor .profile-editor-stage { height: 230px; }
+.section-editor.profile-editor-dialog .profile-editor-stage { height: auto; }
+.section-editor.profile-editor-dialog header { padding-right: 80px; }
+.section-editor .profile-editor-status { margin: 6px 10px; }
+.section-editor .profile-editor-fields { padding-bottom: 10px; }
+.section-editor .profile-editor-fields label { font-size: 11px; }
+.section-editor .profile-editor-fields input[type=number] { padding: 5px 7px; }
+.section-editor .profile-editor-add { border-color: #64748b; }
+.section-editor .profile-editor-colour { display: flex; flex-direction: column; gap: 8px; }
+.section-editor .profile-editor-colour[hidden] { display: none; }
+.section-editor .profile-editor-colour-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.section-editor .profile-editor-colour-row .check { margin: 0; font-size: 11px; }
+.section-editor .profile-editor-colour-row button { margin-left: auto; }
+.section-editor .profile-editor-swatch { display: flex; align-items: center; gap: 6px; }
+.section-editor .profile-editor-swatch { margin: 0; }
+.section-editor .profile-editor-swatch input { width: 40px; height: 26px; padding: 0; margin: 0; border: 1px solid #475569; background: none; cursor: pointer; }
+.section-editor .profile-editor-edges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.section-editor .profile-editor-edges input { min-width: 0; }
+.section-editor.profile-editor-dialog .profile-editor-colour { flex-direction: row; align-items: end; gap: 16px; }
+.section-editor.profile-editor-dialog .profile-editor-edges { flex: 1; max-width: 520px; }

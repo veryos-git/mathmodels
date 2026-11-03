@@ -451,7 +451,7 @@ def hook_tip(spec):
     return style
 
 
-def hook_solid(profile, point, forward, spec, inset=0.05, across=None, segments=24):
+def hook_solid(profile, point, forward, spec, inset=0.05, across=None, segments=24, height=None):
     """A hook swept from the frame's own profile, standing up at `point`.
 
     `forward` is the in-plane direction the hook leaves along (the path's
@@ -468,13 +468,17 @@ def hook_solid(profile, point, forward, spec, inset=0.05, across=None, segments=
     and the rising bar carry it on both faces (the section plus its mirror
     image across the path, as the reference's 180° revolve leaves it), the
     post ending square at the bar's centre line.
+
+    `height` sets the hook's shape from another section's height, so a part
+    of the profile (a colour region) follows exactly the hook the whole
+    profile makes; by default it is `profile`'s own top.
     """
     point = np.asarray(point, dtype=float)
     forward = np.asarray(forward, dtype=float)
     forward = forward / max(np.linalg.norm(forward), 1e-12)
     across = np.array([-forward[1], forward[0]]) if across is None else np.asarray(across, float)
     across = across / max(np.linalg.norm(across), 1e-12)
-    height = profile.bounds[3]
+    height = profile.bounds[3] if height is None else height
     chains, tip, joints = hook_sections(spec, height, segments)
     if inset > 0:
         chains[0] = [(-inset, 0.0)] + chains[0]       # root, inside the frame
@@ -571,19 +575,22 @@ def dome_ending(profile, point, normal, outward, segments=24):
     return mesh
 
 
-def revolved_ending(profile, point, normal, outward, angle=90, side=1, segments=24):
+def revolved_ending(profile, point, normal, outward, angle=90, side=1, segments=24, reference=None):
     """Revolve an end cross-section about its side's vertical axis.
 
     At zero degrees the section coincides exactly with the sweep end. The
     axis touches the profile's lateral edge; turning 90 degrees rolls the
     moulding around the tip, without approximating it by a spherical cap.
     The opposite side is useful for mirrored or differently oriented paths.
+    `reference` places the axis at another section's edge instead, so a part
+    of that section rolls exactly as it does within the whole ending.
     """
     if not 0 < angle <= 180 or side not in (-1, 1):
         raise ValueError("End angle must be 0–180 degrees and side must be -1 or 1")
     ring = np.asarray(profile.exterior.coords[:-1])
     point, normal, outward = map(lambda p: np.asarray(p, dtype=float), (point, normal, outward))
-    radius = -profile.bounds[0] if side == 1 else profile.bounds[2]
+    edge = (reference if reference is not None else profile).bounds
+    radius = -edge[0] if side == 1 else edge[2]
     pivot = point - side * radius * normal
     theta = np.linspace(0, math.radians(angle), max(2, segments) + 1)
     verts = []

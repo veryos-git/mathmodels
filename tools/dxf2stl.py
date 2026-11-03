@@ -43,6 +43,7 @@ below; colour groups are shared, so split and 3MF exports merge the layers.
 
 from gothic import (solid_union, revolved_ending, dome_ending, stepped_profile_sweep,
                     segmented_profile_sweep, path_frames, hook_solid)
+from profile_colours import colour_label, colour_of, colour_region, load_colours, split_frame
 import argparse
 import base64
 import itertools
@@ -1322,6 +1323,83 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
             if not math.isfinite(float(_spec.get("offset", 0.0))):
                 raise ConvertError("A hook's vertical offset must be a finite number")
 
+    # Profile colours: rectangles over the main or cusp section that print in
+    # their own filament (see profile_colours). Cusp colours need cusp paths.
+    colour_entries = []
+    if getattr(args, "profile_colors", None):
+        if profile is None:
+            raise ConvertError("Profile colours need a main sweep profile")
+        try:
+            colour_entries = load_colours(args.profile_colors)
+        except (OSError, ValueError, TypeError) as error:
+            raise ConvertError(f"Could not read the profile colours: {error}") from error
+
+    def revolved_places(paths, end_chains):
+        """(point, normal, forward) of every open ending that is rolled."""
+        places = []
+        if not args.round_ends:
+            return places
+        for chain in end_chains:
+            if chain[0] == chain[-1] or len(chain) < 2:
+                continue
+            for index, neighbour in ((0, 1), (-1, -2)):
+                point = np.asarray(chain[index], dtype=float)
+                forward = point - np.asarray(chain[neighbour], dtype=float)
+                forward /= max(np.linalg.norm(forward), 1e-12)
+                # Avoid rolling an ending at a connection to the main frame.
+                if args.cusps and any(LineString(c).distance(Point(point)) <= max(1e-4, args.sagitta*2) for c in paths):
+                    continue
+                tangent = -forward if index == 0 else forward
+                places.append((point, np.array([-tangent[1], tangent[0]]), forward))
+        return places
+
+    def dome_places(paths):
+        """(point, normal, forward) of every free main-path end with a dome cap."""
+        places = []
+        if not dome_ends_coords:
+            return places
+        tol = max(1e-2, args.sagitta * 2)
+        for chain in chain_curves(paths, min_dot=-0.5):
+            if chain[0] == chain[-1] or len(chain) < 2:
+                continue
+            for index, neighbour in ((0, 1), (-1, -2)):
+                point = np.asarray(chain[index], dtype=float)
+                if not any(np.linalg.norm(point - t) <= tol for t in dome_ends_coords):
+                    continue
+                forward = point - np.asarray(chain[neighbour], dtype=float)
+                forward /= max(np.linalg.norm(forward), 1e-12)
+                tangent = -forward if index == 0 else forward
+                places.append((point, np.array([-tangent[1], tangent[0]]), forward))
+        return places
+
+    def hook_places(paths):
+        """(anchor, forward, spec) of every hook, one per path vertex.
+
+        Hooks stand up out of the drawing plane. They all face the same way,
+        along the drawing's -Y by default, whatever the path does at their
+        vertex; `rotation` turns one about Z, and `offset` slides it up the
+        drawing's vertical axis (+Y) from the vertex. One hook per vertex,
+        even where several paths meet there.
+        """
+        places = []
+        if not hook_specs:
+            return places
+        tol = max(1e-2, args.sagitta * 2)
+        placed = set()
+        for chain in chain_curves(paths, min_dot=-0.5):
+            for point in path_frames(chain)[0]:
+                key = (round(float(point[0]) / tol), round(float(point[1]) / tol))
+                spec = next((s for s in hook_specs
+                             if abs(float(s["x"]) - point[0]) <= tol
+                             and abs(float(s["y"]) - point[1]) <= tol), None)
+                if spec is None or key in placed:
+                    continue
+                placed.add(key)
+                turn = math.radians(float(spec.get("rotation", 0.0)))
+                forward = np.array([math.sin(turn), -math.cos(turn)])
+                places.append((point + (0.0, float(spec.get("offset", 0.0))), forward, spec))
+        return places
+
     def build_frame(offsets=None, trim=None):
         """The swept frame and its connection ribs; None for flat walls.
 
@@ -1346,67 +1424,21 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
             end_chains = chain_curves(cusps if args.cusps else paths, min_dot=-0.5)
             if cusps:
                 solids.append(sweep_profile(cusp_section, end_chains))
-            if args.round_ends:
-                for chain in end_chains:
-                    if chain[0] == chain[-1] or len(chain) < 2:
-                        continue
-                    for index, neighbour in ((0, 1), (-1, -2)):
-                        point = np.asarray(chain[index], dtype=float)
-                        forward = point - np.asarray(chain[neighbour], dtype=float)
-                        forward /= max(np.linalg.norm(forward), 1e-12)
-                        # Avoid rolling an ending at a connection to the main frame.
-                        if args.cusps and any(LineString(c).distance(Point(point)) <= max(1e-4, args.sagitta*2) for c in paths):
-                            continue
-                        tangent = -forward if index == 0 else forward
-                        normal = np.array([-tangent[1], tangent[0]])
-                        solids.append(revolved_ending(end_section, point, normal, forward,
-                                                      args.end_angle, args.end_side))
-            if dome_ends_coords:
-                dome_chains = chain_curves(paths, min_dot=-0.5)
-                tol = max(1e-2, args.sagitta * 2)
-                for chain in dome_chains:
-                    if chain[0] == chain[-1] or len(chain) < 2:
-                        continue
-                    for index, neighbour in ((0, 1), (-1, -2)):
-                        point = np.asarray(chain[index], dtype=float)
-                        if not any(np.linalg.norm(point - t) <= tol for t in dome_ends_coords):
-                            continue
-                        forward = point - np.asarray(chain[neighbour], dtype=float)
-                        forward /= max(np.linalg.norm(forward), 1e-12)
-                        tangent = -forward if index == 0 else forward
-                        normal = np.array([-tangent[1], tangent[0]])
-                        solids.append(dome_ending(profile, point, normal, forward))
-            if hook_specs:
-                tol = max(1e-2, args.sagitta * 2)
-                overlap = max(args.sagitta * 2, 0.05)
-                # Hooks stand up out of the drawing plane. They all face the
-                # same way, along the drawing's -Y by default, whatever the
-                # path does at their vertex; `rotation` turns one about Z, and
-                # `offset` slides it up the drawing's vertical axis (+Y) from
-                # the vertex. One hook per vertex, even where several paths
-                # meet there.
-                placed = set()
-                for chain in chain_curves(paths, min_dot=-0.5):
-                    for point in path_frames(chain)[0]:
-                        key = (round(float(point[0]) / tol), round(float(point[1]) / tol))
-                        spec = next((s for s in hook_specs
-                                     if abs(float(s["x"]) - point[0]) <= tol
-                                     and abs(float(s["y"]) - point[1]) <= tol), None)
-                        if spec is None or key in placed:
-                            continue
-                        placed.add(key)
-                        turn = math.radians(float(spec.get("rotation", 0.0)))
-                        forward = np.array([math.sin(turn), -math.cos(turn)])
-                        anchor = point + (0.0, float(spec.get("offset", 0.0)))
-                        try:
-                            # The profile is centred on both the path and the
-                            # hook, so an unshifted hook's root always overlaps
-                            # the frame.
-                            hook = hook_solid(profile, anchor, forward, spec, overlap)
-                        except ValueError as error:
-                            raise ConvertError(str(error)) from error
-                        (late if groove_profile is not None and not args.groove_last
-                         else solids).append(hook)
+            for point, normal, forward in revolved_places(paths, end_chains):
+                solids.append(revolved_ending(end_section, point, normal, forward,
+                                              args.end_angle, args.end_side))
+            for point, normal, forward in dome_places(paths):
+                solids.append(dome_ending(profile, point, normal, forward))
+            overlap = max(args.sagitta * 2, 0.05)
+            for anchor, forward, spec in hook_places(paths):
+                try:
+                    # The profile is centred on both the path and the hook,
+                    # so an unshifted hook's root always overlaps the frame.
+                    hook = hook_solid(profile, anchor, forward, spec, overlap)
+                except ValueError as error:
+                    raise ConvertError(str(error)) from error
+                (late if groove_profile is not None and not args.groove_last
+                 else solids).append(hook)
             try:
                 frame_mesh = solid_union(solids)
             except (ValueError, RuntimeError) as error:
@@ -1449,8 +1481,69 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                 raise ConvertError(f"Could not fuse the hooks onto the grooved frame: {error}") from error
         return frame_mesh, connection_mesh
 
+    def build_colour_cutters(offsets=None):
+        """[(group label, [closed meshes])] for each profile colour, in order.
+
+        Each colour's rectangle (with its mirror images) is swept along the
+        same paths as the section it colours, and hooked, capped and rolled
+        the same way, with the whole section's geometry. Splitting the
+        finished, grooved frame by these keeps every face of the colour
+        exactly where the frame has it.
+        """
+        if profile is None or not colour_entries:
+            return []
+        paths = repeat_paths(swept, offsets)
+        main_chains = chain_curves(paths)
+        cusps = repeat_paths(cusp_curves, offsets, merge=False) if args.cusps else []
+        end_chains = chain_curves(cusps if args.cusps else paths, min_dot=-0.5)
+        ribs = repeat_paths([list(rib.coords) for rib in connection_curves], offsets)
+        rib_chains = chain_curves(ribs) if ribs and args.frame_only else []
+        overlap = max(args.sagitta * 2, 0.05)
+        rolled = revolved_places(paths, end_chains)
+        domes, hooks = dome_places(paths), hook_places(paths)
+        cutters = []
+        for entry in colour_entries:
+            if entry["section"] == "cusp":
+                if not cusps:
+                    continue
+                section = cusp_section
+                transform = (args.cusp_width, args.cusp_height, args.cusp_z)
+            else:
+                section = profile
+                transform = (args.profile_scale, args.profile_height_scale, args.profile_z)
+            region = colour_region(entry, transform, section.bounds)
+            left, _, right, _ = section.bounds
+            # Rolled and capped endings turn the section about its edge or
+            # base line; a margin past that axis would fold through itself.
+            turned = region.intersection(box(left if args.end_side == 1 else left - 1, -1e6,
+                                             right if args.end_side == -1 else right + 1, 1e6))
+            above = region.intersection(box(left - 1, 0, right + 1, 1e6))
+            pieces = []
+            try:
+                for poly in polygons_of(region):
+                    pieces.append(sweep_profile(poly, end_chains if entry["section"] == "cusp" else main_chains))
+                    if entry["section"] == "main" and rib_chains:
+                        pieces.append(sweep_profile(poly, rib_chains))
+                if entry["section"] == "cusp" or not args.cusps:
+                    for poly in polygons_of(turned):
+                        for point, normal, forward in rolled:
+                            pieces.append(revolved_ending(poly, point, normal, forward, args.end_angle,
+                                                          args.end_side, reference=section))
+                if entry["section"] == "main":
+                    for poly in polygons_of(above):
+                        for point, normal, forward in domes:
+                            pieces.append(dome_ending(poly, point, normal, forward))
+                        for anchor, forward, spec in hooks:
+                            pieces.append(hook_solid(poly, anchor, forward, spec, overlap,
+                                                     height=profile.bounds[3]))
+            except (ValueError, RuntimeError) as error:
+                raise ConvertError(f"Could not build the profile colour {entry['color']}: {error}") from error
+            cutters.append((colour_label(entry["color"]), pieces))
+        return cutters
+
     # Sketch repeats sweep the frame later, once every drawing is placed.
     frame_mesh, connection_mesh = (None, None) if defer_frame else build_frame()
+    colour_cutters = [] if defer_frame else build_colour_cutters()
     xs = [x for c in swept for x, _ in c]
     ys = [y for c in swept for _, y in c]
 
@@ -1473,6 +1566,8 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         "wall_height": wall_height,
         "frame_mesh": frame_mesh,
         "build_frame": build_frame,
+        "colour_cutters": colour_cutters,
+        "build_colour_cutters": build_colour_cutters,
         "open_endpoints": open_endpoints,
         "sketch_bounds": (min(xs), min(ys), max(xs), max(ys)) if xs else None,
         "summary": summary,
@@ -1514,18 +1609,27 @@ def repeat_sketch(layers, nx, ny):
     # Float32 rounding moves the cut faces by a few ULPs; put them back.
     snap = max(1e-5, abs(start) * 2**-22, abs(end) * 2**-22)
 
+    def snap_column(mesh):
+        vertices = mesh.vertices.copy()
+        x = vertices[:, 0]
+        vertices[:, 0] = np.where(np.abs(x - start) < snap, start,
+                                  np.where(np.abs(x - end) < snap, end, x))
+        mesh.vertices = vertices
+
     lo, hi = math.inf, -math.inf
     for drawing in layers:
         dx, dy = drawing["offset"]
         frame, drawing["connection_mesh"] = drawing["build_frame"](offsets, (start - dx, end - dx))
         if frame is not None:
             frame.apply_translation((dx, dy, 0.0))
-            vertices = frame.vertices.copy()
-            x = vertices[:, 0]
-            vertices[:, 0] = np.where(np.abs(x - start) < snap, start,
-                                      np.where(np.abs(x - end) < snap, end, x))
-            frame.vertices = vertices
+            snap_column(frame)
             drawing["frame_mesh"] = frame
+            # Colour parts are cut from the column, so they snap the same way.
+            drawing["colour_cutters"] = drawing["build_colour_cutters"](offsets)
+            for _, pieces in drawing["colour_cutters"]:
+                for piece in pieces:
+                    piece.apply_translation((dx, dy, 0.0))
+            drawing["frame_snap"] = snap_column
             frame_lo, frame_hi = frame.bounds[:, 1]
         else:
             # Flat walls are the buffered paths, so their copies simply merge.
@@ -1763,6 +1867,32 @@ def wall_solids(wall_polys, wall_height, cutter, wall_stack=None, frame_mesh=Non
             z += thickness
 
 
+def frame_parts(drawing):
+    """The swept frame split by its profile colours: [(group or None, mesh)].
+
+    None when the drawing has no profile colours. The split is made from the
+    frame as it is now (shelf attached, drawing placed), once, and every
+    export then files the parts under their own colour groups. A part with
+    group None is the frame's own, uncoloured material.
+    """
+    frame, cutters = drawing.get("frame_mesh"), drawing.get("colour_cutters")
+    if frame is None or not cutters:
+        return None
+    cached = drawing.get("_frame_parts")
+    if cached is not None and cached[0] is frame:
+        return cached[1]
+    try:
+        parts = split_frame(frame, cutters)
+    except (ValueError, RuntimeError) as error:
+        raise ConvertError(f"Could not split the frame into its profile colours: {error}") from error
+    snap = drawing.get("frame_snap")
+    if snap is not None:
+        for _, mesh in parts:
+            snap(mesh)
+    drawing["_frame_parts"] = (frame, parts)
+    return parts
+
+
 def build_meshes(layers, wall_stack=None):
     """Every solid of every drawing layer, stacked by each layer's z_base."""
     meshes = []
@@ -1800,12 +1930,21 @@ def colour_buckets(layers, wall_stack, extrude=None, face_offsets=None):
     buckets = defaultdict(list)
     n_walls, n_regions = 0, 0
     for drawing in layers:
-        for solid, group in wall_solids(drawing["wall_polys"],
-                                        drawing["wall_height"], drawing["cutter"],
-                                        wall_stack, drawing["frame_mesh"],
-                                        drawing["z_base"], extrude=extrude):
-            buckets[group or "walls"].append(solid)
-            n_walls += 1
+        parts = frame_parts(drawing)
+        if parts is not None:
+            # Profile colours: each share of the swept frame prints in its own.
+            for group, mesh in parts:
+                solid = mesh.copy()
+                solid.apply_translation((0.0, 0.0, drawing["z_base"]))
+                buckets[group or "walls"].append(solid)
+                n_walls += 1
+        else:
+            for solid, group in wall_solids(drawing["wall_polys"],
+                                            drawing["wall_height"], drawing["cutter"],
+                                            wall_stack, drawing["frame_mesh"],
+                                            drawing["z_base"], extrude=extrude):
+                buckets[group or "walls"].append(solid)
+                n_walls += 1
         for solid, group in region_solids(drawing["region_polys"],
                                           drawing["stacks"], drawing["cutter"],
                                           drawing["z_base"], drawing["effect"], extrude=extrude):
@@ -2561,6 +2700,11 @@ def main():
     ap.add_argument("--preview", action="store_true",
                     help="report the subject and boundary outlines as JSON for "
                          "the 2D window-position preview, then exit")
+    ap.add_argument("--profile-colors", default=None, metavar="FILE",
+                    help="JSON list of colour rectangles over the main or cusp profile "
+                         "([{section, color, rect: [x0, y0, x1, y1], mirrorX, mirrorY}], "
+                         "in the section's own unscaled coordinates); each prints its "
+                         "share of the swept frame as its own colour group")
     ap.add_argument("--profile-sections", action="store_true",
                     help="report normalized main, groove and cusp sections for the shared profile editor")
     ap.add_argument("--sketch", action="store_true",
@@ -2892,6 +3036,9 @@ def main():
             drawing["crop"] = translate(drawing["crop"], dx, dy)
         if drawing["frame_mesh"] is not None:
             drawing["frame_mesh"].apply_translation((dx, dy, 0.0))
+        for _, pieces in drawing["colour_cutters"]:
+            for piece in pieces:
+                piece.apply_translation((dx, dy, 0.0))
         if drawing["connection_curves"]:
             drawing["connection_curves"] = [translate(rib, dx, dy)
                                             for rib in drawing["connection_curves"]]
@@ -2984,8 +3131,17 @@ def main():
         if drawing["frame_mesh"] is not None:
             # The swept frame is no longer a prism the browser can extrude,
             # so it travels as a ready-made binary STL.
-            payload["wallMesh"] = base64.b64encode(
-                drawing["frame_mesh"].export(file_type="stl")).decode("ascii")
+            parts = frame_parts(drawing)
+            rest = drawing["frame_mesh"] if parts is None else \
+                next((mesh for group, mesh in parts if group is None), None)
+            if rest is not None:
+                payload["wallMesh"] = base64.b64encode(rest.export(file_type="stl")).decode("ascii")
+            if parts is not None:
+                # Profile colours travel as one mesh each, in the colour they print.
+                payload["wallParts"] = [{
+                    "group": group, "color": colour_of(group),
+                    "mesh": base64.b64encode(mesh.export(file_type="stl")).decode("ascii"),
+                } for group, mesh in parts if group is not None]
         if drawing["open_endpoints"]:
             payload["openEndpoints"] = drawing["open_endpoints"]
         return payload

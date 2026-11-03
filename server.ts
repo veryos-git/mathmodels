@@ -387,6 +387,7 @@ function handleRegions(req: Request, placement = false): Promise<Response> {
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await mapFlag(form, "hooks", "--hooks", dir),
+      ...await mapFlag(form, "profileColors", "--profile-colors", dir),
       ...await layerSpecs(form, dir, paths),
       "--sagitta", previewSagitta,   // override for preview speed
     ]));
@@ -680,6 +681,7 @@ function handleConvert(req: Request, slice = false): Promise<Response> {
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await mapFlag(form, "hooks", "--hooks", dir),
+      ...await mapFlag(form, "profileColors", "--profile-colors", dir),
       ...await layerSpecs(form, dir, paths),
       ...(slice ? ["--slice-height", String(height)] : []),
       ...await takeCylinder(form, dir, profilePath),
@@ -730,6 +732,7 @@ function handleExport(req: Request): Promise<Response> {
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await mapFlag(form, "hooks", "--hooks", dir),
+      ...await mapFlag(form, "profileColors", "--profile-colors", dir),
       ...await mapFlag(form, "wallStack", "--wall-stack", dir),
       ...stacks,
       ...groups,
@@ -773,6 +776,7 @@ function handleRingSizes(req: Request): Promise<Response> {
       ...await mapFlag(form, "holes", "--holes", dir),
       ...await mapFlag(form, "domeEnds", "--dome-ends", dir),
       ...await mapFlag(form, "hooks", "--hooks", dir),
+      ...await mapFlag(form, "profileColors", "--profile-colors", dir),
       ...await layerSpecs(form, dir, paths),
       ...await ringFlags(form, dir, ringProfilePath, true),
     ]);
