@@ -16,6 +16,9 @@ Use the **Inputs → Shape → Paint → Export** panels for stained glass, or s
 **Edit pointy tips…** under a DXF subject's preview reshapes the tips where two
 arcs meet: drag a tip or type its position, circle overlap or arc radius, and
 every arc keeps touching the lines it touched (symmetric copies follow).
+For smaller changes, **Expand ↗ → Edit paths** on the subject preview drags a
+DXF line or arc end along its own line or circle (extending a hook's arc, say),
+bends arcs, moves circles and SVG path points; ends that touch stay joined.
 **Additions**, between Shape and Export (or Paint), adds a perpendicular shelf
 from a closed SVG/DXF outline, with adjustable thickness, placement and a rotated
 decorative edge profile. The supplied gothic bat shelf outline is available
@@ -103,6 +106,8 @@ The app is three full-screen steps, each using the whole window:
 - **Open a project file** — reopen a downloaded `.v2sproj`.
 - **Keyfob** — turn a subject into a fold-over keyfob SVG (see
   [Keyfobs](#keyfobs)).
+- **Paper model** — the cutting net of a foldable paper house, with SVG/DXF
+  windows cut into its walls (see [Paper models](#paper-models)).
 - **Saved projects** — the grid below lists everything saved on the server,
   with a thumbnail each. Click one to reopen it; **⧉ duplicates** it and **✕**
   deletes it. **Example sketch** loads the bundled gothic window.
@@ -262,6 +267,90 @@ kind of line: `cut` (red), `details` (blue, front), `details-back` (purple,
 mirrored), `stitch` (green, dashed) and `fold` (grey, dashed). Choose in your
 cutter whether detail lines are cut, scored or engraved. The CLI is
 `tools/keyfob.py subject.svg --size 50 --mirror full --neck-angle 30 --stitch 3 --output keyfob.svg`.
+
+## Paper models
+
+**Paper model** on Start builds the cutting net of a foldable paper model — a
+house by default — for a CNC paper cutter. An OpenSCAD *paper template* in
+`paper_templates/` draws the net: floor, walls and glue tabs. Its walls are
+plain; windows and other decorations are SVG or DXF drawings you add.
+
+- **Template** — pick one from `paper_templates/`. Its Customizer parameters
+  (house size, wall and roof height, roof style, glue tabs) appear under
+  **Template parameters** and rebuild the net as they change; **Reset
+  parameters** returns to the template's defaults.
+- **Decorations** — **Add SVG / DXF…** or **From library…** adds a drawing,
+  shown as a card: a thumbnail of the drawing with what it cuts out filled in
+  dark, the **frame cutout** switch, the paper bar thickness, **clone +** and
+  the bin. As a *frame cutout* (the default) the drawing's connected lines,
+  such as a window frame with a cross, are thickened into paper bars of the
+  given thickness (mm; **−** / **+** step 0.5 mm, 2 mm by default) and only what
+  they enclose is cut out: four panes for a ⊞, never the drawing's outermost
+  line. Untick **frame cutout** for a drawing that already is the cutout, such
+  as a ghost: every closed outline is cut out whole, as drawn. Breaks up to
+  0.6 mm in a traced outline are closed first, and whatever lies inside an
+  outline (the ghost's eyes) falls out with it. A new decoration goes on the
+  wall with the fewest, centred in it and sized to fit. **clone +** adds a copy
+  with the same drawing, size, turn and cut on the wall with the fewest, at the
+  same place (beside the original if that is its own wall), without
+  re-reading the file. The thumbnail selects a decoration; the bin removes it.
+- **Placing** — drag a decoration on the net to move it, across onto another
+  wall too; drag a corner to resize it about its centre. The selected one's
+  wall, centre (X from the wall's left edge seen from outside, Y above the floor
+  fold), width and clockwise rotation can be typed in; arrow keys nudge it
+  0.5 mm (Shift: 5 mm) and Delete removes it. Cuts are trimmed to each wall's
+  **decoration area** (green, dashed), clear of the edges, the floor fold and
+  the glue tabs. The status line says when a decoration is trimmed, cuts
+  nothing, or would leave a loose piece of paper.
+- **3D view** — the cut net folded up along its fold lines, cut-outs and all,
+  with a light inside. Drag to orbit and scroll to zoom; **fold** slides from
+  the flat sheet to the finished model, ⤢ enlarges the view and ⟲ looks at it
+  from the front again.
+
+The net is shown and exported **from outside**, the way the decorations read on
+the finished model: cut it with that side up and fold the walls away from you,
+or turn the sheet over and fold them up. **Download SVG** saves it in
+millimetres with an Inkscape layer each for the `cut` lines (red) and the
+`fold` lines to score (blue, dashed); the status line says whether it fits A4.
+**Save** and **Download project** keep the template, its parameters and every
+decoration with its drawing, like keyfob projects.
+
+Two templates come with the app:
+
+- **house** — a square floor with a wall on each side, roofs as upright
+  silhouettes, open on top: `paper_folding_haunted_house.scad` from
+  `hgc_requirements_documentation/paper_mode_hgc/` with its built-in windows
+  taken out. Its folds are a separate `fold` layer to score.
+- **papercut fold house2** — four walls in a row with two roof halves and no
+  floor, for an A4 sheet: `papercut_fold_house2.scad` from
+  `hgc_requirements_documentation/paper_mode_hgc/updates/new_paper_template/`,
+  unchanged apart from the protocol. Like the house, it leaves windows to the
+  decorations; it keeps an arched door in wall 1 (parameters under **Door**)
+  and a dashed logo in the gable of wall 3, and cuts its folds as dashed slits,
+  so its SVG has no fold layer for a cutter to cut through. The logo is
+  imported from `veryos_logo.svg` beside the template; without that file the
+  status line says so and the logo is left out.
+
+Templates follow a small protocol, described at the top of
+`paper_templates/house.scad`. `output="cut"` draws the net with the app's
+`app_decorations` cut in; `output="area"` draws where decorations may cut and
+echoes `app_walls` (where each wall lies on the net), `app_folds` (fold lines
+and how far each folds inward) and `app_base` (the piece that stays put). A
+template may also echo `app_net_top = "outside"` when the face of its net
+facing up becomes the outside (the house's top face is the inside, so the app
+mirrors it to show it from outside), `app_up` for the direction on the
+`app_base` piece that points up once folded (a wall's `[0, 1, 0]` for a house
+without a floor), and `app_fold_layer = false` when its cut already perforates
+the folds. The 3D view stands the model up that way and looks at wall 1 from
+outside. Customizer groups up to `[Hidden]` become the template parameters
+(the template's description is its first comment paragraph); the `[Output]`
+group is the app's own. A `.scad` added to `paper_templates/` is listed after
+reloading the page. On the command line, `tools/paper.py job.json --output
+net.svg` builds a net (`--help` describes the job file).
+
+`deno task test:paper` checks the editor's geometry, `deno task test:geometry`
+includes `tools/test_paper.py`, and `tools/test_paper_browser.mjs` drives the
+screen in a browser like the keyfob test.
 
 ## Running it
 
@@ -1123,6 +1212,8 @@ go to stderr.
 | `POST /api/trace/upload` | multipart `image` (.png/.jpg/.gif/.webp) → `{id, name}`; held in memory for re-tracing |
 | `POST /api/trace` | JSON `{id, params}` → `{svg, stats}`; runs `tools/trace.py` |
 | `POST /api/inspect` | multipart `file` (.dxf or .svg) → `{layers, skipped, curves, size}` |
+| `GET /api/paper/templates` | the paper templates in `paper_templates/`, each with its Customizer parameters |
+| `POST /api/paper` | multipart `job` JSON (`template`, `params`, `decorations`) and a `decoration-N` file for each decoration whose drawing has to be read → `{svg, view, net, folds, area, walls, decorations, faces, info}`; a decoration that only moved sends back its earlier `geometry` instead. Runs `tools/paper.py` |
 | `POST /api/keyfob` | multipart `file` + `size`, `mirror` (`silhouette`/`full`), `neckWidth`, `neckLength`, `neckAngle`, `neckOffset`, `fillet`, `closeGaps`, `stitch`, `foldMark=1` → `{svg, view, centre, fold, direction, info}`; runs `tools/keyfob.py` |
 | `POST /api/regions` | `file` + settings → wall and face outlines the browser extrudes; with `profile`, the frame also comes as `wallMesh` (base64 STL) |
 | `POST /api/cylinder` | JSON cylinder dimensions and lid/thread options → base64 body and optional lid STLs in assembled coordinates |
@@ -1171,6 +1262,9 @@ so `/api/export` still returns one file per colour plus the walls.
 - `tools/dxf2stl.py` — DXF/SVG → shapely → trimesh → STL
 - `tools/trace.py` — raster (photo/scan) → clean line SVG; the trace step
 - `tools/keyfob.py`, `static/keyfob.js` — keyfobs: silhouette + neck, mirrored at the fold
+- `paper_templates/`, `tools/paper.py`, `tools/paper.ts`, `static/paper.js`,
+  `static/paper-geometry.js` — paper models: template parameters, decorations
+  cut into the net, the folded 3D preview
 - `tools/setup.ts` — builds `.venv` from `requirements.txt`; runs before `start`
 - `static/index.html` — the whole frontend, three.js loaded from a CDN
 - `tools/recover-project.js` — console rescue for pre-project sessions

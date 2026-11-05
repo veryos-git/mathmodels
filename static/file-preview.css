@@ -70,3 +70,15 @@ asset-preview .file-preview-hint { padding: 0 8px 7px; color: #96a9c2; font-size
   .file-inspector header { padding: 12px; gap: 12px; }
   .file-inspector button.ghost { min-height: 40px; min-width: 36px; }
 }
+.file-inspector > .path-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; border: 0; border-radius: 0; }
+.file-inspector > .path-editor[hidden] { display: none; }
+.file-inspector .path-editor .profile-editor-stage { flex: 1; height: auto; min-height: 150px; border-top: 0; }
+.file-inspector .path-editor .profile-editor-view { flex-wrap: wrap; }
+.file-inspector .path-editor .profile-editor-view span { font-size: 12px; }
+.file-inspector .path-editor .profile-editor-fields { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.file-inspector .path-editor .profile-editor-fields:empty { display: none; }
+.file-inspector .path-editor .profile-editor-status.error { color: #f87171; }
+.file-inspector .path-editor .tip-editor-actions { padding-top: 4px; }
+@media (max-width: 760px) {
+  .file-inspector .path-editor .profile-editor-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

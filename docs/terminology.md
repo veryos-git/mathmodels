@@ -21,6 +21,7 @@ The pipeline in one line:
 | **colour region** | A rectangle over the main or cusp profile, in the section's own coordinates (optionally mirrored across its centre line or mid-height); the share of the swept frame it covers prints in its own colour. |
 | **tracery** | The network of ornament lines of a gothic subject. |
 | **pointy tip** | Where two arcs of a subject meet at an angle — in CAD, two overlapping circles. Reshaped in the tip editor. Not to be confused with **cusp paths**, the finer tracery swept with their own profile. |
+| **path end** | Where one of a subject's lines or arcs stops. Ends at the same point are *joined*: the path editor moves them together. |
 
 ## Keyfobs
 
@@ -32,6 +33,20 @@ The pipeline in one line:
 | **cut line** | The keyfob's outer edge, the one line always cut. |
 | **detail line** | A subject line inside its silhouette (a ghost's eyes); on the front only, or mirrored onto the back with *Whole subject*. |
 | **stitching line** | An optional line a set distance inside the cut line, around both halves. |
+
+## Paper models
+
+| Term | Meaning |
+| --- | --- |
+| **paper template** | An OpenSCAD file in `paper_templates/` that draws a foldable paper model's net from its Customizer parameters; the house is the default. |
+| **net** | The flat sheet to cut: every piece of the paper model in one outline, with its fold lines. Shown and exported from outside. |
+| **paper wall** | One side of a paper model that decorations are cut into, numbered from wall 1. Not a relief **wall**. |
+| **decoration** | An SVG or DXF drawing of connected lines cut into a paper wall. |
+| **frame cutout** | The default way a decoration is cut: its lines are thickened into paper bars and only what they enclose is cut out, never its outermost line. Not the relief's **frame**. |
+| **cut as drawn** | A decoration that already is the cutout (frame cutout off): each closed outline is cut out whole; whatever lies inside it falls out with it. |
+| **decoration area** | The part of a paper wall decorations may cut: clear of its edges, the floor fold and the glue tabs. Cuts reaching past it are trimmed. |
+| **glue tab** | A flap on a paper wall's edge, glued behind the neighbouring wall. |
+| **fold line** | A line the net is folded along, scored rather than cut; exported on its own layer. |
 
 ## 3D result
 

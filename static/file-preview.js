@@ -46,35 +46,86 @@ export function filePreview(file, name = file?.name) {
 }
 
 let inspector;
+/** A source whose owner takes edits back (`source.edit`) offers the path editor. */
+const editable = source => !!(source?.edit && /\.(dxf|svg)$/i.test(source.file?.name ?? ''));
+
 export function inspectPreview(source, opener) {
   if (!source) return;
   if (!inspector) {
     inspector = document.createElement('dialog');
     inspector.className = 'file-inspector';
     inspector.setAttribute('aria-labelledby', 'fileInspectorTitle');
-    inspector.innerHTML = `<header><div><strong id="fileInspectorTitle"></strong><p>Source preview</p></div><button type="button" class="ghost" autofocus>Close <span aria-hidden="true">×</span></button></header><asset-preview expanded></asset-preview>`;
+    inspector.innerHTML = `<header><div><strong id="fileInspectorTitle"></strong><p>Source preview</p></div><button type="button" class="ghost" data-inspector="edit" hidden title="Extend, shorten, bend or move this drawing’s own lines, arcs and paths">Edit paths</button><button type="button" class="ghost" data-inspector="close" autofocus>Close <span aria-hidden="true">×</span></button></header><asset-preview expanded></asset-preview>`;
     document.body.append(inspector);
-    inspector.querySelector('button').onclick = () => inspector.close();
+    // Closing from the editor asks before unapplied edits are dropped.
+    const close = () => {
+      if (inspector.editing && inspector.editor.dirty && !confirm('Discard the path edits you have not applied?')) return;
+      inspector.close();
+    };
+    inspector.querySelector('[data-inspector="close"]').onclick = close;
+    inspector.querySelector('[data-inspector="edit"]').onclick = () => editPaths();
     inspector.addEventListener('click', event => {
-      if (event.target !== inspector) return;
+      if (event.target !== inspector || inspector.editing) return;
       const box = inspector.getBoundingClientRect();
-      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) inspector.close();
+      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) close();
     });
     // Escape must close only this inspector, leaving a library picker underneath open.
-    inspector.addEventListener('keydown', event => event.stopPropagation());
+    // In the editor it cancels a drag, then goes back to the preview.
+    inspector.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape' && inspector.editing) { event.preventDefault(); inspector.editor.escape(); }
+    });
+    inspector.addEventListener('cancel', event => { if (inspector.editing) event.preventDefault(); });
     inspector.addEventListener('close', () => {
+      if (inspector.editing) { inspector.editor.close(); setEditing(false); }
       inspector.querySelector('asset-preview').source = null;
       if (inspector.opener?.isConnected) inspector.opener.focus({ preventScroll: true });
       inspector.opener = null;
     });
   }
   inspector.opener = opener;
+  if (inspector.editing) { inspector.editor.close(); setEditing(false); }
+  showSource(source);
+  if (!inspector.open) inspector.showModal();
+}
+
+function showSource(source) {
+  inspector.source = source;
   inspector.querySelector('strong').textContent = source.name || 'File preview';
   const size = source.file ? ` · ${(source.file.size / 1024).toFixed(1)} KB` : '';
   inspector.querySelector('header p').textContent = `Source preview${size} · zoom and pan to inspect`;
+  inspector.querySelector('[data-inspector="edit"]').hidden = !editable(source);
   inspector.querySelector('asset-preview').source = source.detail
     ? { ...source, src: null, loadFile: source.detail } : source;
-  if (!inspector.open) inspector.showModal();
+}
+
+function setEditing(on) {
+  inspector.editing = on;
+  inspector.classList.toggle('editing', on);
+  inspector.querySelector('asset-preview').hidden = on || !inspector.source;
+  inspector.querySelector('[data-inspector="edit"]').hidden = on || !editable(inspector.source);
+  inspector.querySelector('header p').textContent = on
+    ? 'Path editor · nothing changes until you apply'
+    : `Source preview${inspector.source?.file ? ` · ${(inspector.source.file.size / 1024).toFixed(1)} KB` : ''} · zoom and pan to inspect`;
+}
+
+/** Swap the preview for the path editor; an applied edit comes back as the owner's new source. */
+async function editPaths() {
+  const source = inspector.source;
+  if (!editable(source)) return;
+  const { PathEditor } = await import('./path-editor.js');
+  inspector.editor ??= new PathEditor(inspector, {
+    onApply: async (file, details) => {
+      const next = await inspector.source.edit(file, details);
+      showSource(next ?? { ...inspector.source, file });
+    },
+    onClose: () => {
+      setEditing(false);
+      inspector.querySelector('[data-inspector="close"]').focus({ preventScroll: true });
+    },
+  });
+  setEditing(true);
+  inspector.editor.open(source.file);
 }
 
 export class AssetPreview extends HTMLElement {

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="30mm" viewBox="0 0 20 30">
+  <!-- A window of connected lines: frame and cross. In paper mode the lines
+       become paper bars and the four panes are cut out. -->
+  <path d="M0 0 H20 V30 H0 Z M10 0 V30 M0 15 H20" fill="none" stroke="black"/>
+</svg>

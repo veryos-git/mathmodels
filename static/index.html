@@ -351,6 +351,76 @@
   .kf-key.original::before { border-top-style: dashed; border-color: #8b95a5; }
   .kf-key.ring::before { border-top: 3px solid rgba(100, 116, 139, .55); }
   .kf-advanced { margin-top: 14px; font-size: 12px; color: #9aa3af; }
+  /* paper screen: the net seen from outside, on paper, with a small folded 3D view */
+  #ppTemplate, #ppSelWall, #ppParams select { width: 100%; padding: 6px 8px; border: 1px solid #2a2e35;
+              border-radius: 6px; background: #1d2127; color: #ddd; }
+  .pp-note { font-size: 12px; margin: 6px 0 0; }
+  .pp-note:empty { display: none; }
+  .pp-heading { margin-top: 18px; }
+  #ppDecoList { display: grid; gap: 6px; }
+  /* one card per decoration: thumbnail · frame cutout, bar thickness, clone · remove */
+  .pp-deco-card { display: grid; grid-template-columns: 84px minmax(0, 1fr) 30px; gap: 8px; align-items: start;
+              padding: 6px; border: 1px solid #2a2e35; border-radius: 8px; background: #171a1f; }
+  .pp-deco-card[aria-selected=true] { border-color: #3b82f6; background: #1a2130; }
+  .pp-deco-card button { margin: 0; padding: 4px 0; font-size: 12px; }
+  .pp-thumb { width: 84px; height: 84px; padding: 3px !important; background: #f1e6d2; border: 1px solid #2a2e35;
+              border-radius: 6px; cursor: pointer; }
+  .pp-thumb svg { display: block; width: 100%; height: 100%; }
+  .pp-thumb.pending { background: repeating-linear-gradient(45deg, #f1e6d2 0 6px, #e6d8c0 6px 12px); }
+  .pp-thumb-cut { fill: #3a3f48; stroke: #e11d48; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  .pp-thumb-line { fill: none; stroke: #64748b; stroke-width: 1px; vector-effect: non-scaling-stroke;
+              stroke-linecap: round; stroke-linejoin: round; }
+  .pp-deco-controls { display: grid; gap: 5px; min-width: 0; }
+  .pp-deco-name { font-size: 12px; color: #9aa3af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-frame-check { padding: 0; font-size: 12px; color: #ddd; }
+  .pp-bars { display: grid; grid-template-columns: 58px 28px 28px; gap: 4px; }
+  .pp-bars input { padding: 3px 5px; }
+  .pp-bars input:disabled, .pp-bars button:disabled { opacity: .45; }
+  .pp-clone { width: auto !important; justify-self: start; padding: 3px 10px !important; }
+  .pp-trash { display: grid; place-items: center; height: 30px; padding: 0 !important; }
+  .pp-trash:hover:not(:disabled) { color: #f87171; border-color: #7f1d1d; }
+  .pp-turns { display: flex; gap: 6px; }
+  .pp-turns button { margin: 8px 0 0; padding: 4px 0; flex: 1; }
+  #ppResetParams { margin-top: 12px; }
+  #ppNetBox { flex: 1; position: relative; min-height: 320px; margin-bottom: 8px;
+              background: #f4f6f9; border: 1px solid #2a2e35; border-radius: 10px; overflow: hidden; }
+  #ppNet { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; transition: opacity .15s; }
+  #ppNetBox[aria-busy=true] #ppNet { opacity: .7; }
+  #ppNet.panning { cursor: grabbing; }
+  #ppNet:focus-visible { outline: 2px solid #3b82f6; outline-offset: -3px; }
+  #ppNet path { vector-effect: non-scaling-stroke; }
+  #ppNet .pp-paper { fill: #f1e6d2; stroke: #e11d48; stroke-width: 1.4px; }
+  #ppNet .pp-area { fill: rgba(22, 163, 74, .06); stroke: #16a34a; stroke-width: 1px; stroke-dasharray: 3 3; pointer-events: none; }
+  #ppNet .pp-fold { fill: none; stroke: #2563eb; stroke-width: 1.4px; stroke-dasharray: 7 4; pointer-events: none; }
+  #ppNet .pp-wall-label { fill: #8b95a5; text-anchor: middle; font-family: system-ui, sans-serif; pointer-events: none; }
+  #ppNet .pp-deco { cursor: move; }
+  #ppNet .pp-deco-hit { fill: transparent; stroke: none; }
+  #ppNet .pp-deco-cut { fill: none; stroke: none; vector-effect: non-scaling-stroke; }
+  #ppNet .pp-deco:hover .pp-deco-hit { fill: rgba(37, 99, 235, .06); }
+  #ppNet .pp-deco.selected .pp-deco-hit { fill: rgba(37, 99, 235, .08); stroke: #2563eb; stroke-width: 1px;
+              stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  #ppNet .pp-deco.moving .pp-deco-cut { fill: rgba(249, 115, 22, .35); stroke: #f97316; stroke-width: 1.2px; }
+  #ppNet .pp-handle { fill: #fff; stroke: #2563eb; cursor: nwse-resize; }
+  #ppEmpty { position: absolute; inset: 0; display: grid; place-content: center; gap: 4px; padding: 24px;
+              text-align: center; color: #475569; background: #edf1f7; }
+  #ppEmpty[hidden] { display: none; }
+  #ppEmpty .btn-row { grid-template-columns: 1fr; width: min(240px, 80vw); margin: 0 auto; }
+  #pp3dBox { position: absolute; right: 10px; bottom: 10px; width: min(300px, 40%); height: 260px;
+              display: flex; flex-direction: column; background: #1d2127; border: 1px solid #2a2e35;
+              border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, .25); }
+  #pp3dBox.large { width: min(640px, 70%); height: min(560px, 80%); }
+  #pp3dBox[hidden] { display: none; }
+  #pp3d { flex: 1; width: 100%; min-height: 0; display: block; cursor: grab; touch-action: none; }
+  .pp-3d-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; color: #9aa3af;
+              border-top: 1px solid #2a2e35; }
+  .pp-3d-bar label { margin: 0; }
+  .pp-3d-bar input[type=range] { flex: 1; min-width: 0; accent-color: #3b82f6; }
+  .pp-3d-bar button { margin: 0; width: auto; padding: 1px 7px; font-size: 13px; }
+  #ppFoldValue { min-width: 34px; text-align: right; }
+  #ppStatus { margin: 0 0 4px; }
+  #ppStatus.error { color: #f87171; }
+  .kf-key.pp-fold-key::before { border-top-style: dashed; border-color: #2563eb; }
+  .kf-key.pp-area-key::before { border-top-style: dashed; border-color: #16a34a; }
   .kf-advanced summary { cursor: pointer; }
   .slider-row { display: grid; grid-template-columns: 92px 1fr 34px; gap: 8px;
               align-items: center; margin: 7px 0; }
@@ -569,6 +639,10 @@
       <button class="start-card" id="startKeyfob">
         <span class="icon">🔑</span>Keyfob
         <small>Add a neck to a subject and mirror it into a fold-over keyfob SVG.</small>
+      </button>
+      <button class="start-card" id="startPaper">
+        <span class="icon">🏠</span>Paper model
+        <small>A foldable paper house from an OpenSCAD template, with SVG windows cut into its walls.</small>
       </button>
       <button class="start-card" id="startExample">
         <span class="icon">✨</span>
@@ -931,6 +1005,86 @@
       </div>
       <p id="kfStatus" class="muted" role="status" aria-live="polite">Fold the neck through a key ring and the back half lies exactly behind the front.</p>
       <p class="muted kf-hint">Scroll to zoom · drag to pan · the neck runs from the small orange ring to the big one: drag either to move it (Shift snaps to 15°)</p>
+    </main>
+  </div>
+</section>
+
+<section id="paperScreen" class="screen" hidden>
+  <header class="screen-bar">
+    <button class="ghost" id="ppBack">← Start</button>
+    <span class="title">Paper model</span>
+    <input type="text" id="ppProjectName" class="bar-name" placeholder="project name"
+           title="Names the paper project — used when you save it and for the downloaded SVG">
+    <button class="ghost" id="ppSave" disabled title="Save this paper project on the server">Save</button>
+    <button class="ghost" id="ppSaveFile" disabled title="Download this paper project as a .v2sproj file">Download project</button>
+    <button id="ppDownload" disabled title="The net as an SVG in millimetres: a cut layer and a fold (score) layer">Download SVG</button>
+  </header>
+  <div class="trace-layout">
+    <aside>
+      <div class="group-title">Template</div>
+      <select id="ppTemplate" aria-label="Paper template"></select>
+      <p class="muted pp-note" id="ppTemplateNote"></p>
+
+      <div class="group-title pp-heading">Decorations</div>
+      <p class="muted pp-note" id="ppDecoEmpty">Windows and other cut-outs are SVG or DXF drawings. As a frame cutout, their connected lines become paper bars and what they enclose is cut out; untick it for a drawing that already is the cutout, such as a ghost.</p>
+      <div id="ppDecoList" aria-label="Decorations"></div>
+      <div class="btn-row">
+        <button id="ppAdd">Add SVG / DXF…</button>
+        <button class="ghost" id="ppLibrary">From library…</button>
+      </div>
+      <input type="file" id="ppFile" accept=".dxf,.svg,application/dxf,image/svg+xml" multiple hidden>
+
+      <fieldset id="ppSelected" hidden>
+        <legend>Selected · <span id="ppSelName"></span></legend>
+        <label title="The wall it is cut into; dragging it onto another wall on the net moves it there too">Wall<select id="ppSelWall"></select></label>
+        <div class="row">
+          <label title="Its centre, from the wall's left edge as seen from outside">X (mm)<input id="ppSelX" type="number" step="0.5"></label>
+          <label title="Its centre, above the floor fold">Y (mm)<input id="ppSelY" type="number" step="0.5"></label>
+          <label title="The drawing's width on the paper; its height follows. Or drag a corner on the net.">Width (mm)<input id="ppSelWidth" type="number" min="1" step="0.5"></label>
+          <label title="Clockwise, as seen from outside">Rotation (°)<input id="ppSelRotation" type="number" step="5"></label>
+        </div>
+        <div class="pp-turns">
+          <button class="ghost" data-turn="-90" title="Turn 90° anticlockwise">↺ 90°</button>
+          <button class="ghost" data-turn="90" title="Turn 90° clockwise">↻ 90°</button>
+        </div>
+        <p class="muted pp-note" id="ppSelNotes"></p>
+      </fieldset>
+
+      <div class="group-title pp-heading">Template parameters</div>
+      <div id="ppParams"></div>
+      <button class="ghost" id="ppResetParams">Reset parameters</button>
+    </aside>
+    <main>
+      <div class="trace-navigation" aria-label="Net navigation">
+        <button class="ghost" id="ppZoomOut" aria-label="Zoom out">−</button>
+        <span id="ppZoom">100%</span>
+        <button class="ghost" id="ppZoomIn" aria-label="Zoom in">+</button>
+        <button class="ghost" id="ppFit">Fit</button>
+        <span class="kf-legend" aria-label="Line colours">
+          <span class="kf-key cut">cut</span>
+          <span class="kf-key pp-fold-key" id="ppFoldKey">fold (score)</span>
+          <span class="kf-key pp-area-key" title="Where decorations may cut: clear of the edges, the floor fold and the glue tabs — shown here only">decoration area</span>
+        </span>
+      </div>
+      <div id="ppNetBox" aria-busy="false">
+        <svg id="ppNet" tabindex="0" role="img" aria-label="Paper net seen from outside. Drag a decoration to move it, a corner to resize it; scroll to zoom, drag the paper to pan. Arrow keys nudge, Delete removes, plus, minus or 0 zoom." preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="ppEmpty">
+          <p>Building the paper net…</p>
+          <div class="btn-row"><button id="ppEmptyAdd">Add SVG / DXF…</button></div>
+        </div>
+        <div id="pp3dBox">
+          <canvas id="pp3d" aria-label="The cut net folded up. Drag to orbit, scroll to zoom."></canvas>
+          <div class="pp-3d-bar">
+            <label for="ppFold" title="How far the net is folded">fold</label>
+            <input type="range" id="ppFold" min="0" max="100" value="100">
+            <span id="ppFoldValue">100%</span>
+            <button class="ghost" id="pp3dReset" title="Look at the folded model from the front">⟲</button>
+            <button class="ghost" id="pp3dToggle" title="Make the 3D view larger">⤢</button>
+          </div>
+        </div>
+      </div>
+      <p id="ppStatus" class="muted" role="status" aria-live="polite"></p>
+      <p class="muted kf-hint">The net is seen from outside: fold the walls away from you. Drag a decoration to move it — across onto another wall too — or a corner to resize it · scroll to zoom · drag the paper to pan</p>
     </main>
   </div>
 </section>
@@ -1464,6 +1618,7 @@ import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
 import { initKeyfob } from './keyfob.js';
+import { initPaper } from './paper.js';
 import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lassoImage, lineSide, mirrorImage } from './image-editor.js';
 import { LineArtTemplates, TEMPLATE_FILE, templatePoint, templateHandles, templateCanvasBounds, hitTemplate, transformTemplate } from './lineart-templates.js';
 import * as THREE from 'three';
@@ -2806,6 +2961,9 @@ let endpointMode = new Map();
 // index -> mm a hook slides up the drawing's vertical axis from its vertex.
 let hookOffset = new Map();
 let pendingEndpointModes = null;  // [{x, y, mode, offset}] restored from a project
+// [[dx, dy], ...] model mm that path ends moved in an edit of the subject, so
+// an ending set on a moved end finds it again at the next rebuild.
+let pendingEndpointShifts = [];
 let domeEndMarkers = null;   // THREE.Group of marker meshes
 
 const ENDPOINT_COLORS = { dome: 0x60a5fa, round: 0x34d399, straight: 0xf59e0b };
@@ -2913,11 +3071,15 @@ function setDomeEndpoints(eps) {
   const byPosition = pendingEndpointModes
     ? pendingEndpointModes.map(m => [[m.x, m.y], m.mode, Number(m.offset) || 0])
     : [...prevModes].map(([i, mode]) => [prev[i], mode, prevOffsets.get(i) ?? 0]);
+  const shifts = pendingEndpointShifts;
   pendingEndpointModes = null;
+  pendingEndpointShifts = [];
+  const near = ([px, py]) => domeEndpoints.findIndex(([x, y]) => Math.abs(x - px) < 0.1 && Math.abs(y - py) < 0.1);
   for (const [pos, mode, shift] of byPosition) {
     if (!pos) continue;
-    const [px, py] = pos;
-    const j = domeEndpoints.findIndex(([x, y]) => Math.abs(x - px) < 0.1 && Math.abs(y - py) < 0.1);
+    let j = near(pos);
+    // An end the path editor moved takes its ending along.
+    for (const [dx, dy] of shifts) if (j < 0) j = near([pos[0] + dx, pos[1] + dy]);
     if (j < 0) continue;
     endpointMode.set(j, mode);
     if (shift && mode !== 'dome') hookOffset.set(j, shift);
@@ -3529,7 +3691,7 @@ async function pickFile(file, fit = true) {
   resetLayers();
   invalidatePreview();
   picked = file;
-  $('subjectPreview').source = filePreview(file);
+  $('subjectPreview').source = subjectSource(file);
   $('editTips').hidden = !/\.dxf$/i.test(file.name);
   layers[0].file = file;
   $('dropName').textContent = file.name;
@@ -3557,28 +3719,55 @@ $('editTips').onclick = () => {
   tipEditor.open(picked, $('sagitta').value);
 };
 
-/**
- * Write the tip editor's arcs into the subject and rebuild. Unlike a new
- * subject this keeps sublayers, holes, paint and scale: only the arcs moved.
- */
+/** Write the tip editor's arcs into the subject and rebuild. */
 async function applyTipEdits(edits) {
   const form = new FormData();
   form.append('file', picked);
   form.append('edits', JSON.stringify(edits));
   const response = await fetch('/api/sketch/apply', { method: 'POST', body: form });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? response.statusText);
-  // Same name, no library link: the subject is now this edited copy.
   const file = new File([await response.blob()], picked.name, { type: 'application/dxf' });
+  await replaceSubject(file, `${count(edits.length, 'arc')} reshaped`, 'tips edited');
+}
+
+/* ------------------------------------------------------- path edits */
+
+/** The subject's preview; its Expand inspector offers "Edit paths". */
+function subjectSource(file) {
+  return { ...filePreview(file), edit: applyPathEdits };
+}
+
+/**
+ * The inspector's path editor hands back an edited copy of the subject. The
+ * rebuild runs on behind the inspector, which shows the new file at once.
+ */
+function applyPathEdits(file, { count: edited, shifts }) {
+  replaceSubject(file, `${count(edited, 'path')} edited`, 'paths edited', shifts)
+    .catch((error) => setStatus(String(error.message ?? error), true));
+  return $('subjectPreview').source;
+}
+
+/**
+ * Swap in an edited copy of the subject and rebuild. Unlike a new subject
+ * this keeps sublayers, holes, paint and scale: only some paths moved.
+ * `shifts` are how far moved path ends went, in the drawing's millimetres
+ * before scale, so an ending set on one of them follows it.
+ */
+async function replaceSubject(file, summary, hint, shifts = []) {
+  // Same name, no library link and no trace: the subject is now this edited copy.
+  if (picked === traceState.svgFile) clearTrace();
   picked = layers[0].file = file;
-  $('subjectPreview').source = filePreview(file);
-  $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — tips edited · click to change`;
+  $('subjectPreview').source = subjectSource(file);
+  $('dropHint').textContent = `${(file.size / 1024).toFixed(0)} KB — ${hint} · click to change`;
   invalidatePreview();
+  const mm = subjectScale() * (boundaryPicked ? subjectScaleNum() : 1);
+  pendingEndpointShifts.push(...shifts.map(([dx, dy]) => [dx * mm, dy * mm]));
   const info = await inspect(file);
   drawing = layers[0].drawing = { x: info.size[0], y: info.size[1] };
   showYSize();
-  if (!baseModel()) setStatus(`${count(edits.length, 'arc')} reshaped — Generate 3D to build the model`);
+  if (!baseModel()) setStatus(`${summary} — Generate 3D to build the model`);
   else if (await generate(keepStacks(), { lenient: true }) === 'restored') {
-    setStatus([`${count(edits.length, 'arc')} reshaped, model rebuilt`, paintLossNote].filter(Boolean).join(' — '));
+    setStatus([`${summary}, model rebuilt`, paintLossNote].filter(Boolean).join(' — '));
   }
 }
 
@@ -4643,6 +4832,7 @@ function showScreen(name) {
   $('modelScreen').hidden = name !== 'model';
   $('libraryScreen').hidden = name !== 'library';
   $('keyfobScreen').hidden = name !== 'keyfob';
+  $('paperScreen').hidden = name !== 'paper';
   if (name === 'library') showLibrary();
 }
 let traceReturn = 'start';   // where "Back" from the trace screen returns
@@ -6614,6 +6804,7 @@ async function applyProject(project, name = '') {
     return setStatus('that does not look like a vector2stl project', true);
   }
   if (project.workflow === 'keyfob') return keyfob.restore(project, name);
+  if (project.workflow === 'paper') return paper.restore(project, name);
   if (!project.drawing?.data) {
     return setStatus('that project has no drawing in it', true);
   }
@@ -7167,7 +7358,7 @@ async function openFromServer(name) {
     const res = await fetch(`/api/projects/${encodeURIComponent(name)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
-    if (data?.workflow !== 'keyfob') $('projectName').value = name;
+    if (!['keyfob', 'paper'].includes(data?.workflow)) $('projectName').value = name;
     await applyProject(data, name);
   } catch (e) {
     setStatus(String(e.message ?? e), true);
@@ -7507,6 +7698,9 @@ const fromBase64 = (b64) => {
 const keyfob = initKeyfob({ $, showScreen, openPicker, saveBlob, libraryRemember, filePreview,
   fileBase64, fromBase64, refreshShelf, projectFormat: PROJECT_FORMAT });
 $('startKeyfob').onclick = () => keyfob.open();
+const paper = initPaper({ $, showScreen, openPicker, saveBlob, libraryRemember,
+  fileBase64, fromBase64, refreshShelf, projectFormat: PROJECT_FORMAT });
+$('startPaper').onclick = () => paper.open();
 
 $('exportZip').onclick = async () => {
   if (!baseModel()) return;
@@ -7791,6 +7985,10 @@ const PICKER_INFO = {
     title: 'Keyfob subject from the library',
     note: 'its silhouette gets a neck and is mirrored into a fold-over keyfob',
   },
+  paper: {
+    title: 'Decoration from the library',
+    note: 'its lines become paper bars and what they enclose is cut into a wall',
+  },
 };
 
 async function openPicker(slot) {
@@ -7818,7 +8016,7 @@ function closePicker() {
 }
 
 function renderPickerGrid() {
-  const kind = ['subject', 'stack', 'cusps', 'lidSketch', 'additionOutline', 'keyfob'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile', 'additionProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
+  const kind = ['subject', 'stack', 'cusps', 'lidSketch', 'additionOutline', 'keyfob', 'paper'].includes(pickerSlot) ? 'subject' : ['cuspProfile', 'grooveProfile', 'additionProfile'].includes(pickerSlot) ? 'profile' : pickerSlot;
   const resources = pickerResources.filter((r) => pickerSlot === 'template' || r.kind === kind).map((r) => ({
     name: r.name, kind: r.files.drawing.name.toLowerCase().endsWith('.svg') ? 'svg' : 'dxf',
     size: 0, saved: r.updated, resourceRecord: r,
@@ -7835,6 +8033,7 @@ function renderPickerGrid() {
 /** Feed a chosen library drawing to the slot it was picked for. */
 async function applyFileToSlot(slot, file) {
   if (slot === 'keyfob') return keyfob.setSubject(file);
+  if (slot === 'paper') return paper.addDecoration(file);
   if (slot === 'additionOutline' || slot === 'additionProfile') return setAdditionFile(slot, file);
   if (slot === 'lidSketch') return applyLidSketchFile(file);
   if (slot === 'template') return addTemplateFile(file);

@@ -2709,10 +2709,12 @@ def main():
                     help="report normalized main, groove and cusp sections for the shared profile editor")
     ap.add_argument("--sketch", action="store_true",
                     help="report a DXF subject's exact lines, circles and arcs as JSON for "
-                         "the tip editor, then exit")
+                         "the tip and path editors, then exit")
     ap.add_argument("--sketch-edit", default=None, metavar="FILE",
                     help="JSON file: [{handle, center, radius, start, end}] counter-clockwise "
-                         "arcs to write into the DXF subject, saved to the output path")
+                         "arcs, {kind: 'line', handle, a, b} lines and {kind: 'circle', handle, "
+                         "center, radius} circles to write into the DXF subject, saved to the "
+                         "output path")
     ap.add_argument("--heights", default=None, metavar="FILE",
                     help='JSON file mapping region id to height, e.g. {"0": 1.1}')
     ap.add_argument("--cylinder", default=None, metavar="FILE",
@@ -2942,11 +2944,11 @@ def main():
             with open(args.sketch_edit) as fp:
                 edits = json.load(fp)
             if not isinstance(edits, list):
-                raise ConvertError("--sketch-edit expects a JSON list of arcs")
-            sketch_arcs.write_arcs(args.input, edits, args.output)
+                raise ConvertError("--sketch-edit expects a JSON list of edits")
+            counts = sketch_arcs.write_edits(args.input, edits, args.output)
         except (OSError, ValueError) as error:
             raise ConvertError(str(error)) from error
-        json.dump({"arcs": len(edits)}, sys.stdout)
+        json.dump(counts, sys.stdout)
         return
 
     if args.profile_sections:

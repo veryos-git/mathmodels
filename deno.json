@@ -13,8 +13,8 @@
         "install"
       ]
     },
-    "check": "deno check server.ts tools/setup.ts tools/python_test.ts tools/setup_test.ts tools/install.ts tools/cylinder_test.ts",
-    "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts tools/cylinder_test.ts",
+    "check": "deno check server.ts tools/setup.ts tools/python_test.ts tools/setup_test.ts tools/install.ts tools/cylinder_test.ts tools/paper_test.ts",
+    "test": "deno test --allow-read --allow-write --allow-run=deno storage/ tools/python_test.ts tools/setup_test.ts tools/cylinder_test.ts tools/paper_test.ts",
     "test:editor": "deno run --allow-read --allow-env --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_image_editor.mjs",
     "test:geometry": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/python.ts -m unittest discover -s tools -p test_*.py",
     "test:profiles": {
@@ -24,6 +24,8 @@
     "test:profile-editor": "deno run tools/test_profile_editor.mjs",
     "test:shelf-editor": "deno run tools/test_shelf_editor.mjs",
     "test:tip-editor": "deno run --allow-read --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_tip_editor.mjs",
+    "test:path-editor": "deno run tools/test_path_editor.mjs",
+    "test:paper": "deno run tools/test_paper_geometry.mjs",
     "test:shaders": "deno test --allow-read tools/shader_preview_test.mjs tools/shader_vector_test.mjs tools/gif_encoder_test.mjs",
     "install": {
       "command": "deno run --allow-run --allow-sys=uid tools/install.ts",

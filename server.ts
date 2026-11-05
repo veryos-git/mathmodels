@@ -5,6 +5,7 @@ import { PYTHON } from "./tools/python.ts";
 import { cylinderFlags, cylinderMeshes, cylinderSettings, readThreadedDefaults } from "./tools/cylinder.ts";
 import { lighterMeshes, lighterSettings } from "./tools/lighter.ts";
 import { findOpenScad } from "./tools/openscad.ts";
+import { checkParams, listTemplates, PAPER_TEMPLATE_DIR } from "./tools/paper.ts";
 /// Deno web server: upload a DXF or SVG, get back a relief STL.
 /// The heavy lifting is done by tools/dxf2stl.py (ezdxf + svgelements +
 /// shapely + trimesh).
@@ -249,7 +250,64 @@ function handleKeyfob(req: Request): Promise<Response> {
   });
 }
 
-/** POST /api/sketch — a DXF subject's exact lines and arcs, for the tip editor. */
+/**
+ * POST /api/paper — a paper template's net with its decorations cut in, as a
+ * cutting SVG plus the geometry the paper screen edits and folds. The form
+ * carries the job as JSON; a decoration whose drawing has to be (re)read sends
+ * it as the file "decoration-<index>", one that only moved sends back the
+ * geometry the previous answer gave it.
+ */
+function handlePaper(req: Request): Promise<Response> {
+  return withTempDir(async (dir) => {
+    if (Number(req.headers.get("content-length") ?? 0) > MAX_UPLOAD * MAX_LAYERS) {
+      throw new HttpError(413, "those files are too large");
+    }
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      throw new HttpError(400, "expected a multipart form upload");
+    }
+    let job: { template?: unknown; params?: unknown; decorations?: unknown };
+    try {
+      job = JSON.parse(String(form.get("job")));
+    } catch {
+      throw new HttpError(400, "expected the paper job as JSON");
+    }
+    const template = (await listTemplates()).find((t) => t.id === job.template);
+    if (!template) throw new HttpError(400, "unknown paper template");
+    let params;
+    try {
+      params = checkParams(template, job.params);
+    } catch (error) {
+      throw new HttpError(400, (error as Error).message);
+    }
+    const decorations = job.decorations ?? [];
+    if (!Array.isArray(decorations) || decorations.length > 32) {
+      throw new HttpError(400, "expected at most 32 decorations");
+    }
+    for (const [i, raw] of decorations.entries()) {
+      if (!raw || typeof raw !== "object") throw new HttpError(400, "every decoration must be an object");
+      const decoration = raw as Record<string, unknown>;
+      delete decoration.file;      // only files uploaded here are read
+      const file = form.get(`decoration-${i}`);
+      if (file instanceof File) {
+        if (!DRAWING.test(file.name)) throw new HttpError(400, "decorations must be .svg or .dxf files");
+        if (file.size > MAX_UPLOAD) throw new HttpError(413, "that file is too large (16 MB max)");
+        if (file.size === 0) throw new HttpError(400, "that file is empty");
+        const path = `${dir}/decoration-${i}${file.name.toLowerCase().endsWith(".svg") ? ".svg" : ".dxf"}`;
+        await Deno.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+        decoration.file = path;
+      }
+    }
+    await Deno.writeTextFile(`${dir}/job.json`, JSON.stringify({
+      template: `${PAPER_TEMPLATE_DIR}/${template.id}`, params, decorations,
+    }));
+    return Response.json(await runScript([`${dir}/job.json`, "--openscad", await findOpenScad()], "tools/paper.py"));
+  });
+}
+
+/** POST /api/sketch — a DXF subject's exact lines and arcs, for the tip and path editors. */
 function handleSketch(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths } = await takeUpload(req, dir);
@@ -257,12 +315,12 @@ function handleSketch(req: Request): Promise<Response> {
   });
 }
 
-/** POST /api/sketch/apply — the DXF subject with the tip editor's arcs written in. */
+/** POST /api/sketch/apply — the DXF subject with the tip or path editor's edits written in. */
 function handleSketchApply(req: Request): Promise<Response> {
   return withTempDir(async (dir) => {
     const { form, paths } = await takeUpload(req, dir);
     const edits = form.get("edits");
-    if (typeof edits !== "string") throw new HttpError(400, "expected the edited arcs as JSON");
+    if (typeof edits !== "string") throw new HttpError(400, "expected the edited lines and arcs as JSON");
     await Deno.writeTextFile(`${dir}/edits.json`, edits);
     const output = `${dir}/edited.dxf`;
     await runScript([paths[0], output, "--sketch-edit", `${dir}/edits.json`]);
@@ -1558,6 +1616,10 @@ Deno.serve({ port: PORT }, async (req) => {
     if (url.pathname === "/api/preview" && req.method === "POST") return await handlePreview(req);
     if (url.pathname === "/api/sketch" && req.method === "POST") return await handleSketch(req);
     if (url.pathname === "/api/keyfob" && req.method === "POST") return await handleKeyfob(req);
+    if (url.pathname === "/api/paper/templates" && req.method === "GET") {
+      return Response.json({ templates: await listTemplates() });
+    }
+    if (url.pathname === "/api/paper" && req.method === "POST") return await handlePaper(req);
     if (url.pathname === "/api/sketch/apply" && req.method === "POST") return await handleSketchApply(req);
     if (url.pathname === "/api/profiles/preview" && req.method === "POST") return await handleProfileSections(req);
     if (url.pathname === "/api/regions" && req.method === "POST") return await handleRegions(req);

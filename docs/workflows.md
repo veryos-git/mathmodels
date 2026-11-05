@@ -225,7 +225,49 @@ diamond:
 handles, layers and everything else untouched) and rebuilds the model, keeping
 holes, paint and scale. Lines, circles, polylines and arcs inside blocks stay
 fixed; only model-space arcs are editable. SVG subjects cannot be edited this
-way yet. Sizes are the DXF's own units, before the model's scale.
+way yet (use **Edit paths** below). Sizes are the DXF's own units, before the
+model's scale.
+
+### Editing paths
+
+For small changes to the subject's own paths — extending a hook's arc, nudging
+a line end, moving a point of a traced SVG — choose **Expand ↗** under the
+subject preview, then **Edit paths** in the inspector's header. The preview
+turns into an editor over the same drawing; nothing changes until you apply.
+
+- **DXF lines and arcs:** drag an end (●) to extend or shorten it along its own
+  line or circle — the centre and radius stay. Hold **Shift** to move the end
+  anywhere instead: a line turns, an arc keeps its bend through the new end.
+  Drag an arc's middle (◆) to bend it through the pointer with both ends fixed.
+- **DXF circles:** drag the centre (■) to move it, the rim (■) to resize it.
+- **SVG paths, polylines, polygons and lines:** click one to select it, then
+  drag its points (●). A selected point shows its curve handles (■), which drag
+  on their own; moving the point takes them along.
+- **Whole paths:** drag a selected path to move it, or use the arrow keys
+  (0.1, with Shift 1). With an SVG point selected the arrows move that point.
+- **Numbers:** the fields under the drawing belong to the selection — a
+  line's ends and length, an arc's radius, start/end angle, sweep and centre,
+  a circle's centre and radius, an SVG point's X/Y. Typing an arc's **End
+  angle °** extends it exactly.
+- **Keep joined ends together** (on): an end that touched another path's end
+  takes it along. A neighbour on the same circle — CAD often leaves a duplicate
+  piece over an arc — slides with it; a line end follows; an arc on another
+  circle keeps its bend through the moved end. Ends where paths meet are green.
+- Clicking a selected path again selects the next one under the pointer,
+  for overlapping duplicates. **Undo** (Ctrl+Z) steps back, **Reset** returns
+  to the drawing as loaded, Escape cancels a drag and then leaves the editor.
+
+**Apply to subject** writes the edits into the file itself and rebuilds the
+model behind the inspector, keeping holes, paint and scale; the inspector shows
+the edited drawing. DXF edits go through the converter by entity handle, so
+layers, styles and every other entity stay untouched; an SVG keeps its
+structure, transforms and everything but the edited `d`, `points` or line
+attributes. An ending or hook set on a moved path end (gothic tracery) moves
+with it. Lines and arcs inside blocks or polylines, splines and SVG rects,
+circles and ellipses are shown for reference but stay fixed. Sizes are the
+file's own units: the DXF's before the model's scale, the SVG's user units
+with y downwards. An edited subject is a copy: it keeps its name but no
+longer links to the library entry or the trace it came from.
 
 ### Additions: perpendicular shelves
 
@@ -383,13 +425,15 @@ The same options travel through the existing build/export HTTP routes as
 `roundEnds`, `endAngle`, `endSide`, `frameOnly` fields. New dependencies are
 installed by the existing `deno task setup` / start workflow.
 
-The tip editor reads and writes DXF arcs through the converter too:
+The tip and path editors read and write DXF entities through the converter too:
 
 ```bash
-# Exact lines, circles and arcs (model-space arcs carry their handle)
+# Exact lines, circles and arcs (model-space ones carry their handle)
 .venv/bin/python tools/dxf2stl.py subject.dxf --sketch
-# Write [{handle, center, radius, start, end}] counter-clockwise arcs back
-.venv/bin/python tools/dxf2stl.py subject.dxf edited.dxf --sketch-edit arcs.json
+# Write edits back by handle: [{handle, center, radius, start, end}]
+# counter-clockwise arcs, {kind: "line", handle, a, b} lines and
+# {kind: "circle", handle, center, radius} circles
+.venv/bin/python tools/dxf2stl.py subject.dxf edited.dxf --sketch-edit edits.json
 ```
 
 Over HTTP these are `POST /api/sketch` (`file`) and `POST /api/sketch/apply`
@@ -402,7 +446,11 @@ deno task check
 deno task test
 deno task test:geometry
 deno task test:tip-editor
+deno task test:path-editor
 ```
+
+`tools/test_path_editor_browser.mjs` drives the path editor in Chrome against a
+running server (see its header for the environment it needs).
 
 Storage tests cover resource revisions, thumbnails, imports and filament CRUD.
 Geometry tests exercise closed black-area tracing, quarter revolutions,
