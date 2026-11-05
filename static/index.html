@@ -392,6 +392,7 @@
   #ppNet .pp-paper { fill: #f1e6d2; stroke: #e11d48; stroke-width: 1.4px; }
   #ppNet .pp-area { fill: rgba(22, 163, 74, .06); stroke: #16a34a; stroke-width: 1px; stroke-dasharray: 3 3; pointer-events: none; }
   #ppNet .pp-fold { fill: none; stroke: #2563eb; stroke-width: 1.4px; stroke-dasharray: 7 4; pointer-events: none; }
+  #ppNet .pp-slit { fill: none; stroke: #e11d48; stroke-width: 1.4px; stroke-linecap: round; pointer-events: none; }
   #ppNet .pp-wall-label { fill: #8b95a5; text-anchor: middle; font-family: system-ui, sans-serif; pointer-events: none; }
   #ppNet .pp-deco { cursor: move; }
   #ppNet .pp-deco-hit { fill: transparent; stroke: none; }
@@ -420,6 +421,7 @@
   #ppStatus { margin: 0 0 4px; }
   #ppStatus.error { color: #f87171; }
   .kf-key.pp-fold-key::before { border-top-style: dashed; border-color: #2563eb; }
+  .kf-key.pp-fold-key.perforated::before { border-color: #e11d48; }
   .kf-key.pp-area-key::before { border-top-style: dashed; border-color: #16a34a; }
   .kf-advanced summary { cursor: pointer; }
   .slider-row { display: grid; grid-template-columns: 92px 1fr 34px; gap: 8px;

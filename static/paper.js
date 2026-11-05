@@ -125,6 +125,7 @@ export function initPaper({ $, showScreen, openPicker, saveBlob, libraryRemember
     const parts = [`Net ${i.width.toFixed(0)} × ${i.height.toFixed(0)} mm`
       + (fitsA4(i.width, i.height) ? ' (fits A4)' : ' (larger than A4)'),
       `${i.cutouts} cut-out${i.cutouts === 1 ? '' : 's'}`];
+    if (i.slits) parts.push(`${i.slits} fold slits`);
     say(parts.join(' · ') + (i.notes.length ? `. Note: ${i.notes.join('; ')}.` : '.'));
     renderList();
   }
@@ -142,9 +143,12 @@ export function initPaper({ $, showScreen, openPicker, saveBlob, libraryRemember
     sheet.replaceChildren();
     element('path', { d: result.net, class: 'pp-paper', 'fill-rule': 'evenodd' }, sheet);
     element('path', { d: result.area, class: 'pp-area' }, sheet);
-    element('path', { d: result.folds, class: 'pp-fold' }, sheet);
-    // Some templates perforate their folds in the cut itself; then there is no score layer.
-    $('ppFoldKey').textContent = result.foldLayer ? 'fold (score)' : 'fold (perforated in the cut)';
+    // A template either scores its folds (their own layer) or perforates them
+    // with slits, single cuts along the fold, which then are the fold marks.
+    if (result.foldLayer) element('path', { d: result.folds, class: 'pp-fold' }, sheet);
+    element('path', { d: result.slits, class: 'pp-slit' }, sheet);
+    $('ppFoldKey').textContent = result.foldLayer ? 'fold (score)' : 'fold (perforated: slits in the cut)';
+    $('ppFoldKey').classList.toggle('perforated', !result.foldLayer);
     walls().forEach((wall, i) => {
       // The wall's number, just above its floor fold, upright as seen from outside.
       const at = wallPoint(wall, [wall.size[0] / 2, Math.min(4, wall.size[1] / 4)]);

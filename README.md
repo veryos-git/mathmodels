@@ -326,8 +326,11 @@ Two templates come with the app:
   `hgc_requirements_documentation/paper_mode_hgc/updates/new_paper_template/`,
   unchanged apart from the protocol. Like the house, it leaves windows to the
   decorations; it keeps an arched door in wall 1 (parameters under **Door**)
-  and a dashed logo in the gable of wall 3, and cuts its folds as dashed slits,
-  so its SVG has no fold layer for a cutter to cut through. The logo is
+  and a dashed logo in the gable of wall 3, and perforates its folds with
+  slits, so its SVG has no fold layer for a cutter to cut through. OpenSCAD
+  can only draw areas, so a template draws each slit as a thin hole on the
+  fold; the app turns every hole narrower than 1 mm on a fold into the single
+  straight cut it stands for, in the `cut` layer. The logo is
   imported from `veryos_logo.svg` beside the template; without that file the
   status line says so and the logo is left out.
 

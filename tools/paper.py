@@ -58,6 +58,7 @@ SIMPLIFY = 0.01         # vertices closer than this to the line are dropped
 MIN_CUTOUT = 0.05       # mm²: anything smaller is a sliver, not a cut
 MAX_DECORATIONS = 32
 FOLD_BAND = 1.0         # mm either side of a fold in which its two faces are looked for
+SLIT_WIDTH = 1.0        # mm: a hole on a fold narrower than this perforates it
 THUMB_TOLERANCE = 0.05  # mm: the thumbnail's lines need no more detail than this
 FIT = 0.6               # a new decoration fills this share of its wall's area
 OPENSCAD_TIMEOUT = 120
@@ -390,13 +391,14 @@ def line_data(lines):
     return " ".join(f"M{_fmt(a[0])} {_fmt(a[1])} L{_fmt(b[0])} {_fmt(b[1])}" for a, b in lines)
 
 
-def net_svg(net, folds, margin=5.0):
-    """The net as an SVG in millimetres: a cut layer and, unless `folds` is
-    empty because the cut already perforates them, a fold (score) layer."""
+def net_svg(net, folds, slits=(), margin=5.0):
+    """The net as an SVG in millimetres: a cut layer — the outline, every
+    cut-out and every perforating slit — and, unless `folds` is empty because
+    the slits perforate them, a fold (score) layer."""
     minx, miny, maxx, maxy = net.bounds
     x, y = minx - margin, miny - margin
     w, h = maxx - minx + 2 * margin, maxy - miny + 2 * margin
-    groups = [("cut", "Cut", path_data(net), ""),
+    groups = [("cut", "Cut", " ".join(d for d in (path_data(net), line_data(slits)) if d), ""),
               ("fold", "Fold (score)", line_data(folds), ' stroke-dasharray="2 1.5"')]
     out = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -527,6 +529,40 @@ def fold_faces(net, folds, base=None):
     } for i, face in enumerate(faces)]
 
 
+def perforations(sheet, folds):
+    """A template's fold perforations as the knife cuts they stand for.
+
+    OpenSCAD can only draw areas, so a template perforates a fold with thin
+    holes along it. Each hole narrower than SLIT_WIDTH lying on a fold becomes
+    one straight cut — the fold's own stretch across it — and the paper is
+    whole again there. Returns the sheet without those holes, and the cuts.
+    """
+    lines = [LineString([a, b]) for a, b, _ in folds]
+    pieces, cuts = [], []
+    for poly in _polygons(sheet):
+        kept = []
+        for ring in poly.interiors:
+            hole = Polygon(ring)
+            on = [line for line in lines if line.intersects(hole)]
+            if not on or not hole.buffer(-SLIT_WIDTH / 2).is_empty:
+                kept.append(ring)
+                continue
+            for line in on:
+                cut = line.intersection(hole)
+                cuts.extend((part.coords[0], part.coords[-1]) for part in _flatten_lines(cut)
+                            if part.length > 1e-6)
+        pieces.append(Polygon(poly.exterior, kept))
+    return unary_union(pieces), cuts
+
+
+def _flatten_lines(geom):
+    if geom.geom_type == "LineString":
+        yield geom
+    elif hasattr(geom, "geoms"):
+        for g in geom.geoms:
+            yield from _flatten_lines(g)
+
+
 def template_layout(log):
     """What the template's "area" output echoed about its net, beyond its walls."""
     net_top = echoed(log, "app_net_top", "inside")
@@ -621,9 +657,11 @@ def build(job, openscad="openscad", workdir=None):
 
     if sheet.is_empty:
         raise PaperError("the template drew an empty net")
+    sheet, slits = perforations(sheet, folds)
     net = view.geom(sheet)
     view_folds = [[view.point(a), view.point(b)] for a, b, _ in folds]
-    svg, bounds = net_svg(net, view_folds if layout["fold_layer"] else [])
+    view_slits = [[view.point(a), view.point(b)] for a, b in slits]
+    svg, bounds = net_svg(net, view_folds if layout["fold_layer"] else [], view_slits)
     minx, miny, maxx, maxy = net.bounds
     pieces = list(_polygons(net))
     if len(pieces) > 1:
@@ -635,12 +673,12 @@ def build(job, openscad="openscad", workdir=None):
         # The face the wall is: most of the wall's own rectangle, back in the template's coordinates.
         rect = view.geom(affinity.affine_transform(box(0, 0, *wall.size), wall.matrix()))
         wall.face = max(range(len(polygons)), key=lambda i: polygons[i].intersection(rect).area)
-    fold_lines = [LineString(f) for f in view_folds]
     return {
         "svg": svg,
         "view": [round(v, 3) for v in bounds],
         "net": path_data(net),
         "folds": line_data(view_folds),
+        "slits": line_data(view_slits),
         "area": path_data(area),
         "walls": [{**wall.summary(wall_areas[i]), "face": wall.face} for i, wall in enumerate(walls)],
         "decorations": [{
@@ -656,9 +694,8 @@ def build(job, openscad="openscad", workdir=None):
         "foldLayer": layout["fold_layer"],
         "info": {
             "width": round(maxx - minx, 2), "height": round(maxy - miny, 2),
-            # Slits perforating a fold are not cut-outs.
-            "cutouts": sum(1 for p in pieces for hole in p.interiors
-                           if not any(line.intersects(Polygon(hole)) for line in fold_lines)),
+            "cutouts": sum(len(p.interiors) for p in pieces),
+            "slits": len(slits),
             "notes": notes,
         },
     }

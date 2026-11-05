@@ -200,14 +200,19 @@ try {
   assert.equal(data.netTop, 'outside');
   assert.equal(data.foldLayer, false);
   assert.match(await page.locator('#ppTemplateNote').textContent(), /^One-piece paper house net for an A4 sheet\./);
-  assert.equal(await page.locator('#ppFoldKey').textContent(), 'fold (perforated in the cut)');
+  assert.equal(await page.locator('#ppFoldKey').textContent(), 'fold (perforated: slits in the cut)');
   assert.equal(await page.locator('#ppParams [data-param="door_width"]').count(), 1);
   assert.equal(await page.locator('#ppNet .pp-wall-label').count(), 4);
   data = await rebuild(() => page.locator('#ppFile').setInputFiles(windowPath));
   assert.equal(data.decorations.at(-1).wall, emptyWall(data.decorations.slice(0, -1), 4), 'the emptiest wall');
+  assert.equal(await page.locator('#ppNet .pp-fold').count(), 0, 'the slits are the fold marks');
+  assert.ok((await page.locator('#ppNet .pp-slit').getAttribute('d')).split('M').length > 100);
   const rowSvg = page.waitForEvent('download');
   await page.locator('#ppDownload').click();
-  assert.doesNotMatch(await readFile(await (await rowSvg).path(), 'utf8'), /<g id="fold"/, 'no score layer to cut through');
+  const rowText = await readFile(await (await rowSvg).path(), 'utf8');
+  assert.doesNotMatch(rowText, /<g id="fold"/, 'no score layer to cut through');
+  // Every slit is a single straight cut: "M x y L x y" with nothing closing it.
+  assert.ok((rowText.match(/M[\d.-]+ [\d.-]+ L[\d.-]+ [\d.-]+(?= M| ?")/g) ?? []).length > 100, 'slits as lines');
   await page.locator('#pp3dToggle').click();
   await page.screenshot({ path: `${artifacts}/row-house.png` });
   await page.locator('#pp3dToggle').click();

@@ -47,6 +47,7 @@ The pipeline in one line:
 | **decoration area** | The part of a paper wall decorations may cut: clear of its edges, the floor fold and the glue tabs. Cuts reaching past it are trimmed. |
 | **glue tab** | A flap on a paper wall's edge, glued behind the neighbouring wall. |
 | **fold line** | A line the net is folded along, scored rather than cut; exported on its own layer. |
+| **fold slit** | One short straight cut of a fold perforated instead of scored; part of the cut layer. |
 
 ## 3D result
 

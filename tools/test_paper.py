@@ -9,7 +9,8 @@ from pathlib import Path
 from shapely.geometry import Point, Polygon, box
 
 from paper import (PaperError, View, Wall, build, checked_geometry, cutouts_of, echoed,
-                   even_odd, fold_faces, scad_error, scad_problems, scad_svg_rings, template_layout)
+                   even_odd, fold_faces, perforations, scad_error, scad_problems, scad_svg_rings,
+                   template_layout)
 
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parent
@@ -147,6 +148,22 @@ class GeometryTests(unittest.TestCase):
             cx, cy = Polygon(faces[i]["rings"][0]).centroid.coords[0]
             self.assertGreater((bx - ax) * (cy - ay) - (by - ay) * (cx - ax), 0)
 
+    def test_slits_on_a_fold_become_single_cuts(self):
+        # Four 2.6 × 0.45 mm slits on the fold x = 10, and a window that is no slit.
+        sheet = box(0, 0, 20, 20).difference(box(2, 2, 6, 6))
+        for i in range(4):
+            y = 1.4 + i * 4.6
+            sheet = sheet.difference(box(9.775, y, 10.225, y + 2.6))
+        solid, cuts = perforations(sheet, [((10, 0), (10, 20), 90)])
+        self.assertEqual(len(solid.interiors), 1, "the window stays a cut-out")
+        self.assertEqual(len(cuts), 4)
+        for (ax, ay), (bx, by) in cuts:
+            self.assertEqual((ax, bx), (10, 10), "on the fold itself")
+            self.assertAlmostEqual(abs(by - ay), 2.6)
+        # A wide hole on a fold is a cut-out, not a slit.
+        solid, cuts = perforations(box(0, 0, 20, 20).difference(box(8, 8, 12, 12)), [((10, 0), (10, 20), 90)])
+        self.assertEqual((len(solid.interiors), cuts), (1, []))
+
     def test_perforated_folds_still_join_their_faces(self):
         # Two squares joined by a fold cut as slits: 2.6 mm slits, 2 mm bridges.
         sheet = box(0, 0, 20, 10)
@@ -246,6 +263,10 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(result["up"], [0, 1, 0])
         self.assertFalse(result["foldLayer"])
         self.assertNotIn('<g id="fold"', result["svg"], "the cut already perforates the folds")
+        # Each perforation is one straight cut, not a little rectangle.
+        self.assertGreater(result["info"]["slits"], 100)
+        self.assertEqual(result["slits"].count("M"), result["info"]["slits"])
+        self.assertTrue(all(len(f["rings"]) == 1 for f in plain["faces"]), "no slit holes left in the paper")
         self.assertEqual([w["size"] for w in result["walls"]], [[55, 140], [80, 100], [55, 140], [80, 100]])
         # Not mirrored: wall 1 is the first wall left to right, flipped upside down for SVG.
         self.assertEqual(result["walls"][0]["origin"], [7, 0])
