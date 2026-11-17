@@ -1287,8 +1287,8 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
     # corners qualify; the build picks each hook's outward direction from the
     # local geometry. Deduplicated by rounded position.
     open_endpoints = []
+    seen = set()
     if profile is not None:
-        seen = set()
         for chain in chain_curves(list(swept)):
             vertices = chain[:-1] if len(chain) > 1 and chain[0] == chain[-1] else chain
             for pt in vertices:
@@ -1297,6 +1297,21 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                     continue
                 seen.add(key)
                 open_endpoints.append([key[0], key[1]])
+
+    # The free ends of the cusp paths can take a dome cap too, in the cusp
+    # section. Only ends: cusp paths carry no hooks. An end already listed
+    # as a main-path vertex keeps that one marker.
+    cusp_endpoints = []
+    if cusp_curves:
+        for chain in chain_curves(cusp_curves, min_dot=-0.5):
+            if len(chain) < 2 or chain[0] == chain[-1]:
+                continue
+            for pt in (chain[0], chain[-1]):
+                key = (round(float(pt[0]), 4), round(float(pt[1]), 4))
+                if key in seen:
+                    continue
+                seen.add(key)
+                cusp_endpoints.append([key[0], key[1]])
 
     # Dome endings: load the target coordinates once (closure for build_frame).
     dome_ends_coords = []
@@ -1353,13 +1368,17 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                 places.append((point, np.array([-tangent[1], tangent[0]]), forward))
         return places
 
-    def dome_places(paths):
-        """(point, normal, forward) of every free main-path end with a dome cap."""
+    def dome_places(chains):
+        """(point, normal, forward) of every free chain end with a dome cap.
+
+        The same marked positions cap main-path ends and cusp-path ends; the
+        caller passes the chains and caps them in their own section.
+        """
         places = []
         if not dome_ends_coords:
             return places
         tol = max(1e-2, args.sagitta * 2)
-        for chain in chain_curves(paths, min_dot=-0.5):
+        for chain in chains:
             if chain[0] == chain[-1] or len(chain) < 2:
                 continue
             for index, neighbour in ((0, 1), (-1, -2)):
@@ -1427,8 +1446,11 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
             for point, normal, forward in revolved_places(paths, end_chains):
                 solids.append(revolved_ending(end_section, point, normal, forward,
                                               args.end_angle, args.end_side))
-            for point, normal, forward in dome_places(paths):
+            for point, normal, forward in dome_places(chain_curves(paths, min_dot=-0.5)):
                 solids.append(dome_ending(profile, point, normal, forward))
+            if cusps:
+                for point, normal, forward in dome_places(end_chains):
+                    solids.append(dome_ending(cusp_section, point, normal, forward))
             overlap = max(args.sagitta * 2, 0.05)
             for anchor, forward, spec in hook_places(paths):
                 try:
@@ -1500,7 +1522,8 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         rib_chains = chain_curves(ribs) if ribs and args.frame_only else []
         overlap = max(args.sagitta * 2, 0.05)
         rolled = revolved_places(paths, end_chains)
-        domes, hooks = dome_places(paths), hook_places(paths)
+        domes, hooks = dome_places(chain_curves(paths, min_dot=-0.5)), hook_places(paths)
+        cusp_domes = dome_places(end_chains) if cusps else []
         cutters = []
         for entry in colour_entries:
             if entry["section"] == "cusp":
@@ -1536,6 +1559,10 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
                         for anchor, forward, spec in hooks:
                             pieces.append(hook_solid(poly, anchor, forward, spec, overlap,
                                                      height=profile.bounds[3]))
+                if entry["section"] == "cusp":
+                    for poly in polygons_of(above):
+                        for point, normal, forward in cusp_domes:
+                            pieces.append(dome_ending(poly, point, normal, forward))
             except (ValueError, RuntimeError) as error:
                 raise ConvertError(f"Could not build the profile colour {entry['color']}: {error}") from error
             cutters.append((colour_label(entry["color"]), pieces))
@@ -1569,6 +1596,7 @@ def plan_drawing(path, scale, layers_csv, args, boundary=None, defer_frame=False
         "colour_cutters": colour_cutters,
         "build_colour_cutters": build_colour_cutters,
         "open_endpoints": open_endpoints,
+        "cusp_endpoints": cusp_endpoints,
         "sketch_bounds": (min(xs), min(ys), max(xs), max(ys)) if xs else None,
         "summary": summary,
     }
@@ -3144,6 +3172,8 @@ def main():
                 } for group, mesh in parts if group is not None]
         if drawing["open_endpoints"]:
             payload["openEndpoints"] = drawing["open_endpoints"]
+        if drawing.get("cusp_endpoints"):
+            payload["cuspEndpoints"] = drawing["cusp_endpoints"]
         return payload
 
     if args.regions:

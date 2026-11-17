@@ -1154,7 +1154,7 @@
   </div>
   <div id="domeEndsSection" hidden>
     <strong>Path endings &amp; hooks</strong>
-    <p class="muted">Every path vertex — free ends and corners, open or closed paths — is a marker. Pick what to apply, then click a marker in the view to toggle it there. Hit Generate 3D to apply. <span id="domeEndCount"></span></p>
+    <p class="muted">Every path vertex — free ends and corners, open or closed paths — is a marker. The free ends of the cusp paths are markers too (diamonds); they take a dome cap in the cusp section, no hooks. Pick what to apply, then click a marker in the view to toggle it there. Hit Generate 3D to apply. <span id="domeEndCount"></span></p>
     <label for="endpointMode">Apply at endpoint</label>
     <select id="endpointMode">
       <option value="dome">Dome cap</option>
@@ -2708,8 +2708,10 @@ function buildModel(data, lo, hi, rng, keep = null) {
   const drawings = data.drawings ?? [data];
   drawings.forEach((d, li) => buildLayer(li, d, lo, hi, rng, keep ? keep[li] : null));
 
-  // Collect open sweep profile endpoints from the base drawing layer.
-  setDomeEndpoints((data.drawings?.[0] ?? data).openEndpoints ?? []);
+  // Collect open sweep profile endpoints (main vertices, then free cusp
+  // ends) from the base drawing layer.
+  const base = data.drawings?.[0] ?? data;
+  setDomeEndpoints(base.openEndpoints ?? [], base.cuspEndpoints ?? []);
   drawHoleMarkers();
   if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
   $('hint').hidden = true;
@@ -2800,6 +2802,10 @@ async function applyHoles() {
 /* ------------------------------------------------ open path endings & hooks */
 
 let domeEndpoints = [];      // [[x, y], ...] from the regions response
+// Main-path vertices come first; from this index on, the free ends of the
+// cusp paths. Those take a dome cap only — hooks are swept from the main profile.
+let cuspEndpointFrom = 0;
+const isCuspEnd = (i) => i >= cuspEndpointFrom;
 // index -> 'dome' | 'round' | 'straight'. Dome caps the endpoint; the hook
 // kinds continue the main profile along a hook path from it.
 let endpointMode = new Map();
@@ -2825,10 +2831,11 @@ function drawDomeMarkers() {
   const r = 1.2;
   domeEndpoints.forEach(([x, y], i) => {
     const mode = endpointMode.get(i);
+    const cusp = isCuspEnd(i);
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(r, 16, 8),
+      cusp ? new THREE.OctahedronGeometry(r * 1.1) : new THREE.SphereGeometry(r, 16, 8),
       new THREE.MeshBasicMaterial({
-        color: mode ? ENDPOINT_COLORS[mode] : 0x6b7280,
+        color: mode ? ENDPOINT_COLORS[mode] : cusp ? 0xa78bfa : 0x6b7280,
         transparent: true, opacity: mode ? 0.9 : 0.5, depthTest: false,
       }),
     );
@@ -2865,9 +2872,11 @@ function domeEndsUI() {
   $('domeEndsSection').hidden = !hasEndpoints;
   hookParamsUI();
   const n = endpointMode.size;
+  const cuspEnds = domeEndpoints.length - cuspEndpointFrom;
+  const cuspNote = cuspEnds ? ` (${cuspEnds} of them cusp ends, ◆, dome cap only)` : '';
   $('domeEndCount').textContent = n
-    ? `${n} of ${domeEndpoints.length} applied.`
-    : domeEndpoints.length ? `${domeEndpoints.length} endpoints — click to apply.` : '';
+    ? `${n} of ${domeEndpoints.length} applied${cuspNote}.`
+    : domeEndpoints.length ? `${domeEndpoints.length} endpoints${cuspNote} — click to apply.` : '';
   $('domeClearAll').hidden = n === 0;
   hookOffsetsUI();
   grooveLastUI();
@@ -2902,11 +2911,12 @@ function hookOffsetsUI() {
   list.hidden = !list.childElementCount;
 }
 
-function setDomeEndpoints(eps) {
+function setDomeEndpoints(eps, cuspEps = []) {
   const prev = domeEndpoints;
   const prevModes = endpointMode;
   const prevOffsets = hookOffset;
-  domeEndpoints = eps ?? [];
+  domeEndpoints = [...(eps ?? []), ...(cuspEps ?? [])];
+  cuspEndpointFrom = eps?.length ?? 0;
   endpointMode = new Map();
   hookOffset = new Map();
   // A project restore supplies modes by position before the endpoints exist.
@@ -2918,7 +2928,7 @@ function setDomeEndpoints(eps) {
     if (!pos) continue;
     const [px, py] = pos;
     const j = domeEndpoints.findIndex(([x, y]) => Math.abs(x - px) < 0.1 && Math.abs(y - py) < 0.1);
-    if (j < 0) continue;
+    if (j < 0 || (isCuspEnd(j) && mode !== 'dome')) continue;
     endpointMode.set(j, mode);
     if (shift && mode !== 'dome') hookOffset.set(j, shift);
   }
@@ -2945,6 +2955,10 @@ function tryToggleDomeEnd(event) {
   if (!hits.length) return false;
   const idx = hits[0].object.userData.domeEndIndex;
   const mode = $('endpointMode').value;
+  if (isCuspEnd(idx) && mode !== 'dome') {
+    setStatus('Cusp path ends take a dome cap only — choose “Dome cap” to cap one.', true);
+    return true;
+  }
   // Clicking the same mode again clears it; a different mode replaces it.
   // A hook keeps its offset when it changes kind, a dome cap has none.
   if (endpointMode.get(idx) === mode) endpointMode.delete(idx);
