@@ -54,8 +54,8 @@ navigation does not change artwork placement or model settings. DXF uploads
 can be previewed before saving or generating a model.
 
 **Shader preview** in the model toolbar, or **Shader** beside a vector preview,
-turns any loaded DXF/SVG drawing or cross-section into an animated GPU distance
-field. Choose among 60 visual styles, switch between outlines and filled shapes,
+turns any loaded DXF/SVG drawing or cross-section, or several of them together,
+into an animated GPU distance field. Choose among 60 visual styles, switch between outlines and filled shapes,
 adjust curve detail and line width, pause or scrub the animation, and save a PNG,
 a seamlessly looping GIF (up to 4096 × 4096) or a complete GLSL shader bundle. It includes stacked drawings, sweep/groove/cusp
 profiles, boundaries, lid sketches and shelf inputs. Preview settings travel with

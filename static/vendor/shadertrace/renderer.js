@@ -36,6 +36,7 @@ export class ShaderRenderer {
       );
     this.program = null;
     this.particleProgram = null;
+    this.data = null;
     this.vertex = this.createShader(this.gl.VERTEX_SHADER, vertexSource);
     this.vao = this.gl.createVertexArray();
     this.gl.bindVertexArray(this.vao);
@@ -59,13 +60,38 @@ export class ShaderRenderer {
     return program;
   }
 
-  locations(program) {
+  locations(program, data) {
     return Object.fromEntries(
-      ["u_resolution", "u_time", "u_duration", "u_frame"].map((name) => [
-        name,
-        this.gl.getUniformLocation(program, name),
-      ]),
+      ["u_resolution", "u_time", "u_duration", "u_frame", data?.uniform]
+        .filter(Boolean)
+        .map((name) => [name, this.gl.getUniformLocation(program, name)]),
     );
+  }
+
+  // Geometry too large for shader constants arrives as one RGBA32F texture.
+  setData(data) {
+    const gl = this.gl;
+    if (this.data) gl.deleteTexture(this.data.texture);
+    this.data = null;
+    if (!data) return;
+    const texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA32F,
+      data.width,
+      data.height,
+      0,
+      gl.RGBA,
+      gl.FLOAT,
+      data.values,
+    );
+    // Float textures are only complete without filtering or mipmaps.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    this.data = { uniform: data.uniform, texture };
   }
 
   createShader(type, source) {
@@ -81,7 +107,7 @@ export class ShaderRenderer {
     return shader;
   }
 
-  compile(sdf, visualization, { commit = true } = {}) {
+  compile(sdf, visualization, { commit = true, data = null } = {}) {
     const gl = this.gl;
     const header = `#version 300 es\n${uniformsSource}out vec4 fragColor;\n`;
     this.sections = {
@@ -159,10 +185,11 @@ void main() {
         particleVertex: particleVertex ? gl.getShaderSource(particleVertex) : null,
         particleFragment: particleVertex ? particleFragment : null,
       };
-      this.uniforms = this.locations(program);
+      this.setData(data);
+      this.uniforms = this.locations(program, data);
       this.particleProgram = particleProgram || null;
       this.particleUniforms = particleProgram
-        ? this.locations(particleProgram)
+        ? this.locations(particleProgram, data)
         : null;
       return { ok: true, errors: [] };
     } catch (error) {
@@ -213,6 +240,11 @@ void main() {
     gl.uniform1f(locations.u_time, time);
     gl.uniform1f(locations.u_duration, duration);
     gl.uniform1i(locations.u_frame, frame);
+    if (this.data) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.data.texture);
+      gl.uniform1i(locations[this.data.uniform], 0);
+    }
   }
 
   render(time, duration, frame = 0) {
@@ -241,6 +273,7 @@ void main() {
     const gl = this.gl;
     if (this.program) gl.deleteProgram(this.program);
     if (this.particleProgram) gl.deleteProgram(this.particleProgram);
+    this.setData(null);
     gl.deleteShader(this.vertex);
     gl.deleteVertexArray(this.vao);
     this.program = this.particleProgram = this.sources = null;

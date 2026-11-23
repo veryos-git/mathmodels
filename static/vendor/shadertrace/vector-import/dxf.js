@@ -159,14 +159,75 @@ function reversed(path) {
   output.current = path.start;
   return output;
 }
+// Path ends on a grid of tolerance-sized cells, so looking for the ends near a
+// point does not scan every path.
+function endGrid(box, tolerance) {
+  const cells = new Map();
+  const cell = (p) =>
+    [0, 1].map((i) => Math.floor((p[i] - box[i]) / (2 * tolerance)));
+  return {
+    add(path, id) {
+      for (const end of [path.start, path.current]) {
+        const key = cell(end).join();
+        if (!cells.has(key)) cells.set(key, new Set());
+        cells.get(key).add(id);
+      }
+    },
+    near(p) {
+      const [x, y] = cell(p), found = new Set();
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (const id of cells.get(`${x + dx},${y + dy}`) || []) found.add(id);
+        }
+      }
+      return found;
+    },
+  };
+}
+// Whether two paths trace the same curve, in the same or the opposite direction.
+function coincide(a, b, tolerance) {
+  const count = a.pieces.length;
+  return count === b.pieces.length && [false, true].some((flip) =>
+    a.pieces.every((f, i) =>
+      [0, 0.25, 0.5, 0.75, 1].every((t) =>
+        distance(
+          f(t),
+          flip ? b.pieces[count - 1 - i](1 - t) : b.pieces[i](t),
+        ) < tolerance
+      )
+    )
+  );
+}
 function stitch(paths, warnings) {
-  const all = paths.map(worldPath),
-    closed = all.filter((p) => p.closed),
-    open = all.filter((p) => !p.closed);
-  if (!open.length) return closed;
+  if (!paths.length) return [];
+  const all = paths.map(worldPath);
   const box = bounds(all.flatMap((p) => [p.start, p.current]));
   const tolerance = Math.max(box[2] - box[0], box[3] - box[1], 1e-9) * 1e-7;
-  const used = new Set();
+  // CAD sketches often export the same entity several times. The copies make
+  // joins ambiguous, cancel out in even-odd fills and cost segments.
+  const kept = [], seen = endGrid(box, tolerance);
+  for (const path of all) {
+    if (
+      [...seen.near(path.start)].some((id) =>
+        coincide(kept[id], path, tolerance)
+      )
+    ) continue;
+    seen.add(path, kept.length);
+    kept.push(path);
+  }
+  const copies = all.length - kept.length;
+  if (copies) {
+    warnings.add(
+      `${copies} duplicate DXF ${
+        copies > 1 ? "entities were" : "entity was"
+      } skipped.`,
+    );
+  }
+  const closed = kept.filter((p) => p.closed),
+    open = kept.filter((p) => !p.closed);
+  if (!open.length) return closed;
+  const used = new Set(), ends = endGrid(box, tolerance);
+  open.forEach((path, j) => ends.add(path, j));
   for (let i = 0; i < open.length; i++) {
     if (used.has(i)) continue;
     used.add(i);
@@ -181,13 +242,12 @@ function stitch(paths, warnings) {
           break;
         }
         const choices = [];
-        for (let j = 0; j < open.length; j++) {
-          if (!used.has(j)) {
-            if (distance(chain.current, open[j].start) < tolerance) {
-              choices.push([j, false]);
-            } else if (distance(chain.current, open[j].current) < tolerance) {
-              choices.push([j, true]);
-            }
+        for (const j of ends.near(chain.current)) {
+          if (used.has(j)) continue;
+          if (distance(chain.current, open[j].start) < tolerance) {
+            choices.push([j, false]);
+          } else if (distance(chain.current, open[j].current) < tolerance) {
+            choices.push([j, true]);
           }
         }
         if (choices.length !== 1) {

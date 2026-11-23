@@ -19,6 +19,15 @@ page.on('pageerror', error => errors.push(error.message));
 const dialog = page.locator('.shader-inspector[open]');
 const field = name => dialog.locator(`[data-field="${name}"]`);
 const action = name => dialog.locator(`[data-action="${name}"]`);
+const sourceBoxes = dialog.locator('[data-sources] input');
+const selected = () => sourceBoxes.evaluateAll(nodes => nodes.filter(n => n.checked).map(n => n.value));
+// Checks before unchecking, so the selection is never empty on the way.
+const selectSources = async (...ids) => {
+  const boxes = await sourceBoxes.all(), values = await Promise.all(boxes.map(box => box.getAttribute('value')));
+  for (const wanted of [true, false]) {
+    for (const [i, box] of boxes.entries()) if (ids.includes(values[i]) === wanted) await box.setChecked(wanted);
+  }
+};
 const ready = async () => {
   await page.waitForFunction(() =>
     ['ready', 'error'].includes(document.querySelector('.shader-inspector[open]')?.dataset.state), null, { timeout: 60000 });
@@ -47,7 +56,8 @@ try {
       profile: await embedded('library/Part Studio 1 - profile.dxf'), settings: {},
       additions: { enabled: false, outline: { name: 'shelf.svg',
         data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0H40L30 20H10Z"/></svg>').toString('base64') } } };
-  project.shaderPreview = { playing: false, resolution: 256 };
+  // `source` is how projects named their one source before several could be combined.
+  project.shaderPreview = { playing: false, resolution: 256, source: 'profile' };
   const built = page.waitForResponse(r => r.url().endsWith('/api/regions'), { timeout: 120000 });
   await page.locator('#startProjectFileInput').setInputFiles({
     name: 'shader-test.v2sproj', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)),
@@ -58,21 +68,45 @@ try {
   page.on('request', request => { if (request.url().endsWith('/api/regions')) rebuilds++; });
   await page.locator('#shaderPreview').click();
   await ready();
-  assert.equal(await field('style').locator('option').count(), 60);
-  const options = await field('source').locator('option').evaluateAll(nodes => nodes.map(n => n.value));
+  assert.equal(await field('style').locator('option').count(), 61);
+  assert.deepEqual(await selected(), ['profile']);
+  const options = await sourceBoxes.evaluateAll(nodes => nodes.map(n => n.value));
   assert(options.includes('drawing') && options.includes('profile') && options.includes('additionOutline'));
+  const stats = () => dialog.locator('.shader-stats').textContent();
+  const segments = {};
   for (const id of options) {
-    await field('source').selectOption(id); await ready();
-    assert.match(await dialog.locator('.shader-stats').textContent(), /\d+ segments/);
+    await selectSources(id); await ready();
+    assert.deepEqual(await selected(), [id]);
+    segments[id] = Number((await stats()).match(/^(\d+) segments/)[1]);
   }
-  await field('source').selectOption('drawing'); await ready();
+  // Several sources become one field. Curve detail follows the combined size, so the
+  // smaller drawing may need fewer segments than it does alone.
+  await selectSources('drawing', 'profile'); await ready();
+  const both = (await stats()).match(/^2 sources · (\d+) segments · \d+ shape groups · outline \+ filled$/);
+  assert(both, await stats());
+  assert(Number(both[1]) > Math.min(segments.drawing, segments.profile)
+    && Number(both[1]) <= segments.drawing + segments.profile, await stats());
+  await page.screenshot({ path: `${artifacts}/combined-shader.png` });
+  const combined = page.waitForEvent('download');
+  await action('shader').click();
+  const combinedBundle = await combined;
+  assert.match(combinedBundle.suggestedFilename(), /\+1-[\w-]+\.shader\.json$/);
+  await combinedBundle.saveAs(`${artifacts}/combined.shader.json`);
+  assert.deepEqual(JSON.parse(await readFile(`${artifacts}/combined.shader.json`, 'utf8')).sources.map(item => item.role),
+    ['Main drawing', 'Sweep cross-section']);
+  await sourceBoxes.evaluateAll(nodes => nodes.forEach(n => { if (n.checked) n.click(); }));
+  await page.waitForFunction(() => document.querySelector('.shader-inspector').dataset.state === 'empty');
+  assert.match(await dialog.locator('.shader-message').textContent(), /Select at least one/);
+  assert(await action('png').isDisabled());
+  await selectSources('drawing'); await ready();
   await field('style').selectOption('neon'); await ready();
   await page.screenshot({ path: `${artifacts}/project-shader.png` });
   const png = await download('png', 'frame.png');
   assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   const bundle = JSON.parse(await download('shader', 'frame.shader.json'));
   assert.match(bundle.shaders.fragment, /#version 300 es/);
-  assert.equal(bundle.source.name, project.drawing.name);
+  assert.deepEqual(bundle.sources.map(item => item.name), [project.drawing.name]);
+  assert.deepEqual(bundle.textures, []);
   assert.match(bundle.sdf, /float sdf/);
   await action('play').click();
   await page.waitForFunction(() => Number(document.querySelector('.shader-inspector [data-time]').value) > .15);
@@ -80,6 +114,7 @@ try {
   const paused = await dialog.locator('[data-time]').inputValue();
   await page.waitForTimeout(150);
   assert.equal(await dialog.locator('[data-time]').inputValue(), paused);
+  await selectSources('drawing', 'profile'); await ready();
   await action('close').click();
   assert.equal(rebuilds, 0, 'shader inspection never rebuilds the model');
 
@@ -89,6 +124,7 @@ try {
   await page.locator('#saveProject').click();
   await (await saved).saveAs(`${artifacts}/shader.v2sproj`);
   const roundtrip = JSON.parse(await readFile(`${artifacts}/shader.v2sproj`, 'utf8'));
+  assert.deepEqual(roundtrip.shaderPreview.sources, ['drawing', 'profile']);
   assert.equal(roundtrip.shaderPreview.style, 'neon');
   assert.equal(roundtrip.shaderPreview.resolution, 256);
   assert.equal(roundtrip.shaderPreview.playing, false);
@@ -99,10 +135,15 @@ try {
   await page.locator('[data-step="inputs"]').click();
   await page.locator('#subjectPreview [data-action="shader"]').click();
   await ready();
-  assert.equal(await field('source').inputValue(), 'drawing');
+  assert.deepEqual(await selected(), ['drawing']);
   assert.equal(await field('style').inputValue(), 'neon');
   await action('close').click();
-  console.log('PASS project sources, live rendering, playback, PNG/GLSL exports, persistence, preview entry point');
+  // Looking at one file does not replace the combination saved with the project.
+  await page.locator('#shaderPreview').click();
+  await ready();
+  assert.deepEqual(await selected(), ['drawing', 'profile']);
+  await action('close').click();
+  console.log('PASS project sources, combined sources, live rendering, playback, PNG/GLSL exports, persistence, preview entry point');
 
   // Compile/render the complete style catalog with an SVG that has a hole.
   const catalog = await page.evaluate(async () => {
@@ -140,8 +181,77 @@ try {
     renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
     return verified;
   });
-  assert.equal(catalog.length, 60);
-  console.log('PASS all 60 styles rendered, SVG holes, CPU/GPU distances, particle export and disposal');
+  assert.equal(catalog.length, 61);
+  console.log('PASS all 61 styles rendered, SVG holes, CPU/GPU distances, particle export and disposal');
+
+  // Drawings past the inline limits read their geometry from a texture: same styles, same distances.
+  const large = await page.evaluate(async () => {
+    const { ShaderRenderer } = await import('/vendor/shadertrace/renderer.js');
+    const { SHADER_STYLES } = await import('/shader-preview.js');
+    const { convertVector } = await import('/vendor/shadertrace/vector-import/index.js');
+    const { evaluateGeometry, LIMITS } = await import('/vendor/shadertrace/vector-import/geometry.js');
+    // 40 nested rings with even-odd holes, crossed by open strokes: two big shapes.
+    const entities = [];
+    for (let i = 0; i < 40; i++) entities.push(0, 'CIRCLE', 8, '0', 10, 0, 20, 0, 40, 4 + i * 1.5);
+    for (let i = 0; i < 9; i++) entities.push(0, 'LINE', 8, '0', 10, -60, 20, i * 13 - 52, 11, 60, 21, 52 - i * 11);
+    const dxf = ['0', 'SECTION', '2', 'ENTITIES', ...entities, '0', 'ENDSEC', '0', 'EOF'].join('\n');
+    const rings = convertVector(dxf, 'dxf', { tolerance: .0005 });
+    if (rings.stats.segments <= LIMITS.inlineSegments || rings.geometry.groups.length !== 2) throw new Error('Expected two large shapes');
+    // 120 small shapes: overlapping discs, squares with holes, strokes of several widths.
+    const shapes = [];
+    for (let i = 0; i < 120; i++) {
+      const x = (i % 12) * 10 + 5, y = Math.floor(i / 12) * 10 + 5;
+      shapes.push(i % 3 === 0 ? `<circle cx="${x}" cy="${y}" r="${3 + i % 4}"/>`
+        : i % 3 === 1 ? `<path fill-rule="evenodd" d="M${x - 4} ${y - 4}h8v8h-8z M${x - 2} ${y - 2}h4v4h-4z"/>`
+        : `<path fill="none" stroke="black" stroke-width="${.4 + (i % 5) * .3}" d="M${x - 4} ${y}q4 -8 8 0t-3 4"/>`);
+    }
+    const mosaic = convertVector(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100">${shapes.join('')}</svg>`, 'svg');
+    if (mosaic.geometry.groups.length !== 120) throw new Error('Expected one shape per element');
+    const size = 96, renderer = new ShaderRenderer(document.createElement('canvas'));
+    renderer.resize(size, size);
+    const pixels = new Uint8Array(size * size * 4), report = [];
+    for (const converted of [rings, mosaic]) {
+      if (!converted.data) throw new Error('Expected a data texture');
+      for (const style of SHADER_STYLES) {
+        const result = renderer.compile(converted.code, style.code, { data: converted.data });
+        if (!result.ok) throw new Error(`${style.name}: ${JSON.stringify(result.errors)}`);
+        renderer.render(.7, 8, 21);
+        renderer.readPixels(pixels);
+        if (!pixels.some((value, i) => i % 4 !== 3 && value > 0)) throw new Error(`${style.name}: empty canvas`);
+      }
+      // Distance as red, and inside/outside as green, against the CPU reference at every pixel.
+      const diagnostic = renderer.compile(converted.code,
+        'vec3 shade(vec2 p,float d){return vec3(clamp(abs(d)*8.0,0.0,1.0),d<0.0?1.0:0.0,0.0);}', { data: converted.data });
+      if (!diagnostic.ok) throw new Error('Distance diagnostic failed');
+      renderer.render(0, 8);
+      renderer.readPixels(pixels);
+      let worst = 0, flipped = 0, inside = 0;
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        const d = evaluateGeometry(converted.geometry.groups, [(2 * x + 1) / size - 1, (2 * y + 1) / size - 1]);
+        const at = 4 * (y * size + x);
+        worst = Math.max(worst, Math.abs(pixels[at] / 255 - Math.min(1, Math.abs(d) * 8)));
+        // A pixel centre within rounding distance of an edge may land on either side.
+        if (Math.abs(d) > 1e-5 && (pixels[at + 1] > 127) !== (d < 0)) flipped++;
+        if (d < 0) inside++;
+      }
+      report.push({ segments: converted.stats.segments, shapes: converted.stats.shapes, worst, flipped, inside });
+    }
+    // A stale texture must not survive the next, smaller drawing.
+    const small = convertVector(dxf, 'dxf', { tolerance: .008, mode: 'outline' });
+    const again = renderer.compile(small.code, 'vec3 shade(vec2 p,float d){return vec3(step(d,0.0));}', { data: small.data });
+    renderer.render(0, 8);
+    renderer.readPixels(pixels);
+    const lit = pixels.some((value, i) => i % 4 === 0 && value > 0);
+    renderer.dispose();
+    renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return { report, again: again.ok, lit, inline: !small.data };
+  });
+  for (const drawing of large.report) {
+    assert(drawing.inside > 500, JSON.stringify(drawing));
+    assert(drawing.worst < .012 && drawing.flipped === 0, `texture field differs from the CPU reference: ${JSON.stringify(drawing)}`);
+  }
+  assert(large.again && large.lit && large.inline);
+  console.log(`PASS ${large.report.map(d => `${d.segments} segments in ${d.shapes} shapes`).join(', ')}: all styles and CPU/GPU distances through the data texture`);
 
   // Recover from bad input; race changing sources; use library-style lazy files.
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('shader-preview', { detail: {
@@ -149,7 +259,7 @@ try {
   } })));
   await page.waitForFunction(() => document.querySelector('.shader-inspector').dataset.state === 'error');
   assert(await action('shader').isDisabled());
-  await field('source').selectOption('profile'); await ready();
+  await selectSources('profile'); await ready();
   await action('close').click();
   await page.evaluate(() => {
     const original = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>';
@@ -160,7 +270,7 @@ try {
     preview.querySelector('[data-action="shader"]').click();
   });
   await ready();
-  assert.match(await field('source').locator('option:checked').textContent(), /library-shape/);
+  assert.match(await dialog.locator('[data-sources] label:has(:checked)').textContent(), /library-shape/);
   const particleStyle = 'style-60';
   await field('style').selectOption(particleStyle); await ready();
   const particle = JSON.parse(await download('shader', 'particles.shader.json'));
@@ -176,11 +286,11 @@ try {
     } } }));
   });
   await page.waitForFunction(() => !!window.finishShaderFile);
-  await field('source').selectOption('profile'); await ready();
+  await selectSources('profile'); await ready();
   await page.evaluate(() => window.finishShaderFile(new File(['bad'], 'slow.svg')));
   await page.waitForTimeout(100);
   assert.equal(await dialog.getAttribute('data-state'), 'ready');
-  assert.equal(await field('source').inputValue(), 'profile');
+  assert.deepEqual(await selected(), ['profile']);
   // Native close is queued: reopening in the same task must preserve the new render.
   await page.evaluate(() => {
     document.querySelector('.shader-inspector').close();

@@ -57,13 +57,14 @@ export class ShaderInspector {
     this.settings = shaderSettings();
     this.revision = 0;
     this.time = 0;
+    this.selected = [];
     document.addEventListener('visibilitychange', () => {
       this.stop();
       if (!document.hidden) this.animate();
     });
   }
 
-  snapshot() { return { ...this.settings }; }
+  snapshot() { return { ...this.settings, sources: [...this.settings.sources] }; }
   restore(value) {
     this.dialog?.close();
     this.settings = shaderSettings(value);
@@ -84,7 +85,10 @@ export class ShaderInspector {
           <p class="shader-message" role="status"></p>
         </div>
         <div class="shader-controls">
-          <label>Drawing or profile<select data-field="source"></select></label>
+          <fieldset class="shader-sources">
+            <legend>Drawings and profiles <span class="muted">(select one or more)</span></legend>
+            <div data-sources></div>
+          </fieldset>
           <label>Visual style<select data-field="style"></select></label>
           <p class="shader-description"></p>
           <label>Geometry<select data-field="mode">
@@ -123,15 +127,18 @@ export class ShaderInspector {
             <button type="button" class="ghost" data-action="shader" disabled>Save shader bundle</button>
           </div>
           <p class="shader-export" role="status"></p>
-          <p class="shader-note">Sources are centered and fitted to the canvas. Preview settings are saved with the project.
+          <p class="shader-note">Selected sources keep their own drawing coordinates, then are centered and fitted
+            to the canvas together. Preview settings are saved with the project.
             A GIF covers one full loop and repeats seamlessly; at 2048 and above it can take minutes and
-            hundreds of MB. The shader bundle contains GLSL, uniforms and draw passes.</p>
+            hundreds of MB. The shader bundle contains GLSL, uniforms, draw passes and, for large drawings,
+            their edge texture.</p>
           <p class="shader-note">Powered by <a href="https://github.com/jonasfrey/shadertracev2" target="_blank" rel="noopener">Shadertrace</a> · WebGL 2</p>
         </div>
       </div>`;
     document.body.append(dialog);
     this.canvas = dialog.querySelector('canvas');
     this.message = dialog.querySelector('.shader-message');
+    this.sourceList = dialog.querySelector('[data-sources]');
     this.fields = Object.fromEntries([...dialog.querySelectorAll('[data-field]')].map(el => [el.dataset.field, el]));
     this.fields.exportSize.append(...EXPORT_SIZES.map(size => new Option(`${size} × ${size}`, size)));
     this.fields.gifFps.append(...GIF_FRAME_RATES.map(fps => new Option(`${fps} fps`, fps)));
@@ -187,6 +194,11 @@ export class ShaderInspector {
         } else this.compile();
       });
     }
+    this.sourceList.addEventListener('change', () => {
+      // Only a choice made here is saved; opening one file's preview leaves the project's choice alone.
+      this.selected = this.settings.sources = [...this.sourceList.querySelectorAll(':checked')].map(input => input.value);
+      this.compile();
+    });
     dialog.querySelector('[data-time]').addEventListener('input', event => {
       this.settings.playing = false;
       this.stop(); this.time = Number(event.target.value); this.render();
@@ -206,21 +218,25 @@ export class ShaderInspector {
     if (!this.dialog) this.build();
     this.opener = opener;
     this.sources = this.getSources().filter(item => item.file && /\.(svg|dxf)$/i.test(item.file.name));
-    let selected = this.settings.source;
+    let selected = this.settings.sources;
     if (source) {
-      const match = this.sources.find(item => item.file === source.file);
-      if (match) selected = match.id;
-      else {
-        selected = 'inspected-file';
-        this.sources.push({ id: selected, label: 'File preview', name: source.name, file: source.file,
-          loadFile: source.detail || source.loadFile, mode: 'outline' });
+      let match = this.sources.find(item => item.file === source.file);
+      if (!match) {
+        match = { id: 'inspected-file', label: 'File preview', name: source.name, file: source.file,
+          loadFile: source.detail || source.loadFile, mode: 'outline' };
+        this.sources.push(match);
       }
+      selected = [match.id];
     }
-    if (!this.sources.some(item => item.id === selected)) selected = this.sources[0]?.id || '';
-    this.settings.source = selected;
-    this.fields.source.replaceChildren(...this.sources.map(item =>
-      new Option(`${item.label} · ${item.file?.name || item.name}`, item.id)));
-    this.fields.source.disabled = !this.sources.length;
+    selected = this.sources.filter(item => selected.includes(item.id)).map(item => item.id);
+    this.selected = selected.length ? selected : this.sources.slice(0, 1).map(item => item.id);
+    this.sourceList.replaceChildren(...this.sources.map(item => {
+      const label = document.createElement('label'), input = document.createElement('input');
+      input.type = 'checkbox'; input.value = item.id; input.checked = this.selected.includes(item.id);
+      label.append(input, `${item.label} · ${item.file?.name || item.name}`);
+      return label;
+    }));
+    this.sourceList.parentElement.hidden = !this.sources.length;
     if (!this.gifJob) this.exportStatus('');
     this.syncControls();
     if (!this.dialog.open) this.dialog.showModal();
@@ -272,34 +288,42 @@ export class ShaderInspector {
     this.stop(); this.ready = false; this.current = null;
     this.dialog.querySelector('.shader-stats').textContent = '';
     this.dialog.querySelector('.shader-warnings').textContent = '';
-    const source = this.sources.find(item => item.id === this.settings.source);
-    if (!source) { this.state('empty', 'Upload a DXF or SVG drawing or profile to see its shader preview.'); return; }
+    const sources = this.sources.filter(item => this.selected.includes(item.id));
+    if (!sources.length) {
+      this.state('empty', this.sources.length ? 'Select at least one drawing or profile.'
+        : 'Upload a DXF or SVG drawing or profile to see its shader preview.');
+      return;
+    }
     this.state('loading', 'Generating shader from the source paths…');
     // Let the browser paint the loading state before parsing and compiling.
     await new Promise(resolve => setTimeout(resolve, 20));
     if (revision !== this.revision || !this.dialog.open) return;
     const settings = this.snapshot();
     try {
-      if (!source.file && source.loadFile) source.file = await source.loadFile();
-      if (revision !== this.revision || !this.dialog.open) return;
-      const conversion = await sourceShader(source, settings);
+      for (const source of sources) {
+        if (!source.file && source.loadFile) source.file = await source.loadFile();
+        if (revision !== this.revision || !this.dialog.open) return;
+      }
+      const conversion = await sourceShader(sources, settings);
       if (revision !== this.revision || !this.dialog.open) return;
       if (!this.renderer) this.renderer = new ShaderRenderer(this.canvas);
       if (this.renderer.gl.isContextLost()) throw new Error('Waiting for the GPU context to recover.');
       const style = SHADER_STYLES.find(item => item.id === settings.style);
-      const result = this.renderer.compile(conversion.code, style.code);
+      const result = this.renderer.compile(conversion.code, style.code, { data: conversion.data });
       if (!result.ok) throw new Error(result.errors.map(error => error.message).join('\n'));
       this.renderer.resize(settings.resolution, settings.resolution);
-      this.current = { source, conversion };
+      this.current = { sources, conversion };
       this.ready = true;
-      this.dialog.querySelector('.shader-stats').textContent =
-        `${conversion.stats.segments} segments · ${conversion.stats.shapes} shape groups · ${settings.mode === 'auto' ? source.mode || 'outline' : settings.mode}`
-        + (source.layers ? ` · layers: ${source.layers.join(', ')}` : '');
+      const [source] = sources, many = sources.length > 1;
+      const modes = new Set(sources.map(item => settings.mode === 'auto' ? item.mode || 'outline' : settings.mode));
+      this.dialog.querySelector('.shader-stats').textContent = (many ? `${sources.length} sources · ` : '')
+        + `${conversion.stats.segments} segments · ${conversion.stats.shapes} shape groups · ${[...modes].join(' + ')}`
+        + (!many && source.layers ? ` · layers: ${source.layers.join(', ')}` : '');
       const warnings = [...conversion.warnings];
       if (style.catalogNumber >= 57 || style.category === 'Relief & materials') {
         warnings.push('This style samples the field repeatedly. Use Fast detail or 256 × 256 for complex drawings.');
       }
-      this.dialog.querySelector('.shader-warnings').textContent = warnings.join(' ');
+      this.dialog.querySelector('.shader-warnings').textContent = warnings.join('\n');
       this.state('ready');
       this.render(); this.animate();
     } catch (error) {
@@ -321,7 +345,7 @@ export class ShaderInspector {
   exportRenderer(style, conversion, size) {
     const renderer = new ShaderRenderer(document.createElement('canvas'));
     try {
-      const result = renderer.compile(conversion.code, style.code);
+      const result = renderer.compile(conversion.code, style.code, { data: conversion.data });
       if (!result.ok) throw new Error(result.errors.map(error => error.message).join('\n'));
       renderer.resize(size, size);
       return renderer;
@@ -361,7 +385,8 @@ export class ShaderInspector {
   }
 
   exportName() {
-    return `${this.current.source.file.name.replace(/\.(svg|dxf)$/i, '')}-${this.settings.style}`;
+    const [first, ...others] = this.current.sources;
+    return `${first.file.name.replace(/\.(svg|dxf)$/i, '')}${others.length ? `+${others.length}` : ''}-${this.settings.style}`;
   }
 
   async savePng() {
@@ -439,8 +464,9 @@ export class ShaderInspector {
 
   saveShader() {
     if (!this.ready) return;
-    const { source, conversion } = this.current;
-    const bundle = shaderBundle(source, this.snapshot(), conversion, this.renderer.sources, this.time);
+    const { sources, conversion } = this.current;
+    const settings = { ...this.snapshot(), sources: sources.map(source => source.id) };
+    const bundle = shaderBundle(sources, settings, conversion, this.renderer.sources, this.time);
     download(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }), `${this.exportName()}.shader.json`);
   }
 }

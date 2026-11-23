@@ -1,8 +1,12 @@
 // Shared, DOM-independent geometry and GLSL generation.
 export const LIMITS = Object.freeze({
-  bytes: 2 * 1024 * 1024,
-  segments: 1024,
-  pieces: 10000,
+  bytes: 16 * 1024 * 1024,
+  segments: 32768,
+  // Drawings within both of these are written into the shader as constants.
+  // Compilers reject larger arrays, so anything beyond reads a data texture.
+  inlineSegments: 1024,
+  inlineBytes: 100000,
+  pieces: 32768,
 });
 export const identity = [1, 0, 0, 1, 0, 0];
 export const point = (
@@ -66,9 +70,38 @@ function fillBoundary(group) {
   const edges = contourEdges(group), cuts = edges.map(() => [0, 1]);
   const cross = (a, b) => a[0] * b[1] - a[1] * b[0],
     sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+  // Edges are indexed by horizontal band and paired by a sweep along x, so the
+  // work follows local density rather than the square of the edge count.
+  const box = edges.map(([a, b]) => [
+    Math.min(a[0], b[0]),
+    Math.min(a[1], b[1]),
+    Math.max(a[0], b[0]),
+    Math.max(a[1], b[1]),
+  ]);
+  let low = Infinity, high = -Infinity;
+  for (const b of box) {
+    low = Math.min(low, b[1]);
+    high = Math.max(high, b[3]);
+  }
+  const bands = Array.from(
+    { length: Math.max(1, Math.ceil(Math.sqrt(edges.length))) },
+    () => [],
+  );
+  const band = (y) =>
+    Math.max(
+      0,
+      Math.min(
+        bands.length - 1,
+        Math.floor((y - low) / (high - low || 1) * bands.length),
+      ),
+    );
+  box.forEach((b, i) => {
+    for (let k = band(b[1]); k <= band(b[3]); k++) bands[k].push(i);
+  });
   const inside = (p) => {
     let winding = 0;
-    for (const [a, b] of edges) {
+    for (const i of bands[band(p[1])]) {
+      const [a, b] = edges[i];
       const side = cross(sub(b, a), sub(p, a));
       if (a[1] <= p[1] && b[1] > p[1] && side > 0) winding++;
       if (a[1] > p[1] && b[1] <= p[1] && side < 0) winding--;
@@ -77,8 +110,19 @@ function fillBoundary(group) {
       ? Math.abs(winding) % 2 === 1
       : winding !== 0;
   };
-  for (let i = 0; i < edges.length; i++) {
-    for (let j = i + 1; j < edges.length; j++) {
+  // Only edges whose boxes come within reach of each other can meet.
+  const reach = 1e-6;
+  const order = edges.map((_, i) => i).sort((i, j) => box[i][0] - box[j][0]);
+  for (let m = 0; m < order.length; m++) {
+    for (
+      let n = m + 1;
+      n < order.length && box[order[n]][0] <= box[order[m]][2] + reach;
+      n++
+    ) {
+      const i = Math.min(order[m], order[n]), j = Math.max(order[m], order[n]);
+      if (box[j][1] > box[i][3] + reach || box[j][3] < box[i][1] - reach) {
+        continue;
+      }
       const [a, b] = edges[i],
         [c, d] = edges[j],
         r = sub(b, a),
@@ -116,10 +160,13 @@ function fillBoundary(group) {
       if (size < 1e-9) continue;
       const mid = lerp(p, q, 0.5),
         normal = [-(q[1] - p[1]) / size, (q[0] - p[0]) / size];
+      // The probe offset starts below reach / 10, so farther edges cannot shrink it.
       let epsilon = Math.min(size * 1e-5, 1e-7);
-      for (const [c, d] of edges) {
-        const gap = segmentDistance(mid, c, d);
-        if (gap > 1e-10) epsilon = Math.min(epsilon, gap * 0.1);
+      for (let k = band(mid[1] - reach); k <= band(mid[1] + reach); k++) {
+        for (const e of bands[k]) {
+          const gap = segmentDistance(mid, edges[e][0], edges[e][1]);
+          if (gap > 1e-10) epsilon = Math.min(epsilon, gap * 0.1);
+        }
       }
       const left = inside([
         mid[0] + normal[0] * epsilon,
@@ -215,6 +262,8 @@ export function flatten(
   const rough = bounds(pieces.flatMap((f) => [0, 0.25, 0.5, 0.75, 1].map(f)));
   const span = Math.max(rough[2] - rough[0], rough[3] - rough[1]);
   if (!(span > 1e-12)) throw new Error("The drawing has no measurable size.");
+  // A group can ask for outlines by itself when drawings with different modes are combined.
+  const outlined = (g) => outline || g.outline;
   let budget = 0;
   function sample(path) {
     const points = [point(path.matrix, path.start)];
@@ -254,7 +303,8 @@ export function flatten(
   // Include the largest source stroke in the fit, with room for normalized DXF strokes.
   const margin = Math.max(0, ...groups.map((g) => g.stroke || 0));
   const scale =
-    (1.5 - (outline || groups.some((g) => g.defaultStroke) ? strokeWidth : 0)) /
+    (1.5 -
+      (groups.some((g) => outlined(g) || g.defaultStroke) ? strokeWidth : 0)) /
     (size + margin);
   const center = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
   const output = [];
@@ -268,7 +318,7 @@ export function flatten(
         ],
       ),
     }));
-    if (g.fill && !outline) {
+    if (g.fill && !outlined(g)) {
       const filled = contours.filter((c) => c.points.length >= 3).map((c) => {
         const points = [...c.points];
         if (distance(points[0], points.at(-1)) > 1e-10) points.push(points[0]);
@@ -283,7 +333,7 @@ export function flatten(
         });
       }
     }
-    const width = outline || g.defaultStroke
+    const width = outlined(g) || g.defaultStroke
       ? strokeWidth
       : (g.stroke || 0) * scale;
     if (width > 0) {
@@ -305,11 +355,11 @@ export function flatten(
   return { groups: output, bounds: box, scale, segments: count };
 }
 
+const num = (v) => {
+  const n = Number(v.toFixed(8));
+  return Number.isInteger(n) ? `${n}.0` : String(n);
+};
 export function generateGLSL(geometry) {
-  const num = (v) => {
-    const n = Number(v.toFixed(8));
-    return Number.isInteger(n) ? `${n}.0` : String(n);
-  };
   const vec = (p) => `vec2(${num(p[0])}, ${num(p[1])})`;
   const declarations = [], calls = [];
   geometry.groups.forEach((g, id) => {
@@ -357,12 +407,127 @@ float stvi_shape_${id}(vec2 p) {
     }\n\nfloat sdf(vec2 p) {\n    float result = 1e20;\n${
       calls.join("\n")
     }\n    return result;\n}\n`;
-  if (new TextEncoder().encode(code).length > 100000) {
-    throw new Error(
-      "Generated shader exceeds the template size limit. Simplify the drawing.",
-    );
-  }
   return code;
+}
+
+// Drawings too large for constants keep their geometry in an RGBA32F texture:
+// one edge per texel, then a bounding box per run of edges, then two texels per
+// shape. The shader below is the same for every drawing. A pixel skips each run,
+// and each whole shape, that cannot come nearer than what it has already found
+// (or, inside a fill's bounds, that its ray cannot cross), so the field stays
+// exact while most edges go unread.
+const DATA_WIDTH = 1024, RUN = 16;
+function enclose(texels) {
+  const box = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [ax, ay, bx, by] of texels) {
+    box[0] = Math.min(box[0], ax, bx);
+    box[1] = Math.min(box[1], ay, by);
+    box[2] = Math.max(box[2], ax, bx);
+    box[3] = Math.max(box[3], ay, by);
+  }
+  return box;
+}
+export function generateDataGLSL(geometry) {
+  // Boxes are taken from the stored single-precision values, so they always enclose them.
+  const shapes = geometry.groups.map((g) => ({
+    ...g,
+    edges: (g.edges || contourEdges(g)).map(([a, b]) =>
+      [...a, ...b].map(Math.fround)
+    ),
+  })).filter((g) => g.edges.length);
+  if (!shapes.length) {
+    throw new Error("The drawing contains only zero-length geometry.");
+  }
+  const edges = shapes.flatMap((g) => g.edges), boxes = [], heads = [];
+  let first = 0;
+  for (const g of shapes) {
+    const run = boxes.length;
+    for (let i = 0; i < g.edges.length; i += RUN) {
+      boxes.push(enclose(g.edges.slice(i, i + RUN)));
+    }
+    heads.push(
+      [
+        first,
+        g.edges.length,
+        edges.length + run,
+        g.fill ? (g.rule === "evenodd" ? -2 : -1) : g.width / 2,
+      ],
+      enclose(boxes.slice(run)),
+    );
+    first += g.edges.length;
+  }
+  const texels = [...edges, ...boxes, ...heads];
+  const height = Math.ceil(texels.length / DATA_WIDTH);
+  const values = new Float32Array(DATA_WIDTH * height * 4);
+  texels.forEach((texel, i) => values.set(texel, i * 4));
+  const code = `// Imported vector geometry. Centered, fitted to 1.5 units, +Y up.
+// Curves are polylines; negative inside, positive outside.
+// Overlapping fills use a union; interior distances can be approximate.
+// Prefix stvi_ is reserved for this generated template.
+//
+// Geometry is read from the ${DATA_WIDTH} x ${height} RGBA32F texture stvi_data, row by row:
+//   ${edges.length} edges (a.xy, b.zw);
+//   ${boxes.length} bounding boxes (min.xy, max.zw), one per run of ${RUN} edges of a shape;
+//   ${shapes.length} shapes of two texels: (first edge, edge count, first box, kind), then the
+//   shape's bounding box. kind is half the stroke width, or -1.0 for a nonzero
+//   fill and -2.0 for an even-odd fill.
+
+uniform highp sampler2D stvi_data;
+
+vec4 stvi_texel(int i) {
+    return texelFetch(stvi_data, ivec2(i % ${DATA_WIDTH}, i / ${DATA_WIDTH}), 0);
+}
+
+float sdf(vec2 p) {
+    float result = 1e18;
+    for (int shape = 0; shape < ${shapes.length}; ++shape) {
+        vec4 head = stvi_texel(${edges.length + boxes.length} + 2 * shape);
+        vec4 hull = stvi_texel(${edges.length + boxes.length + 1} + 2 * shape);
+        vec2 apart = max(max(hull.xy - p, p - hull.zw), 0.0);
+        // Only within a fill's bounds can a point be inside it and need its exact distance.
+        bool wound = head.w < 0.0 && apart == vec2(0.0);
+        float nearest = 1e20;
+        if (!wound) {
+            // Any other shape counts only where it comes nearer than the result so far.
+            float reach = result + max(head.w, 0.0);
+            if (reach <= 0.0 || dot(apart, apart) >= reach * reach) continue;
+            nearest = reach * reach;
+        }
+        int first = int(head.x);
+        int end = first + int(head.y);
+        int winding = 0;
+        for (int run = 0; first + run * ${RUN} < end; ++run) {
+            vec4 box = stvi_texel(int(head.z) + run);
+            vec2 gap = max(max(box.xy - p, p - box.zw), 0.0);
+            bool crossed = wound && p.y >= box.y && p.y <= box.w && p.x <= box.z;
+            if (dot(gap, gap) >= nearest && !crossed) continue;
+            int last = min(first + run * ${RUN} + ${RUN}, end);
+            for (int i = first + run * ${RUN}; i < last; ++i) {
+                vec4 ends = stvi_texel(i);
+                vec2 a = ends.xy;
+                vec2 b = ends.zw;
+                vec2 edge = b - a;
+                vec2 offset = p - a;
+                float t = clamp(dot(offset, edge) / max(dot(edge, edge), 1e-20), 0.0, 1.0);
+                vec2 away = offset - edge * t;
+                nearest = min(nearest, dot(away, away));
+                float side = edge.x * offset.y - edge.y * offset.x;
+                if (a.y <= p.y && b.y > p.y && side > 0.0) winding += 1;
+                if (a.y > p.y && b.y <= p.y && side < 0.0) winding -= 1;
+            }
+        }
+        float d = sqrt(nearest);
+        if (head.w >= 0.0) d -= head.w;
+        else if (wound && (head.w < -1.5 ? abs(winding) % 2 == 1 : winding != 0)) d = -d;
+        result = min(result, d);
+    }
+    return result;
+}
+`;
+  return {
+    code,
+    data: { uniform: "stvi_data", width: DATA_WIDTH, height, values },
+  };
 }
 
 // CPU reference for geometry tests and integrators that need a signed-distance query.
