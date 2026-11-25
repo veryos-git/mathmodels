@@ -63,6 +63,7 @@ The pipeline in one line:
 | **relief** | The finished 3D object: frame plus painted faces. |
 | **layered subject** | A subject placed on top of another to build a stacked model. |
 | **print layer** | One layer the printer lays down; its thickness is the *print layer height*. |
+| **stone look** | The 3D view's way of showing the frame as carved, veined marble instead of its flat preview colour. A look only: it changes no geometry and no export. |
 
 ## Pipeline and storage
 
@@ -80,6 +81,7 @@ The pipeline in one line:
 | **build plate** / **plate** | One printer bed in a multi-plate 3MF project. |
 | **version** | One printable arrangement in the export: Single hue, Frame only, Black frame + one hue, Outline 0.2 mm, colour arrangements. |
 | **filament slot** | The printer's material position a part prints from (the 3MF `extruder` field). |
+| **stone render** | A finished picture (PNG) of the model in the stone look, as the 3D view shows it. |
 | **surface pattern** | The slicer's infill path style for top and bottom surfaces (monotonic, hilbert curve …). This is the *only* thing called a pattern in the project. |
 | **silhouette plate** | The flat 0.2 mm version shaped like the subject's silhouette. |
 

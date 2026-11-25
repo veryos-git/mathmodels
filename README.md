@@ -61,6 +61,12 @@ a seamlessly looping GIF (up to 4096 × 4096) or a complete GLSL shader bundle. 
 profiles, boundaries, lid sketches and shelf inputs. Preview settings travel with
 the project. See [shader previews](docs/shader-previews.md) for formats and limits.
 
+**Stone look** in the model toolbar shows the frame as carved, veined marble with
+shadows; it starts on for gothic tracery and is saved with the project. **Export →
+Stone render** downloads a finished PNG of the model in marble as the 3D view
+shows it, up to 3840 px, on a dark or transparent background. Neither changes
+what is printed. See the [workflow guide](docs/workflows.md#stone-look-and-stone-render).
+
 **Inputs → Sweep profiles & cusp paths** is one graph for every section:
 the main profile (blue), groove cutter (pink) and cusp section (green) on one
 millimetre grid. Below it, one row per input — **Profile**, **Groove**,

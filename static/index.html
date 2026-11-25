@@ -134,6 +134,23 @@
   .slice-chip { width: 12px; height: 12px; border-radius: 50%; background: var(--slice-color); }
   .slice-error, #gothicConfineWarning { color: #fbbf24; font-size: 12px; margin: 6px 0; }
   #sliceList .slice-height { width: 100%; }
+  .slice-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .slice-preview[hidden], .slice-preview[data-state=error] figure { display: none; }
+  .slice-preview figure { margin: 0; min-width: 0; }
+  .slice-preview figcaption { margin-top: 3px; color: #6b7280; font-size: 11px; text-align: center; }
+  /* The background is the render's own table colour, so a wide or tall sheet shows no bands. */
+  .slice-thumb, .slice-thumb:disabled { display: block; margin: 0; padding: 0; aspect-ratio: 1; overflow: hidden;
+    background: #16181d; border: 1px solid #2a2e35; }
+  .slice-thumb:not(:disabled) { cursor: zoom-in; }
+  .slice-thumb:hover:not(:disabled) { border-color: var(--slice-color); }
+  .slice-thumb svg, .slice-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .slice-outline svg { box-sizing: border-box; padding: 6px; }
+  /* The file's own outline is a 0.1 mm hairline; the thumbnail draws it legibly and tints the material. */
+  .slice-outline path { stroke: var(--slice-color); stroke-width: 1.25px; vector-effect: non-scaling-stroke;
+    fill: var(--slice-color); fill-opacity: .22; }
+  .slice-preview:is([data-state=loading], [data-state=stale]) .slice-thumb > * { opacity: .35; }
+  .slice-note { grid-column: 1 / -1; color: #9aa3af; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .slice-preview:is([data-state=error], [data-state=stale]) .slice-note { color: #fbbf24; }
   #status { margin-top: 12px; font-size: 12px; color: #9aa3af; white-space: pre-wrap;
             word-break: break-word; }
   #status.error { color: #f87171; }
@@ -1445,14 +1462,25 @@
     <button id="export3mf" hidden>Download .3mf (Snapmaker Orca)</button>
     <div id="flatExportNote" class="muted">Choose colour variations before downloading. Includes single hue, frame only, black frame + one hue, and the flat silhouette plate.</div>
     <p id="cylinderExportNote" class="muted" hidden>Cylinder/ring exports use STL. Download STL joins the relief to the shell. Colour STLs keep parts registered; import each file together. 3MF variations and CNC slices are available in flat mode.</p>
+    <hr>
+    <strong>Stone render</strong>
+    <div class="row">
+      <div><label for="renderSize" title="Length of the picture's longer side; the shorter side follows the 3D view">size (px)</label>
+        <select id="renderSize"><option value="1920">1920</option><option value="2560">2560</option><option value="3840" selected>3840</option></select></div>
+      <div><label for="renderBackground">background</label>
+        <select id="renderBackground"><option value="dark">Dark</option><option value="transparent">Transparent</option></select></div>
+    </div>
+    <button id="exportRender" title="A finished picture of the model in marble, seen as the 3D view shows it">Download stone render (PNG)</button>
+    <p class="muted">The model in marble at full quality, seen as the 3D view shows it: turn and zoom the view first. Smooth edges, soft shadows, and hollows as dark as the little sky they see. The grid, markers and slice planes are left out. Takes a few seconds.</p>
     <div id="flatSlices">
     <hr>
     <strong>CNC slices</strong>
     <p id="sliceRange" class="muted"></p>
     <button id="addSlice">Add slice</button>
     <div id="sliceList"></div>
-    <button id="exportSlices" hidden>Download all slice SVGs</button>
+    <button id="exportSlices" hidden title="One zip with every slice's SVG and its shader render (PNG)">Download all slices (.zip)</button>
     <p class="muted">Each slice has its own color. Edit its height to move the matching plane in the 3D preview. Turn off other planes to inspect one slice.</p>
+    <p class="muted">Every slice shows its SVG outline, with the material tinted, and a shader render of the cut sheet. Click either to enlarge it. Download all saves each SVG and render in one zip.</p>
     <div class="muted">Horizontal cross-section, full size in mm, with holes and closed cutting outlines. All slices share the same canvas for alignment. For 3 mm sheets, sample at 1.5, 4.5, 7.5 mm… below the model top. Apply cutter compensation in your CNC software.</div>
     </div>
   </fieldset>
@@ -1506,6 +1534,7 @@
     <button class="ghost" id="top" hidden>Top view</button>
     <button class="ghost" id="reset" hidden>Reset view</button>
     <button class="ghost" id="wire" hidden>Wireframe</button>
+    <button class="ghost" id="stone" hidden aria-pressed="false" title="Show the frame as carved marble, with shadows. Only the preview changes, not the export">Stone look</button>
   </div>
   <div id="readout" hidden></div>
   <div id="faceCard" hidden></div>
@@ -1619,6 +1648,9 @@ import { ShaderInspector } from './shader-inspector.js';
 import { snapProfileOffset } from './profile-editor-geometry.js';
 import { initFilaments } from './filaments.js';
 import { initSlicePreview } from './slice-preview.js';
+import { initStoneLook } from './stone-look.js';
+import { renderSlice } from './slice-render.js';
+import { zipBlob } from './zip.js';
 import { initKeyfob } from './keyfob.js';
 import { initPaper } from './paper.js';
 import { DEFAULT_IMAGE_ADJUSTMENTS, ImageHistory, lassoImage, lineSide, mirrorImage } from './image-editor.js';
@@ -1958,13 +1990,16 @@ camera.up.set(0, 0, 1);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+const sky = new THREE.HemisphereLight(0xffffff, 0x334455, 1.2);
+scene.add(sky);
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(1, -2, 3);
 scene.add(sun);
 
 const group = new THREE.Group();     // everything belonging to the current model
 scene.add(group);
+// Frame and shell meshes are made through this, so they can turn to marble.
+const stoneLook = initStoneLook({ THREE, renderer, scene, sun, sky, group });
 
 // One entry per drawing layer, base first. Each holds the whole per-drawing
 // state that used to be module-wide, plus its own scene group lifted to zBase
@@ -2371,8 +2406,7 @@ function buildLighterPreview(shellB64, info) {
   }
   lighterShellObj = new THREE.Group();
   const geometry = new STLLoader().parse(fromBase64(shellB64).buffer);
-  const shellMesh = new THREE.Mesh(geometry,
-    new THREE.MeshStandardMaterial({ color: 0x687582, roughness: 0.8, wireframe }));
+  const shellMesh = stoneLook.mesh(geometry, { color: 0x687582, roughness: 0.8, wireframe });
   shellMesh.userData.cylinderShell = true;
   lighterShellObj.add(shellMesh);
   group.add(lighterShellObj);
@@ -2439,8 +2473,7 @@ function buildRingPreview(shellB64, ringInfo) {
   }
   ringShellObj = new THREE.Group();
   const geometry = new STLLoader().parse(fromBase64(shellB64).buffer);
-  const shellMesh = new THREE.Mesh(geometry,
-    new THREE.MeshStandardMaterial({ color: 0x687582, roughness: 0.8, wireframe }));
+  const shellMesh = stoneLook.mesh(geometry, { color: 0x687582, roughness: 0.8, wireframe });
   shellMesh.userData.cylinderShell = true;
   ringShellObj.add(shellMesh);
   group.add(ringShellObj);
@@ -2487,14 +2520,14 @@ function buildCylinderPreview(shell, lidArt = null) {
   for(const part of ['body','lid']) {
     if(!shell[part])continue;
     const geometry=new STLLoader().parse(fromBase64(shell[part]).buffer);
-    const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:0x687582,roughness:0.8,wireframe}));
+    const mesh=stoneLook.mesh(geometry,{color:0x687582,roughness:0.8,wireframe});
     mesh.userData.cylinderShell=true;
     cylinderShell.add(mesh);
   }
   if(lidArt) {
     const geometry=new STLLoader().parse(fromBase64(lidArt.stl).buffer);
-    const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({
-      color:$('workflowMode').value==='gothic'?0xb9c4d2:0x2b2f36,metalness:0.1,roughness:0.8,wireframe}));
+    const mesh=stoneLook.mesh(geometry,{
+      color:$('workflowMode').value==='gothic'?0xb9c4d2:0x2b2f36,metalness:0.1,roughness:0.8,wireframe});
     mesh.userData.cylinderShell=true; mesh.userData.lidArtwork=true;
     cylinderShell.add(mesh); lidArtInfo=lidArt;
   }
@@ -2507,7 +2540,9 @@ function buildCylinderPreview(shell, lidArt = null) {
 const baseModel = () => layers[0]?.model ?? null;
 const slicePreview = initSlicePreview({ THREE, scene, modelGroup: group,
   list: $('sliceList'), addButton: $('addSlice'), exportButton: $('exportSlices'),
-  rangeLabel: $('sliceRange'), exportSlices: exportSliceEntries,
+  rangeLabel: $('sliceRange'), sliceSource, renderSlice, zipFiles: zipBlob, saveBlob,
+  inspect: (file, opener) => inspectPreview({ ...filePreview(file), dark: true }, opener),
+  reportStatus: text => setStatus(text),
   reportError: error => setStatus(String(error.message ?? error), true),
 });
 
@@ -2677,9 +2712,10 @@ function rebuildFrame(li) {
     const frame = $('workflowMode').value === 'gothic' ? 0xb9c4d2 : 0x2b2f36;
     const pieces = [...(l.sweptGeom ? [{ geom: l.sweptGeom, color: frame }] : []), ...l.sweptParts];
     for (const piece of pieces) {
-      const mesh = new THREE.Mesh(piece.geom, new THREE.MeshStandardMaterial({
+      // In the stone look a profile colour stays that colour, veined.
+      const mesh = stoneLook.mesh(piece.geom, {
         color: piece.color, metalness: 0.1, roughness: 0.8, wireframe,
-      }));
+      }, { tinted: piece.geom !== l.sweptGeom });
       mesh.userData = { layer: li, region: null };
       l.group.add(mesh);
       l.wallMeshes.push(mesh);
@@ -2696,10 +2732,11 @@ function rebuildFrame(li) {
   for (const geom of l.wallGeom) {
     let z = 0;
     for (const layer of slabs) {
-      const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+      // A band shows which filament prints it, so it keeps that colour in stone.
+      const mesh = stoneLook.mesh(geom, {
         color: layer.hue === null ? 0x2b2f36 : shadeFor(layer.hue, mid, l.model.lo, l.model.hi),
         metalness: 0.1, roughness: 0.8, wireframe,
-      }));
+      }, { tinted: layer.hue !== null });
       mesh.scale.z = Math.max(layer.t, 1e-4);
       mesh.position.z = z;
       mesh.userData = { layer: li, region: null };
@@ -2872,7 +2909,7 @@ function buildModel(data, lo, hi, rng, keep = null) {
   drawHoleMarkers();
   if (!keep || !framed) frameModel();     // keep the camera put on a hole edit
   $('hint').hidden = true;
-  for (const id of ['reset', 'wire', 'top', 'readout', 'paintBox', 'holeBox',
+  for (const id of ['reset', 'wire', 'stone', 'top', 'readout', 'paintBox', 'holeBox',
                     'exportBox', 'saveProject', 'download', 'exportZip', 'export3mf', 'exportBambu']) {
     $(id).hidden = false;
   }
@@ -3410,6 +3447,7 @@ function resetView() {
  */
 function captureModelThumbnail() {
   try {
+    stoneLook.update();
     renderer.render(scene, camera);   // a fresh frame, camera already framed
     const size = 320;
     const out = document.createElement('canvas');
@@ -3443,8 +3481,9 @@ function resize() {
   }
 }
 renderer.setAnimationLoop(() => {
-  if (shaderInspector.dialog?.open) return;
-  resize(); controls.update(); renderer.render(scene, camera);
+  // A stone render borrows the renderer and the lights until it is done.
+  if (shaderInspector.dialog?.open || stoneLook.rendering) return;
+  resize(); controls.update(); stoneLook.update(); renderer.render(scene, camera);
 });
 
 $('reset').onclick = resetView;
@@ -3452,6 +3491,35 @@ $('wire').onclick = () => {
   wireframe = !wireframe;
   group.traverse((o) => { if (o.material) o.material.wireframe = wireframe; });
   $('wire').textContent = wireframe ? 'Solid' : 'Wireframe';
+};
+
+/** The frame as carved marble, or back in its plain preview colour. */
+function setStoneLook(on) {
+  stoneLook.set(on);
+  $('stone').setAttribute('aria-pressed', String(stoneLook.enabled));
+}
+$('stone').onclick = () => setStoneLook(!stoneLook.enabled);
+
+/** A finished picture of the model in stone, shaped like the 3D view. */
+$('exportRender').onclick = async () => {
+  const long = Number($('renderSize').value);
+  const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+  const width = Math.round(aspect >= 1 ? long : long * aspect);
+  const height = Math.round(aspect >= 1 ? long / aspect : long);
+  $('exportRender').disabled = true;
+  setStatus('rendering in stone…');
+  try {
+    const png = await stoneLook.render({
+      camera, width, height, transparent: $('renderBackground').value === 'transparent',
+      progress: (done) => setStatus(`rendering in stone… ${Math.round(100 * done)}%`),
+    });
+    saveBlob(png, 'image/png', `${baseName()}-stone.png`);
+    setStatus(`stone render saved — ${width} × ${height} px`);
+  } catch (e) {
+    setStatus(String(e.message ?? e), true);
+  } finally {
+    $('exportRender').disabled = false;
+  }
 };
 
 /* --------------------------------------------------------------- picking */
@@ -6638,6 +6706,7 @@ async function buildProject() {
     saved: new Date().toISOString(),
     workflow: $('workflowMode').value,
     shaderPreview: shaderInspector.snapshot(),
+    stoneLook: stoneLook.enabled,
     additions: {
       enabled: $('additionEnabled').checked,
       outline: additionOutlinePicked ? {name:additionOutlinePicked.name,data:await fileBase64(additionOutlinePicked),resource:additionOutlinePicked.resource??null} : null,
@@ -6834,7 +6903,9 @@ async function applyProject(project, name = '') {
   if (!project.cylinder && !project.ring) restoreLighter(project.lighter);
   filamentManager?.restore(project.filaments);
   shaderInspector.restore(project.shaderPreview);
-  const embeddedFile = (value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
+  // Projects saved before the stone look get their workflow's default.
+  setStoneLook(project.stoneLook ?? project.workflow === 'gothic');
+  const embeddedFile =(value) => value?.data ? Object.assign(new File([fromBase64(value.data)],value.name),{resource:value.resource??null}) : null;
   restoreAdditions(project.additions, embeddedFile, project.settings);
   lidSketchPicked=embeddedFile(project.lidSketch); lidSketchRevision++; lidSketchUI();
   cuspPicked = embeddedFile(project.tracery?.cusps);
@@ -7529,30 +7600,28 @@ const baseName = () => $('projectName').value.trim()
   .replace(/[^A-Za-z0-9 ._-]+/g, '-').replace(/^[-.\s]+|[-.\s]+$/g, '')
   || picked.name.replace(DRAWING, '');
 
-async function exportSliceEntries(entries) {
+/**
+ * The model as the slice exporter sees it right now, frozen for a batch of
+ * heights. Its key changes whenever a slice could, which is how the previews
+ * know they are out of date.
+ */
+function sliceSource() {
   if (!baseModel()) throw new Error('Generate the model first.');
-  // Freeze geometry/settings and the filename for the complete batch.
-  const form = buildForm(), name = baseName();
-  let saved = 0;
-  for (const { id, height, color } of entries) {
-    setStatus(`exporting slice ${id} at ${height} mm (${saved + 1}/${entries.length})…`);
-    form.set('sliceHeight', String(height));
-    const res = await fetch('/api/slice', { method: 'POST', body: form });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(`Slice ${id} at ${height} mm: ${error.error ?? res.statusText}`
-        + (saved ? `\n${saved} earlier slice(s) downloaded successfully.` : ''));
-    }
-    const svg = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
-    if (svg.querySelector('parsererror')) throw new Error('The server returned an invalid SVG.');
-    for (const node of svg.querySelectorAll('[stroke]')) {
-      if (node.getAttribute('stroke') !== 'none') node.setAttribute('stroke', color);
-    }
-    saveBlob(new XMLSerializer().serializeToString(svg), 'image/svg+xml', `${name}-slice-${id}-${height}mm.svg`);
-    saved++;
-  }
-  setStatus(`saved ${saved} slice SVG${saved === 1 ? '' : 's'}`
-    + (saved > 1 ? '\nYour browser may ask to allow multiple downloads.' : ''));
+  const form = buildForm();
+  const key = JSON.stringify([...form].map(([field, value]) => typeof value === 'string'
+    ? [field, value] : [field, value.name, value.size, value.lastModified]));
+  return {
+    key, name: baseName(),
+    async load(height, signal) {
+      form.set('sliceHeight', String(height));
+      const res = await fetch('/api/slice', { method: 'POST', body: form, signal });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error ?? res.statusText);
+      }
+      return res.text();
+    },
+  };
 }
 
 // A ring prints at a size for everybody: one Download sweeps the relief once
@@ -8717,7 +8786,7 @@ function setWorkflow(mode, defaults=true) {
   $('workflowHint').textContent=gothic?'Main frame → profile → finer cusp paths → additions → export':'Pattern → fitting boundary → thickness → additions → paint → export';
   $('gothicOptions').open=gothic;
   if ($('sweepDetails')) $('sweepDetails').open=gothic||!!profilePicked;
-  if(defaults){$('frameOnly').checked=gothic;if(gothic){$('blackFrame').checked=true;$('confineWalls').checked=false;}}
+  if(defaults){$('frameOnly').checked=gothic;setStoneLook(gothic);if(gothic){$('blackFrame').checked=true;$('confineWalls').checked=false;}}
   updateGothicConfineWarning();
   updateWorkflowProgress();
 }

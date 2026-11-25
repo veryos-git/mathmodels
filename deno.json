@@ -26,6 +26,8 @@
     "test:tip-editor": "deno run --allow-read --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_tip_editor.mjs",
     "test:path-editor": "deno run tools/test_path_editor.mjs",
     "test:paper": "deno run tools/test_paper_geometry.mjs",
+    "test:zip": "deno run --allow-run=.venv/bin/python,.venv/Scripts/python.exe tools/test_zip.mjs",
+    "test:stone-look": "deno run tools/test_stone_look.mjs",
     "test:shaders": "deno test --allow-read tools/shader_preview_test.mjs tools/shader_vector_test.mjs tools/gif_encoder_test.mjs",
     "install": {
       "command": "deno run --allow-run --allow-sys=uid tools/install.ts",

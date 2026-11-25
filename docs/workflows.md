@@ -41,10 +41,25 @@ random color and a matching horizontal plane in the 3D preview; editing the
 height moves that plane immediately. Use **Show plane** to hide individual
 planes when inspecting several slices. Heights must be below the model top.
 
-Click a slice's **Download SVG**, or **Download all slice SVGs** for the list.
-SVG cutting outlines use the same color as their preview planes. Your browser
-may ask to allow multiple downloads. Slice heights, colors and plane visibility
-are saved with the project. Removing a slice removes its preview plane too.
+Each slice shows two previews under its height. **SVG outline** is the
+cross-section itself, drawn in the slice's color with the material tinted, so
+holes read as holes. **Shader render** shows the same outlines as a cut sheet
+lit from the top left. Every render of a model frames the whole sheet the same
+way, so slices at different heights can be compared directly. Click either
+preview to open it in the zoomable file inspector; the outline's inspector also
+offers the full shader preview.
+
+Previews load one at a time once the slice list is on screen, and again after
+a height or the model changes. A slice the exporter cannot produce shows the
+reason in place of its previews. If the shader render is unavailable (no
+WebGL 2, or more than 32,768 outline segments), the SVG still previews and
+downloads.
+
+Click a slice's **Download SVG**, or **Download all slices (.zip)** for one
+archive holding every slice's SVG and its render as a 1024-pixel PNG. Downloads
+reuse the previews already loaded. SVG cutting outlines use the same color as
+their preview planes. Slice heights, colors and plane visibility are saved with
+the project. Removing a slice removes its preview plane too.
 
 The height selects a
 horizontal cross-section through the complete model, including painted
@@ -198,6 +213,29 @@ Choose **Frame only** for an ornamental tracery object without faces.
 Keep it off for a swept frame with paintable infill. The input files, settings,
 workflow selection and material calibrations all travel inside project files.
 Imported project resources include cusp paths and cusp profiles.
+
+### Stone look and stone render
+
+**Stone look**, in the 3D view's toolbar, shows the frame as carved marble
+instead of its flat preview colour: veined stone, round mouldings smoothed with
+their arrises kept sharp, and a low sun casting shadows across the relief. It
+starts on for gothic tracery and off for stained glass, and is saved with the
+project. Only the preview changes: STL, 3MF and slice exports are the same
+either way.
+
+A colour region of a multicolour profile keeps its colour under the veining,
+as does each frame band of a banded frame. Painted faces keep their paint.
+Cylinder, ring and lighter shells turn to marble with the frame.
+
+**Export → Stone render** downloads a finished picture of the model in marble
+as a PNG. It shows the model as the 3D view does, so turn and zoom the view
+first. Choose the length of the picture's longer side (1920, 2560 or 3840 px;
+the shorter side follows the 3D view) and a dark or transparent background.
+The render adds what the live preview leaves out: every edge smoothed, soft
+shadows, and hollows darkened by how little of the sky they see. The grid, the
+hole and ending markers and the slice planes are left out. It takes a few
+seconds, works whether or not Stone look is switched on, and leaves the 3D
+view as it was.
 
 ### Editing pointy tips
 
@@ -447,10 +485,19 @@ deno task test
 deno task test:geometry
 deno task test:tip-editor
 deno task test:path-editor
+deno task test:stone-look
+deno task test:zip
 ```
+
+`tools/test_slice_preview.mjs` and `tools/test_slice_render.mjs` run under Node
+with `jsdom` (and `three` for the first) on `NODE_PATH`.
+`tools/test_slice_browser.mjs` drives the slice previews, renders and downloads
+in Chrome against a running server.
 
 `tools/test_path_editor_browser.mjs` drives the path editor in Chrome against a
 running server (see its header for the environment it needs).
+`tools/test_stone_browser.mjs` does the same for the stone look and the stone
+render.
 
 Storage tests cover resource revisions, thumbnails, imports and filament CRUD.
 Geometry tests exercise closed black-area tracing, quarter revolutions,
